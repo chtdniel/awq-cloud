@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<!-- PREVIEW ONLY — WX drawer AI REVIEW dengan select model per kartu (belum produksi).
+     Simulasi 1:1 perilaku yang akan dipasang ke Weather_Warning_Ui.html:
+     - Header drawer = select aktif (options JSON ala katalog #wx-ai-model), bukan badge read-only.
+     - Ganti select → tulis ke "master" atas → regenerate kartu itu saja (fake 600ms di preview).
+     - Semua var(--*) Titanium: ikut light (:root) / dark ([data-theme="dark"]).
+     Buka via file://. File produksi TIDAK diubah. -->
+<html lang="id" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview — WX drawer + select model per kartu</title>
+<style>
+  :root{
+    --ease-out:cubic-bezier(0.23,1,0.32,1);
+    --bg-void:#F1F3F6; --bg-panel:#FFFFFF; --bg-panel-sunken:#EEF1F5; --bg-panel-alt:#F7F8FA;
+    --border-subtle:#E2E8F0; --border-light:#CBD5E1; --border-medium:#94A3B8;
+    --text-primary:#0F172A; --text-secondary:#334155; --text-muted:#5B6B7F;
+    --status-critical:#C8102E; --status-critical-bg:#FEF0F2;
+    --status-warning:#8A5F0E; --status-warning-bg:#FFF7E6;
+    --status-safe:#0E7A4B; --status-safe-bg:#E6F4ED;
+    --accent-primary:#C8102E;
+    --font-ui:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono',Consolas,monospace;
+    --radius-lg:10px; --radius-pill:9999px;
+    --shadow-soft:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.07);
+  }
+  [data-theme="dark"]{
+    --bg-void:#030508; --bg-panel:#0F141E; --bg-panel-sunken:#0B0F1A; --bg-panel-alt:#111827;
+    --border-subtle:#1E293B; --border-light:#243449; --border-medium:#334155;
+    --text-primary:#F1F5F9; --text-secondary:#CBD5E1; --text-muted:#94A3B8;
+    --status-critical:#FF5340; --status-critical-bg:rgba(255,83,64,.14);
+    --status-warning:#F59E0B; --status-warning-bg:rgba(245,158,11,.12);
+    --status-safe:#22C55E; --status-safe-bg:rgba(34,197,94,.12);
+    --accent-primary:#FF3B52;
+    --shadow-soft:0 8px 32px rgba(0,0,0,.40);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg-void);color:var(--text-primary);font-family:var(--font-ui);font-size:14px;line-height:1.5}
+  .wrap{max-width:1120px;margin:0 auto;padding:24px 16px 64px}
+  .preview-note{font-size:12px;color:var(--text-muted);background:var(--bg-panel-sunken);
+    border:1px dashed var(--accent-primary);border-radius:10px;padding:10px 14px;margin-bottom:16px}
+  .preview-note b{color:var(--accent-primary)}
+  h1{font-size:24px;font-weight:800;letter-spacing:-.02em;margin:8px 0 2px}
+  h1 span{color:var(--accent-primary)}
+  .sub{color:var(--text-muted);font-size:12px;letter-spacing:.06em;font-weight:700;margin-bottom:12px}
+  .demo-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}
+  .demo-bar .lbl{font-size:11px;font-weight:800;letter-spacing:.08em;color:var(--text-muted)}
+  .seg{display:inline-flex;border:1px solid var(--border-light);border-radius:999px;overflow:hidden;background:var(--bg-panel)}
+  .seg button{border:0;background:transparent;color:var(--text-muted);font:inherit;font-size:11px;font-weight:800;
+    letter-spacing:.06em;padding:8px 14px;cursor:pointer;min-height:36px}
+  .seg button[aria-pressed="true"]{background:var(--text-primary);color:var(--bg-panel)}
+
+  /* Master bar ala #wx-ai-bar */
+  .master{display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:14px;
+    border:1px solid var(--border-light);border-radius:12px;padding:10px 14px;background:var(--bg-panel)}
+  .master label{font-weight:800;color:var(--text-muted)}
+  .master select{font:inherit;font-size:11px;font-weight:700;color:var(--text-primary);
+    background:var(--bg-panel-sunken);border:1px solid var(--border-light);border-radius:8px;padding:6px 8px;min-height:32px}
+  .master .sync{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)}
+
+  /* Kartu flight ala .weather-card */
+  .card{background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-lg);
+    overflow:hidden;box-shadow:var(--shadow-soft)}
+  .card-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--border-subtle)}
+  .flight-no{font-weight:900;font-size:24px;letter-spacing:-.02em}
+  .route{font-size:12px;color:var(--text-secondary);font-weight:800;letter-spacing:.04em;font-family:var(--font-mono)}
+  .head-right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pill{font-size:11px;font-weight:800;letter-spacing:.06em;padding:3px 10px;border-radius:999px;border:1px solid transparent}
+  .pill-danger{color:var(--status-critical);border-color:var(--status-critical);background:var(--status-critical-bg)}
+  .btn{background:var(--text-primary);color:var(--bg-panel);border:none;padding:8px 16px;border-radius:8px;
+    font-weight:800;font-size:11px;cursor:pointer;min-height:36px;font-family:inherit}
+  .btn:hover{background:var(--accent-primary);color:#fff}
+  .btn-outline{background:transparent;border:1px solid var(--accent-primary);color:var(--accent-primary)}
+  .btn-outline:hover{background:var(--accent-primary);color:#fff}
+  .btn:disabled{opacity:.55;cursor:wait}
+  button:focus-visible,select:focus-visible{outline:3px solid var(--accent-primary);outline-offset:2px}
+
+  /* Drawer AI REVIEW dengan select per kartu */
+  .drawer{border-top:1px solid var(--border-subtle);padding:14px 20px 18px;background:var(--bg-panel)}
+  .ai-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--status-safe)}
+  .ai-title{font-size:12px;font-weight:800;letter-spacing:.08em}
+  .model-picker{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;
+    border:1px solid var(--border-light);border-radius:999px;padding:2px 4px 2px 10px;
+    background:var(--bg-panel-sunken);color:var(--text-primary);min-height:36px}
+  .model-picker .vendor{color:var(--accent-primary)}
+  .model-picker select{font:inherit;font-size:11px;font-weight:700;color:var(--text-primary);
+    background:var(--bg-panel);border:1px solid var(--border-light);border-radius:999px;
+    padding:6px 8px;min-height:30px;max-width:230px;cursor:pointer}
+  .meta{font-family:var(--font-mono);font-size:11px;color:var(--text-muted)}
+  .row{display:grid;grid-template-columns:150px minmax(0,1fr) 230px;border-top:1px solid var(--border-subtle);
+    border-left:4px solid var(--border-light);opacity:0;transform:translateY(8px);animation:rise 320ms var(--ease-out) forwards}
+  .row:nth-child(2){animation-delay:0ms}.row:nth-child(3){animation-delay:60ms}.row:nth-child(4){animation-delay:120ms}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .row.st-danger{border-left-color:var(--status-critical)}
+  .row.st-warning{border-left-color:var(--status-warning)}
+  .row.st-ok{border-left-color:var(--status-safe)}
+  .c-status{padding:10px 12px;display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;
+    padding:3px 10px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+  .badge svg{width:11px;height:11px;flex:none}
+  .b-danger{color:var(--status-critical);border-color:var(--status-critical);background:var(--status-critical-bg)}
+  .b-warning{color:var(--status-warning);border-color:var(--status-warning);background:var(--status-warning-bg)}
+  .b-ok{color:var(--status-safe);border-color:var(--status-safe);background:var(--status-safe-bg)}
+  .phase{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--text-muted)}
+  .c-detail{padding:10px 14px;border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle);
+    font-family:var(--font-mono);font-size:12px;min-width:0;overflow-wrap:anywhere}
+  .act{display:block;margin-top:3px;font-family:var(--font-ui);font-size:12px;font-weight:700}
+  .st-danger .act{color:var(--status-critical)}.st-warning .act{color:var(--status-warning)}.st-ok .act{color:var(--status-safe)}
+  .c-src{padding:10px 12px;display:flex;align-items:flex-start;justify-content:flex-end}
+  .src{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:var(--text-muted);
+    border:1px solid var(--border-light);border-radius:999px;padding:4px 10px;background:transparent;
+    font-family:inherit;cursor:pointer;min-height:32px;max-width:100%}
+  .src:hover{border-color:var(--accent-primary);color:var(--accent-primary)}
+  .src svg{width:11px;height:11px;flex:none}
+  .src span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0;font-size:11px;color:var(--text-muted)}
+  .legend i{font-style:normal;border:1px solid var(--border-light);border-radius:6px;padding:2px 8px;background:var(--bg-panel)}
+  @media(max-width:860px){
+    .row{grid-template-columns:minmax(0,1fr)}
+    .c-detail{border:none;border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle)}
+    .c-src{justify-content:flex-start}
+  }
+  @media(prefers-reduced-motion:reduce){.row{animation:none;opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="preview-note"><b>PREVIEW ONLY</b> — select model langsung di badge panel drawer (2 kartu demo: 544 + 545). Ganti select kartu → master atas ikut → regenerate kartu itu saja (fake 600ms). Buka via <b>file://</b>.</div>
+  <h1>WX DRAWER <span>+ select per kartu</span></h1>
+  <div class="sub">MASTER ATAS TETAP ADA · DRAWER SELECT = SHORTCUT YANG SYNC DUA ARAH</div>
+
+  <div class="demo-bar">
+    <span class="lbl">TEMA:</span>
+    <span class="seg">
+      <button type="button" id="t-light" aria-pressed="false">TERANG</button>
+      <button type="button" id="t-dark" aria-pressed="true">GELAP</button>
+    </span>
+  </div>
+
+  <div class="master">
+    <label for="wx-ai-model">AI MODEL (master)</label>
+    <select id="wx-ai-model">
+      <option value="">Auto</option>
+      <option value='{"provider":"gemini","model":"gemini-3.5-flash-lite"}' selected>Gemini · 3.5-flash-lite</option>
+      <option value='{"provider":"custom","model":"kl/deepseek-v3.2"}'>CIZ-AI · deepseek-v3.2</option>
+      <option value='{"provider":"custom","model":"kl/gemini-3.8-flash"}'>CIZ-AI · gemini-3.8-flash</option>
+    </select>
+    <span class="sync" id="master-sync">master = Gemini · 3.5-flash-lite</span>
+  </div>
+
+  <section class="card" aria-label="Flight 544 demo">
+    <div class="card-head">
+      <span class="flight-no">544</span>
+      <span class="route">WADD → YPPH · ALT YPKG</span>
+      <span class="head-right">
+        <span class="pill pill-danger">1 RESTRICTED</span>
+        <button class="btn" type="button">DETAILS</button>
+        <button class="btn btn-outline" type="button" id="btn-544">AI REVIEW</button>
+      </span>
+    </div>
+    <div class="drawer">
+      <div class="ai-head">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="ai-title">AI REVIEW</span>
+        <label class="model-picker"><span class="vendor" id="vendor-544">GEMINI ·</span>
+          <select id="sel-544" aria-label="Pilih model AI flight 544"></select>
+        </label>
+        <span class="meta" id="meta-544">06:18Z · conf High</span>
+        <span class="head-right" style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-outline" type="button" id="regen-544">REGENERATE</button>
+        </span>
+      </div>
+      <article class="row st-ok">
+        <div class="c-status"><span class="badge b-ok"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="m5.5 8.2 1.8 1.8 3.2-3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>CLEAR</span><span class="phase">AI DEP · ORIGIN</span></div>
+        <div class="c-detail">14011KT 9999 SCT016<span class="act">Proceed with departure as TAF conditions are above minima.</span></div>
+        <div class="c-src"><button class="src" type="button" title="Operations Manual Part A, Chapter 8.1.2.2.1"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>Ops Manual A 8.1.2.2.1</span></button></div>
+      </article>
+      <article class="row st-danger">
+        <div class="c-status"><span class="badge b-danger"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1 15 14H1L8 1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="12" r=".9" fill="currentColor"/></svg>DANGER</span><span class="phase">AI ARR · DEST</span></div>
+        <div class="c-detail">FM061800 16008KT 800 FG BKN003<span class="act">Ensure main body forecast at destination is at or above landing minima during ETA; delay or divert if below.</span></div>
+        <div class="c-src"><button class="src" type="button" title="Flight Dispatch Manual, Chapter 4.1.5 (B.1)"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>Dispatch Manual 4.1.5 (B.1)</span></button></div>
+      </article>
+      <article class="row st-warning">
+        <div class="c-status"><span class="badge b-warning"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.8V8l2.2 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>WARNING</span><span class="phase">AI ALT · ALTN</span></div>
+        <div class="c-detail">TEMPO 0618/0623 200 FG BKN001<span class="act">Apply conditional TAF terms evaluation and 50% rule for alternate visibility.</span></div>
+        <div class="c-src"><button class="src" type="button" title="Flight Dispatch Manual, Chapter 4.1.5 (A.1)"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>Dispatch Manual 4.1.5 (A.1)</span></button></div>
+      </article>
+    </div>
+  </section>
+
+  <div style="height:14px"></div>
+
+  <section class="card" aria-label="Flight 545 demo">
+    <div class="card-head">
+      <span class="flight-no">545</span>
+      <span class="route">YPPH → WADD · ALT YPKU</span>
+      <span class="head-right">
+        <span class="pill pill-danger">1 RESTRICTED</span>
+        <button class="btn" type="button">DETAILS</button>
+        <button class="btn btn-outline" type="button" id="btn-545">AI REVIEW</button>
+      </span>
+    </div>
+    <div class="drawer">
+      <div class="ai-head">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="ai-title">AI REVIEW</span>
+        <label class="model-picker"><span class="vendor" id="vendor-545">GEMINI ·</span>
+          <select id="sel-545" aria-label="Pilih model AI flight 545"></select>
+        </label>
+        <span class="meta" id="meta-545">06:20Z · conf High</span>
+        <span class="head-right" style="margin-left:auto;display:flex;gap:8px">
+          <button class="btn btn-outline" type="button" id="regen-545">REGENERATE</button>
+        </span>
+      </div>
+      <article class="row st-danger">
+        <div class="c-status"><span class="badge b-danger"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1 15 14H1L8 1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="12" r=".9" fill="currentColor"/></svg>DANGER</span><span class="phase">AI ARR · DEST</span></div>
+        <div class="c-detail">FM070100 13008KT 2000 FG BKN008<span class="act">Delay or divert if below landing minima during ETA.</span></div>
+        <div class="c-src"><button class="src" type="button" title="OM-A8.3 — Low vis/severe WX"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>OM-A8.3 — Low vis/severe WX</span></button></div>
+      </article>
+    </div>
+  </section>
+
+  <div class="legend"><i>Ganti select kartu 545 → master atas ikut berubah → REGENERATE hanya kartu itu</i><i>Ganti master atas → semua select kartu ikut</i></div>
+</div>
+<script>
+  (() => {
+    const root = document.documentElement;
+    const master = document.getElementById('wx-ai-model');
+    const sync = document.getElementById('master-sync');
+    const cards = ['544', '545'];
+    const labelOf = (sel) => {
+      const o = sel.selectedOptions && sel.selectedOptions[0];
+      return o ? o.textContent.trim() : '';
+    };
+    const vendorOf = (value) => {
+      try {
+        const v = JSON.parse(value);
+        return v.provider === 'custom' ? 'CIZ-AI ·' : 'GEMINI ·';
+      } catch { return 'GEMINI ·'; }
+    };
+    const paint = () => {
+      sync.textContent = `master = ${labelOf(master) || 'Auto'}`;
+      cards.forEach((id) => {
+        const sel = document.getElementById(`sel-${id}`);
+        if (sel.value !== master.value) sel.value = master.value;
+        document.getElementById(`vendor-${id}`).textContent = vendorOf(master.value);
+      });
+    };
+    const fakeRegen = (id) => {
+      const meta = document.getElementById(`meta-${id}`);
+      const btn = document.getElementById(`regen-${id}`);
+      btn.disabled = true;
+      meta.textContent = `regenerating with ${labelOf(master)}…`;
+      setTimeout(() => { meta.textContent = `06:2${id.slice(-1)}Z · ${labelOf(master)} · conf High`; btn.disabled = false; }, 600);
+    };
+    // Clone options master → tiap drawer (cara yang akan dipakai di produksi).
+    cards.forEach((id) => {
+      const sel = document.getElementById(`sel-${id}`);
+      sel.innerHTML = master.innerHTML;
+      sel.value = master.value;
+      sel.addEventListener('change', () => { master.value = sel.value; paint(); fakeRegen(id); });
+      document.getElementById(`regen-${id}`).addEventListener('click', () => fakeRegen(id));
+      document.getElementById(`btn-${id}`).addEventListener('click', () => fakeRegen(id));
+    });
+    master.addEventListener('change', paint);
+    const bL = document.getElementById('t-light');
+    const bD = document.getElementById('t-dark');
+    const setTheme = (dark) => {
+      if (dark) root.setAttribute('data-theme', 'dark');
+      else root.removeAttribute('data-theme');
+      bD.setAttribute('aria-pressed', String(dark));
+      bL.setAttribute('aria-pressed', String(!dark));
+    };
+    bL.addEventListener('click', () => setTheme(false));
+    bD.addEventListener('click', () => setTheme(true));
+    paint();
+  })();
+</script>
+</body>
+</html>

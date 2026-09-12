@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operational Readiness — Current vs Compact</title>
+  <style>
+    /* ===== RESET ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-page: #0a0f1e;
+      --bg-card: #131c33;
+      --bg-card-hover: #1a2440;
+      --bg-sunken: #0c1225;
+      --border: #1e2d4a;
+      --border-light: #253656;
+      --amber: #f59e0b;
+      --amber-bg: rgba(245,158,11,0.10);
+      --amber-border: rgba(245,158,11,0.30);
+      --text: #e8ecf4;
+      --text-secondary: #8e99b0;
+      --text-muted: #5a6784;
+      --red: #ef4444;
+      --red-bg: rgba(239,68,68,0.10);
+      --green: #22c55e;
+      --radius: 8px;
+      --radius-pill: 9999px;
+    }
+
+    body {
+      background: var(--bg-page);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ===== PAGE HEADER ===== */
+    .page-header {
+      max-width: 1260px;
+      margin: 0 auto;
+      padding: 32px 24px 8px;
+    }
+    .page-header h1 {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .page-header h1 span { color: var(--amber); }
+    .page-header p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      max-width: 640px;
+    }
+
+    /* ===== GRID ===== */
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      max-width: 1260px;
+      margin: 20px auto 48px;
+      padding: 0 24px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .compare-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ===== PANEL SHARED ===== */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+    .panel-badge {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: var(--radius-pill);
+      z-index: 2;
+    }
+    .badge-current {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid rgba(239,68,68,0.30);
+    }
+    .badge-proposed {
+      background: rgba(34,197,94,0.10);
+      color: var(--green);
+      border: 1px solid rgba(34,197,94,0.30);
+    }
+    .panel-body {
+      padding: 20px;
+    }
+    .panel-title {
+      font-size: 17px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    .panel-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+
+    /* ===== LEFT: CURRENT BULKY MODAL ===== */
+    .modal-replica {
+      background: var(--bg-sunken);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      position: relative;
+    }
+
+    .mr-header h3 {
+      font-size: 16px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    .mr-header p {
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+
+    .mr-cards { display: flex; flex-direction: column; gap: 10px; }
+
+    .mr-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+    }
+    .mr-card-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+    .mr-card-value {
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .mr-card-detail {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    .mr-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: var(--radius-pill);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+    .mr-pill.warning {
+      background: var(--amber-bg);
+      color: var(--amber);
+      border: 1px solid var(--amber-border);
+    }
+    .mr-pill.blocked {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid rgba(239,68,68,0.30);
+    }
+    .mr-pill-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .mr-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+    .mr-check input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--amber);
+      cursor: pointer;
+    }
+
+    .mr-actions {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-top: 14px;
+    }
+    .mr-btn {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 8px 6px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      cursor: pointer;
+      text-align: center;
+      transition: 0.15s;
+    }
+    .mr-btn:hover {
+      border-color: var(--amber);
+      color: var(--amber);
+    }
+
+    .mr-footnote {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+
+    .mr-continue {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-sunken);
+      color: var(--text-muted);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: not-allowed;
+      opacity: 0.45;
+      text-align: center;
+    }
+
+    /* ===== RIGHT: COMPACT MODAL ===== */
+    .compact-wrap {
+      transition: max-width 0.2s;
+    }
+
+    .compact-modal {
+      background: var(--bg-sunken);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .cm-header {
+      margin-bottom: 10px;
+    }
+    .cm-header h3 {
+      font-size: 15px;
+      font-weight: 800;
+      margin-bottom: 2px;
+    }
+    .cm-header h3 .count {
+      background: var(--amber-bg);
+      color: var(--amber);
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 800;
+      margin-left: 6px;
+      border: 1px solid var(--amber-border);
+    }
+    .cm-header h3 .utc {
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 12px;
+      margin-left: 4px;
+    }
+    .cm-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .cm-rows { display: flex; flex-direction: column; gap: 0; }
+
+    .cm-row {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .cm-row:last-child { border-bottom: none; }
+
+    .cm-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--amber);
+      background: var(--amber-bg);
+      border: 1px solid var(--amber-border);
+      flex-shrink: 0;
+    }
+
+    .cm-text {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.3;
+    }
+    .cm-text .dim { color: var(--text-secondary); }
+
+    .cm-link {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--amber);
+      text-decoration: none;
+      cursor: pointer;
+      white-space: nowrap;
+      padding: 6px 10px;
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 4px;
+      transition: 0.15s;
+    }
+    .cm-link:hover {
+      background: var(--amber-bg);
+    }
+    .cm-link:focus-visible, .cm-btn-primary:focus-visible, .cm-btn-ghost:focus-visible,
+    .density-toggle button:focus-visible, .cm-check-area input:focus-visible + label {
+      outline: 2px solid var(--amber);
+      outline-offset: 2px;
+    }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+    .cm-check-area {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .cm-check-area input[type="checkbox"] {
+      width: 20px;
+      height: 20px;
+      accent-color: var(--amber);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .cm-check-area label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      padding: 4px 0;
+    }
+
+    .cm-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .cm-btn-primary {
+      flex: 1;
+      padding: 11px 16px;
+      border-radius: 8px;
+      border: none;
+      background: var(--amber);
+      color: #0a0f1e;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: 0.15s;
+      text-align: center;
+    }
+    .cm-btn-primary:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .cm-btn-primary:not(:disabled):hover {
+      filter: brightness(1.1);
+    }
+    .cm-btn-ghost {
+      padding: 11px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+    .cm-btn-ghost:hover {
+      border-color: var(--text-secondary);
+      color: var(--text);
+    }
+
+    .cm-footnote {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+
+    /* ===== DENSITY TOGGLE ===== */
+    .density-toggle {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-sunken);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      padding: 3px;
+      margin-bottom: 14px;
+      width: fit-content;
+    }
+    .density-toggle button {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: var(--radius-pill);
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: 0.15s;
+      letter-spacing: 0.03em;
+    }
+    .density-toggle button.active {
+      background: var(--amber);
+      color: #0a0f1e;
+    }
+
+    /* Comfortable density overrides */
+    .cm-comfortable .cm-row {
+      padding: 14px 0;
+    }
+    .cm-comfortable .cm-text {
+      font-size: 14px;
+    }
+    .cm-comfortable .cm-icon {
+      width: 28px;
+      height: 28px;
+      font-size: 13px;
+    }
+    .cm-comfortable .compact-modal {
+      padding: 20px;
+    }
+    .cm-comfortable .cm-check-area { margin-top: 18px; padding-top: 16px; }
+    .cm-comfortable .cm-buttons { margin-top: 18px; }
+    .cm-comfortable .cm-btn-primary,
+    .cm-comfortable .cm-btn-ghost {
+      padding: 13px 18px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="page-header">
+    <h1>Operational Readiness Check <span>Comparison</span></h1>
+    <p>Side-by-side preview of the current bulky modal versus the proposed compact redesign. Left panel replicates the existing dialog; right panel is the target UX with a density toggle.</p>
+  </div>
+
+  <div class="compare-grid">
+
+    <!-- ========== LEFT: CURRENT ========== -->
+    <div class="panel">
+      <span class="panel-badge badge-current">Current</span>
+      <div class="panel-body">
+        <div class="panel-title">Current Design</div>
+        <div class="panel-desc">Full dialog with large cards, per-item checkboxes, four action buttons, and a disabled Continue bar.</div>
+
+        <div class="modal-replica">
+          <div class="mr-header">
+            <h3>Operational Readiness Check</h3>
+            <p>Confirm all operational data before starting dispatch work. Review DOF date, NOTAM last update, and TAF freshness. Timestamps are shown in UTC.</p>
+          </div>
+
+          <div class="mr-cards">
+            <!-- DOF -->
+            <div class="mr-card">
+              <div>
+                <div class="mr-card-label">DOF Date</div>
+                <div class="mr-card-value">2026-09-08</div>
+                <div class="mr-card-detail">Confirm flight date matches current operational date in UTC.</div>
+                <label class="mr-check"><input type="checkbox" class="mr-cb"> I have checked this item</label>
+              </div>
+              <div><span class="mr-pill warning"><span class="mr-pill-dot"></span>WARNING</span><div style="margin-top:4px;font-size:11px;color:var(--text-muted);">DOF 2026-09-08 vs Today 2026-09-10</div></div>
+            </div>
+
+            <!-- NOTAM -->
+            <div class="mr-card">
+              <div>
+                <div class="mr-card-label">NOTAM Last Update</div>
+                <div class="mr-card-value">2026-09-06 07:14:11Z</div>
+                <div class="mr-card-detail">5729 min ago — threshold 360 min. Confirm NOTAM data is current.</div>
+                <label class="mr-check"><input type="checkbox" class="mr-cb"> I have checked this item</label>
+              </div>
+              <div><span class="mr-pill blocked"><span class="mr-pill-dot"></span>WARNING</span><div style="margin-top:4px;font-size:11px;color:var(--text-muted);">5729 min ago &gt; 360 min</div></div>
+            </div>
+
+            <!-- TAF -->
+            <div class="mr-card">
+              <div>
+                <div class="mr-card-label">TAF</div>
+                <div class="mr-card-value">10 stations, 2026-09-09 16:02:08Z</div>
+                <div class="mr-card-detail">881 min ago — threshold 360 min. Confirm issue time and validity period.</div>
+                <label class="mr-check"><input type="checkbox" class="mr-cb"> I have checked this item</label>
+              </div>
+              <div><span class="mr-pill blocked"><span class="mr-pill-dot"></span>WARNING</span><div style="margin-top:4px;font-size:11px;color:var(--text-muted);">881 min ago &gt; 360 min</div></div>
+            </div>
+          </div>
+
+          <div class="mr-actions">
+            <button class="mr-btn">Open Flight Board</button>
+            <button class="mr-btn">Open NOTAM</button>
+            <button class="mr-btn">Open TAF</button>
+            <button class="mr-btn">Retry</button>
+          </div>
+
+          <p class="mr-footnote">Operations/Safety approval required before production — default 6h freshness for NOTAM and TAF.</p>
+
+          <button class="mr-continue" disabled>Continue to Dashboard</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========== RIGHT: COMPACT ========== -->
+    <div class="panel">
+      <span class="panel-badge badge-proposed">Proposed Compact</span>
+      <div class="panel-body">
+
+        <div class="panel-title">Compact Redesign</div>
+        <div class="panel-desc">Condensed rows, single acknowledgement, two buttons. Density toggle switches between compact and comfortable spacing.</div>
+
+        <div class="density-toggle" id="densityToggle">
+          <button class="active" data-density="compact">Compact</button>
+          <button data-density="comfortable">Comfortable</button>
+        </div>
+
+        <div class="compact-wrap" id="compactWrap">
+          <div class="compact-modal">
+            <div class="cm-header">
+              <h3>Operational Readiness <span class="count">3 issues</span> <span class="utc">[UTC]</span></h3>
+              <div class="cm-sub">Data not fresh. Review before dispatch.</div>
+            </div>
+
+            <div class="cm-rows">
+              <div class="cm-row">
+                <div class="cm-icon" aria-hidden="true">!</div>
+                <div class="cm-text">DOF <span class="dim">08 Sep &ne; Today 10 Sep</span></div>
+                <a class="cm-link" href="#" aria-label="Check DOF date">Check &rsaquo;</a>
+              </div>
+              <div class="cm-row">
+                <div class="cm-icon" aria-hidden="true">!</div>
+                <div class="cm-text">NOTAM <span class="dim">4d ago (limit 6h)</span></div>
+                <a class="cm-link" href="#" aria-label="Open NOTAM">Open &rsaquo;</a>
+              </div>
+              <div class="cm-row">
+                <div class="cm-icon" aria-hidden="true">!</div>
+                <div class="cm-text">TAF <span class="dim">10 st, 14h ago (limit 6h)</span></div>
+                <a class="cm-link" href="#" aria-label="Open TAF">Open &rsaquo;</a>
+              </div>
+            </div>
+
+            <div class="cm-check-area">
+              <input type="checkbox" id="cmAck">
+              <label for="cmAck">I understand the risks and wish to proceed</label>
+            </div>
+
+            <div class="cm-buttons">
+              <button class="cm-btn-primary" id="cmContinue" disabled>Continue to Dashboard</button>
+              <button class="cm-btn-ghost">Retry</button>
+            </div>
+
+            <div class="cm-footnote">Operations/Safety note — NOTAM and TAF require 6h freshness for dispatch clearance.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    (function () {
+      /* Right panel: checkbox enables Continue */
+      var ack = document.getElementById('cmAck');
+      var cont = document.getElementById('cmContinue');
+      if (ack && cont) {
+        ack.addEventListener('change', function () {
+          cont.disabled = !ack.checked;
+        });
+      }
+
+      /* Density toggle */
+      var wrap = document.getElementById('compactWrap');
+      var btns = document.querySelectorAll('#densityToggle button');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].addEventListener('click', function () {
+          for (var j = 0; j < btns.length; j++) btns[j].classList.remove('active');
+          this.classList.add('active');
+          var d = this.getAttribute('data-density');
+          if (d === 'comfortable') {
+            wrap.classList.add('cm-comfortable');
+          } else {
+            wrap.classList.remove('cm-comfortable');
+          }
+        });
+      }
+    })();
+  </script>
+
+</body>
+</html>

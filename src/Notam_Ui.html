@@ -1,0 +1,905 @@
+<style>
+  /* fonts loaded via Index.html preconnect */
+  /* =========================================================
+     AWQ NOTAM CONSOLE (ZONE C)
+     ========================================================= */
+  
+  .notam-grid { 
+    display: grid; 
+    grid-template-columns: repeat(2, 1fr); 
+    gap: 20px; 
+    margin-top: 24px; 
+    margin-bottom: 40px; 
+    align-items: stretch; 
+  }
+
+  @media (max-width: 1200px) { .notam-grid { grid-template-columns: 1fr; } }
+
+  /* NOTAM CARD */
+  .notam-card {
+    min-width: 0;
+    background: var(--bg-panel); 
+    border: 1px solid var(--border-light); 
+    border-radius: var(--radius-md); 
+    position: relative; cursor: pointer; 
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); 
+    display: flex; flex-direction: column; height: 100%; overflow: hidden;
+    box-shadow: var(--shadow-soft);
+  }
+  .notam-card:hover { 
+    transform: translateY(-2px); 
+    border-color: var(--accent-primary); 
+    box-shadow: 0 6px 20px rgba(200, 16, 46, 0.16); 
+  }
+  
+  .notam-card-critical { border-left: 4px solid var(--status-critical); }
+  .notam-card-warning  { border-left: 4px solid var(--status-warning); }
+  .notam-card-advisory { border-left: 4px solid var(--border-medium); }
+
+  .notam-card.selected-card { 
+    border-color: var(--status-safe) !important;
+    background: var(--status-safe-bg) !important;
+    box-shadow: inset 4px 0 0 var(--status-safe), 0 4px 20px rgba(0, 230, 118, 0.15);
+  }
+  
+  @keyframes pulseCritical {
+    0% { box-shadow: 0 0 0 0 rgba(255, 59, 59, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 59, 59, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 59, 59, 0); }
+  }
+  .warning-alert-card { animation: pulseCritical 2s infinite; border-color: var(--status-critical); }
+
+  .warning-banner {
+    background: var(--status-critical-bg);
+    border: 1px solid var(--status-critical);
+    color: var(--text-primary); padding: 8px 16px;
+    border-radius: var(--radius-md); margin-bottom: 16px;
+    font-family: var(--font-ui); font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: space-between;
+    backdrop-filter: blur(10px);
+  }
+
+  .notam-raw-text { 
+    background: var(--bg-panel-sunken);
+    padding: 16px 20px; white-space: pre-wrap; word-wrap: break-word; 
+    font-family: var(--font-mono); font-size: 13px; color: var(--text-primary); 
+    line-height: 1.6; flex-grow: 1; border-top: 1px solid var(--border-light);
+    letter-spacing: 0.01em;
+  }
+
+  /* WINDOW-TIMELINE AXIS + TIME BAND */
+  .notam-window-axis {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: var(--bg-panel-sunken);
+    border: 1px solid var(--border-light);
+    border-bottom: none;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    letter-spacing: 0.02em;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .notam-window-axis .nw-label { font-weight: 800; }
+  .notam-window-axis .nw-val { color: var(--text-primary); font-weight: 800; }
+  .notam-window-axis .gap-warning-badge { margin-left: auto; }
+
+  .notam-time-band {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: var(--bg-panel-alt);
+    border-top: 1px solid var(--border-subtle);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+  .notam-time-band .ntb-track { flex: 1; height: 6px; border-radius: 99px; background: var(--bg-panel-sunken); border: 1px solid var(--border-light); overflow: hidden; }
+  .notam-time-band .ntb-fill { display: block; height: 100%; width: 46%; border-radius: 99px; }
+  .notam-time-band .ntb-from, .notam-time-band .ntb-to { font-weight: 800; color: var(--text-primary); white-space: nowrap; }
+  .notam-time-band .ic { color: var(--text-disabled); }
+
+  /* HIGHLIGHTS */
+  .notam-hl-critical { background: var(--status-critical); color: #fff; padding: 0 4px; border-radius: 2px; font-weight: 800; }
+  .notam-hl-warn { color: var(--status-warning); font-weight: 800; border-bottom: 1px dashed var(--status-warning); }
+
+  /* CONSOLE CONTROLS */
+  .notam-sticky-control-centre {
+    position: sticky; top: 0; z-index: var(--z-header); /* Layer: Header/control */ 
+    background: var(--bg-panel); 
+    padding: 24px 0 0 0; 
+    margin-bottom: 24px;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(15px);
+    overflow: hidden;
+  }
+
+  .notam-control-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 24px 16px 24px;
+  }
+
+  .stn-label-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .stn-label-text {
+    font-family: var(--font-ui);
+    font-weight: 800;
+    font-size: 14px;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .stn-title-badge {
+    background: var(--accent-primary);
+    color: white;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-weight: 800;
+    font-size: 19px;
+    box-shadow: 0 2px 8px rgba(200, 16, 46, 0.22);
+    text-transform: uppercase;
+  }
+
+  .notam-actions-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+
+  .notam-btn-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  .notam-ctrl-btn-premium {
+    height: 34px;
+    padding: 0 16px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .btn-sync-premium {
+    background: var(--accent-primary);
+    color: white;
+    box-shadow: var(--accent-glow);
+  }
+
+  .btn-sync-premium:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 5px 20px rgba(0, 163, 255, 0.5);
+  }
+
+  .btn-clear-premium {
+    background: var(--status-critical);
+    color: white;
+  }
+
+  .btn-clear-premium:hover {
+    background: #ff6666;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 77, 77, 0.4);
+  }
+
+  .query-timestamp-premium {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+    opacity: 0.8;
+  }
+
+  .gap-warning-badge {
+    background: var(--status-critical-bg);
+    color: var(--status-critical);
+    border: 1px solid rgba(255, 77, 77, 0.3);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-weight: 800;
+    font-size: 10px;
+    margin-left: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    animation: pulseGap 2s infinite;
+  }
+
+  @keyframes pulseGap {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+  }
+
+  .sticky-flight-banner {
+    background: var(--bg-panel-raised); border-radius: var(--radius-md);
+    display: flex; justify-content: space-between; align-items: stretch; 
+    margin: 0 24px 20px 24px; border: 1px solid var(--border-light);
+    overflow: hidden;
+  }
+  
+  .banner-leg-item {
+    padding: 16px 20px; border-right: 1px solid var(--border-light);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .banner-leg-item:last-child { border-right: none; }
+  .banner-leg-item .flt-num { font-weight: 800; color: var(--accent-primary); font-size: 18px; }
+  .banner-leg-item .route { font-family: var(--font-mono); font-weight: 700; font-size: 15px; opacity: 0.8; }
+
+/* =========================================================
+     [UPDATED] NAVIGATION & MODERN PILLS (ZONE C)
+     ========================================================= */
+  .notam-tabs-nav { 
+    display: flex; 
+    gap: 12px;
+    padding: 0 24px 18px 24px;
+    overflow-x: auto; 
+    scrollbar-width: none;
+    align-items: center;
+  }
+  .notam-tabs-nav::-webkit-scrollbar { display: none; }
+
+  .notam-tab-btn { 
+    background: transparent;
+    border: 1px solid var(--border-light);
+    color: var(--text-muted); 
+    padding: 10px 22px;         /* Proportional padding */
+    border-radius: var(--radius-sm);        /* Tactical square — not generic pill */
+    cursor: pointer; 
+    font-family: var(--font-ui); 
+    font-weight: 700; 
+    font-size: 15px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex; 
+    align-items: center; 
+    gap: 12px;
+    white-space: nowrap;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .notam-tab-btn:focus-visible {
+    outline: 3px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  .notam-tab-btn:hover {
+    background: var(--overlay); 
+    color: var(--text-primary); 
+    border-color: var(--border-medium); 
+  }
+
+  .notam-tab-btn.active-sector { 
+    background: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important; 
+    color: #ffffff !important; 
+    box-shadow: 0 4px 14px rgba(200, 16, 46, 0.28); /* Jeppesen blue glow */
+  }
+  
+  /* REFINED INDICATOR BADGE (SQUARE STYLE) */
+  .tab-badge { 
+    padding: 4px 8px; 
+    border-radius: 4px;         /* Sharp square style from reference */
+    font-size: 12px; 
+    font-family: var(--font-mono); 
+    font-weight: 900;           /* Ultra bold mono */
+    line-height: 1;
+    letter-spacing: 0.05em;
+    background: var(--bg-panel-sunken); 
+    color: var(--text-muted);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid transparent;
+  }
+
+  .notam-card-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 20px; background: var(--bg-panel-alt);
+  }
+
+  /* CHECKBOX */
+  .cb-notam-container { position: relative; width: 20px; height: 20px; cursor: pointer; }
+  .cb-notam-container input { position: absolute; opacity: 0; cursor: pointer; }
+  .checkmark { 
+    position: absolute; top: 0; left: 0; height: 20px; width: 20px; 
+    background-color: var(--bg-void); border: 1px solid var(--border-medium); 
+    border-radius: 4px; transition: 0.2s; 
+  }
+  .cb-notam-container:hover .checkmark { border-color: var(--accent-primary); }
+  .cb-notam-container input:checked ~ .checkmark { background-color: var(--status-safe); border-color: var(--status-safe); }
+  .checkmark:after { 
+    content: ""; position: absolute; display: none; 
+    left: 6px; top: 2px; width: 4px; height: 10px; 
+    border: solid white; border-width: 0 2px 2px 0; transform: rotate(45deg); 
+  }
+  .cb-notam-container input:checked ~ .checkmark:after { display: block; }
+
+  @keyframes fadeInPanel { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .sector-view-panel { display: none; animation: fadeInPanel 0.3s ease-out; }
+  .sector-view-panel.active-panel { display: block; }
+
+  /* TOGGLE SWITCH */
+  .toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-right: 10px;
+  }
+
+  /* BACK TO TOP BUTTON */
+  .back-to-top-btn {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    background: var(--accent-primary);
+    color: white;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: var(--z-modal); /* Layer: Modal-like action */
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    border: none;
+  }
+  .back-to-top-btn.visible {
+    opacity: 1;
+    visibility: visible;
+  }
+  .back-to-top-btn:hover {
+    background: var(--accent-hover);
+    transform: translateY(-3px);
+  }
+</style>
+
+<div id="view-notam" class="view-section">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+    <div>
+      <h2 class="header-title">NOTAM ANALYSIS DESK</h2>
+      <div class="header-sub">Review and correlate critical operational notices</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 20px;">
+      <span id="sync-status" style="color: var(--status-safe); font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;"></span>
+      <button class="control-btn btn-outline-critical" onclick="window.clearNotamAnalysis()">RESET SESSION</button>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card accent"><span class="kpi-label">Sectors Analysed</span><span class="kpi-val" id="notam-kpi-sectors">0</span><span class="kpi-sub">stations in window</span></div>
+    <div class="kpi-card crit"><span class="kpi-label">Critical Alerts</span><span class="kpi-val" id="notam-kpi-alerts">0</span><span class="kpi-sub">impacting schedule</span></div>
+    <div class="kpi-card warn"><span class="kpi-label">Session State</span><span class="kpi-val text" id="notam-kpi-state">STANDBY</span><span class="kpi-sub">analysis cache</span></div>
+  </div>
+
+  <div id="notam-warning-banner" class="warning-banner" style="display: none;"></div>
+
+  <div id="notam-loader" style="text-align: center; padding: 60px; background: var(--bg-panel-sunken); border: 1px dashed var(--border-medium); border-radius: var(--radius-md); display: none;">
+    <div style="font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--text-muted);">
+      [ SYNCHRONIZING NOTAM DATABASE... ]
+    </div>
+  </div>
+  
+  <div id="notam-results-container"></div>
+
+  <script>
+    window.lastFetchedFlightIds = "";
+    window.savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
+    window.activeStationGlobalState = "";
+
+    window.loadNotamsForSelected = function(isForced = false) {
+      try {
+        console.log('[NOTAM] Triggering load, forced:', isForced);
+        const container = document.getElementById('notam-results-container');
+        const loader = document.getElementById('notam-loader');
+        const banner = document.getElementById('notam-warning-banner');
+        
+        if (banner) banner.style.display = 'none';
+        
+        let selectedFlights = [];
+        try {
+            selectedFlights = typeof window.getSelectedFlightObjects === 'function' ? window.getSelectedFlightObjects() : [];
+        } catch (e) {
+            console.error("Flight selector error:", e);
+        }
+
+        if (!selectedFlights || selectedFlights.length === 0) {
+          if (container) container.innerHTML = `
+            <div style="background: var(--bg-panel-sunken); padding: 48px; color: var(--status-warning); font-family: var(--font-mono); border: 1px dashed var(--border-light); border-radius: 8px; font-size:13px; text-align: center; font-weight: 700;">
+              <svg class="ic ic-xl" style="margin-bottom: 16px; color: var(--status-warning);"><use href="#i-search"/></svg>
+              AWAITING FLIGHT CONTEXT<br/>
+              <span style="font-weight: 400; font-size: 11px; opacity: 0.7; margin-top: 8px; display: block;">SELECT AT LEAST ONE FLIGHT FROM THE BOARD TO BEGIN ANALYSIS</span>
+            </div>`;
+          window.lastFetchedFlightIds = ""; 
+          return;
+        }
+
+        const currentFlightIds = selectedFlights.map(f => f.rowIdx).sort().join(',');
+        if (!isForced && currentFlightIds === window.lastFetchedFlightIds && container && container.innerHTML.length > 500) {
+          console.log('[NOTAM] Using cached view');
+          return; 
+        }
+
+
+        
+        window.lastFetchedFlightIds = currentFlightIds;
+        if (container) container.innerHTML = '';
+        if (loader) loader.style.display = 'block';
+
+        if (typeof google === 'undefined' || typeof google.script === 'undefined') {
+             if (loader) loader.style.display = 'none';
+             if (container) container.innerHTML = `<div style="color:var(--status-critical); padding:20px; font-family:var(--font-mono); font-weight:700;">[ ERROR: google.script.run is not available in this environment. ]</div>`;
+             return;
+        }
+
+        google.script.run
+          .withSuccessHandler(res => {
+            try {
+              window.renderStationCentricGrid(res);
+            } catch (err) {
+              console.error('[NOTAM] Render error:', err);
+              if (loader) loader.style.display = 'none';
+              const safeMsg = err && err.message ? err.message : 'Unexpected render failure';
+              if (container) container.innerHTML = `<div style="color:var(--status-critical); padding:20px; font-family:var(--font-mono); font-weight:700;">[ RENDER ERROR: ${window.escapeHtml ? window.escapeHtml(safeMsg) : safeMsg} ]</div>`;
+            }
+          })
+          .withFailureHandler(err => {
+             console.error('[NOTAM] Server failure:', err);
+             if (loader) loader.style.display = 'none';
+              const safeServerMsg = err && err.message ? err.message : 'Server connection failed';
+              if (container) container.innerHTML = `<div style="color:var(--status-critical); padding:20px; font-family:var(--font-mono); font-weight:700;">[ SERVER CONNECTION ERROR: ${window.escapeHtml ? window.escapeHtml(safeServerMsg) : safeServerMsg} ]</div>`;
+          })
+          .analyzeNotams(selectedFlights, { showAll: true });
+      } catch (fatalErr) {
+         console.error('Fatal loadNotamsForSelected error:', fatalErr);
+         const container = document.getElementById('notam-results-container');
+         const loader = document.getElementById('notam-loader');
+         if (loader) loader.style.display = 'none';
+         if (container) {
+            const safeMsg = fatalErr && fatalErr.message ? fatalErr.message : 'Unexpected script error';
+            container.innerHTML = `<div style="color:white; background:var(--status-critical); padding:20px; font-family:var(--font-mono); font-weight:700; border-radius:4px;">[ FATAL SCRIPT ERROR ]<br/>${window.escapeHtml ? window.escapeHtml(safeMsg) : safeMsg}</div>`;
+         }
+      }
+    };
+
+    window.renderStationCentricGrid = function(res) {
+      console.log('[NOTAM] Rendering grid', res);
+      if (res && res.timestamp) window.lastNotamTimestamp = res.timestamp;
+      
+      const container = document.getElementById('notam-results-container');
+      const loader = document.getElementById('notam-loader');
+      if (loader) loader.style.display = 'none';
+      if (!container) return;
+      const esc = window.escapeHtml;
+
+      if (!res || res.error || !res.data) {
+         const safeResErr = esc((res && res.error) || 'Invalid response from server');
+         container.innerHTML = `<div style="color: var(--status-critical); font-family: var(--font-mono); padding: 20px; background: var(--status-critical-bg); border-left: 4px solid var(--status-critical); font-weight: 700;">[ ERROR: ${safeResErr} ]</div>`;
+         return;
+      }
+
+      const selectedFlights = typeof window.getSelectedFlightObjects === 'function' ? window.getSelectedFlightObjects() : [];
+      let multiLegDetailsHtml = '';
+      selectedFlights.forEach(f => {
+         multiLegDetailsHtml += `
+           <div class="banner-leg-item">
+             <div class="flt-num"><svg class="ic ic-sm"><use href="#i-plane"/></svg> ${esc(f.FLIGHT)}</div>
+             <div class="route">${esc(f.DEP)} <svg class="ic ic-sm"><use href="#i-arrow-r"/></svg> ${esc(f.ARR)}</div>
+             <div style="font-size: 12px; opacity: 0.6; font-family: var(--font-mono);">${esc(f.STD)}Z - ${esc(f.STA)}Z</div>
+           </div>
+         `;
+      });
+
+      let html = `<div class="notam-analysis-wrapper">
+        <div class="notam-sticky-control-centre">
+          <div class="notam-control-header">
+            <div class="stn-label-group">
+              <span class="stn-label-text">STATION</span>
+              <span id="sticky-active-stn" class="stn-title-badge">---</span>
+            </div>
+            <div class="notam-actions-group">
+              <div class="notam-btn-row">
+
+                 <button class="notam-ctrl-btn-premium btn-sync-premium" onclick="window.loadNotamsForSelected(true)">
+                   <svg class="ic"><use href="#i-sync"/></svg> SYNC DATA
+                 </button>
+                 <button class="notam-ctrl-btn-premium btn-clear-premium" onclick="window.clearNotamAnalysis()">
+                   <svg class="ic"><use href="#i-trash"/></svg> CLEAR ALL
+                 </button>
+              </div>
+              <div id="query-timestamp" class="query-timestamp-premium">
+                ${window.lastNotamTimestamp ? 'Query ran at UTC: ' + String(window.lastNotamTimestamp).replace(' ', 'T').replace(/$/, function(m){ return /Z$/.test(window.lastNotamTimestamp) ? '' : 'Z'; }) : ''}
+              </div>
+            </div>
+          </div>
+          <div class="notam-tabs-nav" id="station-tabs-bar" role="tablist" aria-label="NOTAM station tabs">`;
+
+      res.data.forEach((stnObj, idx) => {
+        const activeClass = idx === 0 ? 'active-sector' : '';
+        const stnId = `stn-${idx}`;
+
+        const gapIndicator = stnObj.gapWarning ? `<svg class="ic ic-sm" style="color: var(--status-critical);"><use href="#i-warn"/></svg>` : '';
+
+        html += `<button class="notam-tab-btn ${activeClass}" id="tab-btn-${stnId}" data-idx="${idx}" data-stn="${esc(stnObj.station)}" data-wndw="${esc(stnObj.windowStr)}" data-gap="${esc(stnObj.gapWarning)}" role="tab" aria-selected="${idx === 0}">
+          ${gapIndicator}
+          <span class="stn-name">${esc(stnObj.station)}</span>
+          <span class="tab-badge" id="tab-badge-${stnId}">0/0</span>
+        </button>`;
+      });
+
+      html += `</div></div>
+        <div class="sticky-flight-banner" style="margin-bottom: 20px;">
+          <div style="display: flex;">${multiLegDetailsHtml}</div>
+          <div style="text-align: right; padding: 16px 24px; border-left: 1px solid var(--border-light); background: var(--overlay); display: flex; flex-direction: column; justify-content: center; min-width: 340px;">
+            <div style="font-family: var(--font-mono); font-size: 13px; color: var(--text-muted); margin-top: 4px; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px;">
+              WINDOW: <span id="sticky-active-wndw" style="color:var(--status-warning); font-weight:bold;">---</span>
+              <span id="sticky-gap-warning"></span>
+            </div>
+            <div style="margin-top: 8px; font-size: 13px; font-weight: 700;"><span id="sticky-selected-count" style="color: var(--status-safe);">0</span> / <span id="sticky-total-count">0</span> SELECTED</div>
+          </div>
+        </div>
+      </div>`; 
+
+      let targetedAlertCount = 0;
+      let stateModified = false;
+
+      res.data.forEach((stnObj, idx) => {
+        const panelClass = (idx === 0) ? 'active-panel' : '';
+        const stnId = `stn-${idx}`;
+        html += `<div class="sector-view-panel ${panelClass}" id="panel-${idx}">`;
+        
+        if (!stnObj.notams || stnObj.notams.length === 0) {
+          html += `<div style="padding: 30px; color: var(--status-safe); font-family: var(--font-mono); font-weight: 700; text-align: center; border: 1px dashed var(--status-safe); margin-top:24px;"><svg class="ic ic-sm"><use href="#i-check"/></svg> NIL CRITICAL NOTAM DETECTED FOR THIS AIRPORT INTERSECTION WINDOW.</div>`;
+        } else {
+          html += `<div class="notam-grid">`;
+          html += `<div class="notam-window-axis"><span class="nw-label">OPS WINDOW</span><span class="nw-val">${esc(stnObj.windowStr)}</span>${stnObj.gapWarning ? `<span class="gap-warning-badge"><svg class="ic ic-sm"><use href="#i-warn"/></svg> ${esc(stnObj.gapWarning)}</span>` : ''}</div>`;
+          const renderedNotamNumbers = new Set();
+          let lastStatus = null;
+
+          stnObj.notams.forEach((n, nIdx) => {
+            if (!n || renderedNotamNumbers.has(n.notamNum)) return; 
+            renderedNotamNumbers.add(n.notamNum);
+
+            // Add Divider if status changes from IMPACTED to something else
+            if (lastStatus === 'IMPACTED' && n.status !== 'IMPACTED') {
+              html += `<div style="grid-column: 1 / -1; margin: 20px 0 10px 0; padding: 10px; border-bottom: 1px solid var(--border-light); font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); font-weight: 800; letter-spacing: 0.1em; display: flex; align-items: center; gap: 10px;">
+                <svg class="ic ic-sm" style="opacity:0.5;"><use href="#i-caret-dn"/></svg> NON-IMPACTED / OUTSIDE OPS WINDOW
+              </div>`;
+            }
+            lastStatus = n.status;
+
+            const rawText = esc(n.rawText);
+            const parsedRawText = rawText
+              .replace(/\b(CLOSED|CLSD|CLOSURE|CLOSURES|U\/S|UNSERVICEABLE|NOT AVBL|VIP MOV|VIP MOVEMENT)\b/gi, "<span class='notam-hl-critical'>$1</span>")
+              .replace(/\b(RWY|ILS|APCH|APCH LGT|HIAL|SFL|DME|VOR|LOC)\b/gi, "<span class='notam-hl-warn'>$1</span>");
+
+            const flightsArr = (stnObj.flightsStr || '').split(',').map(s => s.trim());
+            let isSaved = flightsArr.some(fNum => window.savedNotamAnalysis[fNum] && window.savedNotamAnalysis[fNum].includes(n.notamNum));
+            
+            if (n.isTargetedCritical) {
+                targetedAlertCount++;
+                if (!isSaved) {
+                    isSaved = true; stateModified = true;
+                    flightsArr.forEach(fNum => {
+                        if (!window.savedNotamAnalysis[fNum]) window.savedNotamAnalysis[fNum] = [];
+                        if (!window.savedNotamAnalysis[fNum].includes(n.notamNum)) window.savedNotamAnalysis[fNum].push(n.notamNum);
+                    });
+                }
+            }
+
+            const checkedAttr = isSaved ? 'checked' : '';
+            const severityClass = n.isTargetedCritical ? 'notam-card-critical' : (parsedRawText.includes('notam-hl-warn') ? 'notam-card-warning' : 'notam-card-advisory');
+            
+            // Status specific styling
+            let statusStyle = "";
+            let statusLabel = n.status;
+            let statusColor = "var(--text-muted)";
+            
+            if (n.status === 'IMPACTED') {
+              statusColor = "var(--status-safe)";
+            } else {
+              statusStyle = "opacity: 0.7; filter: grayscale(0.5);";
+              if (n.status === 'EXPIRED') statusColor = "var(--status-critical)";
+              else if (n.status === 'FUTURE') statusColor = "var(--status-warning)";
+              else if (n.status === 'NOT IN WINDOW') statusColor = "var(--accent-primary)";
+            }
+
+            let cardClass = `notam-card ${severityClass} ${isSaved ? 'selected-card' : ''}`;
+            if (n.isTargetedCritical && !isSaved) cardClass += ' warning-alert-card';
+            const uniqueCardId = `stncard-${idx}-${nIdx}`;
+
+            let flightPillsHtml = '';
+            if (n.flightsInvolved && n.flightsInvolved.length > 0) {
+                flightPillsHtml = `<div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">` + 
+                    n.flightsInvolved.map(f => `<span style="background: var(--bg-panel-sunken); padding: 4px 10px; border-radius: 4px; font-size: 13px; font-family: var(--font-mono); font-weight: 700; color: var(--text-primary); border: 1px solid var(--border-light);">${esc(f.pillStr)}</span>`).join('') + 
+                `</div>`;
+            }
+
+            html += `<article id="card-${uniqueCardId}" class="${cardClass}" style="${statusStyle}">
+                <div class="notam-card-header" style="align-items: flex-start;">
+                  <div style="display: flex; flex-direction: column; flex-grow: 1;">
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                      <div class="cb-notam-container" style="margin-right: 4px;">
+                         <input type="checkbox" class="cb-group-${stnId} notam-cb" ${checkedAttr} aria-label="Select NOTAM ${esc(n.notamNum)} for ${esc(stnObj.station)}" data-stn="${esc(stnId)}" data-card="${esc(uniqueCardId)}" data-notam="${esc(n.notamNum)}" data-flights="${esc(stnObj.flightsStr)}">
+                         <span class="checkmark" style="border-radius: 50%;"></span>
+                      </div>
+                      <span style="font-family: var(--font-mono); font-weight: 800; font-size: 17px; color: var(--text-primary);">${esc(stnObj.station)}</span>
+                      <span style="background: ${n.bg || 'var(--bg-panel-sunken)'}; color: ${n.fg || 'var(--text-primary)'}; padding: 4px 10px; font-size: 12px; font-weight: 800; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em;">${esc(n.tag)}</span>
+                      <span style="color: ${statusColor}; font-size: 12px; font-family: var(--font-mono); font-weight: 900; background: var(--bg-panel-sunken); padding: 2px 8px; border-radius: 10px; border: 1px solid ${statusColor}44;">${statusLabel}</span>
+                      <span style="color: var(--text-muted); font-size: 13px; font-family: var(--font-mono); font-weight: 700;">[ ${esc(n.cat)} ]</span>
+                    </div>
+                    ${flightPillsHtml}
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 6px; text-align: right; margin-left: 12px; min-width: 160px;">
+                     <div style="font-size: 12px; font-family: var(--font-mono); font-weight: 800; background: var(--bg-panel-sunken); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-light);">START: <span style="color: var(--text-primary);">${esc(n.effFromUi)}</span></div>
+                     <div style="font-size: 12px; font-family: var(--font-mono); font-weight: 800; background: var(--bg-panel-sunken); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-light);">END: <span style="color: var(--text-primary);">${esc(n.effToUi)}</span></div>
+                  </div>
+                </div>
+                <div class="notam-time-band">
+                  <div class="ntb-track"><span class="ntb-fill" style="background: ${statusColor};"></span></div>
+                  <span class="ntb-from">${esc(n.effFromUi)}</span>
+                  <svg class="ic ic-sm"><use href="#i-arrow-r"/></svg>
+                  <span class="ntb-to">${esc(n.effToUi)}</span>
+                </div>
+                <div class="notam-raw-text">${parsedRawText}</div>
+              </article>`;
+          });
+          html += `</div>`; 
+        }
+        html += `</div>`; 
+      });
+      html += `</div>`; // Close notam-analysis-wrapper
+      container.innerHTML = html;
+      container.querySelectorAll('.notam-card').forEach(card => {
+        card.addEventListener('click', event => {
+          if (event.target.closest('input, button, a, label, select, textarea')) return;
+          const checkbox = card.querySelector('input[type="checkbox"]');
+          if (checkbox) checkbox.click();
+        });
+      });
+
+      // Event delegation: tab button clicks (C1 fix — no inline handlers)
+      const tabsBar = document.getElementById('station-tabs-bar');
+      if (tabsBar) {
+        tabsBar.addEventListener('click', function(e) {
+          const btn = e.target.closest('.notam-tab-btn');
+          if (!btn) return;
+          window.switchStationTab(
+            Number(btn.dataset.idx),
+            btn.dataset.stn || '',
+            btn.dataset.wndw || '',
+            btn.dataset.gap || ''
+          );
+        });
+      }
+
+      // Event delegation: NOTAM checkbox changes (C1 fix — no inline handlers)
+      if (container) {
+        container.addEventListener('change', function(e) {
+          const cb = e.target;
+          if (!cb.classList.contains('notam-cb')) return;
+          window.toggleStationNotamSelection(
+            cb.dataset.stn || '',
+            cb.dataset.card || '',
+            cb.dataset.notam || '',
+            cb.dataset.flights || ''
+          );
+        });
+      }
+
+      const sysAlert = document.getElementById('sys-alert-count');
+      const navBadge = document.getElementById('nav-notam-badge');
+      if(sysAlert) sysAlert.innerText = targetedAlertCount;
+      if(navBadge) {
+        navBadge.innerText = targetedAlertCount;
+        navBadge.style.display = targetedAlertCount > 0 ? 'inline-block' : 'none';
+      }
+
+      const kpiSectors = document.getElementById('notam-kpi-sectors');
+      if (kpiSectors) kpiSectors.innerText = Array.isArray(res.data) ? res.data.length : 0;
+      const kpiAlerts = document.getElementById('notam-kpi-alerts');
+      if (kpiAlerts) kpiAlerts.innerText = targetedAlertCount;
+      const kpiState = document.getElementById('notam-kpi-state');
+      if (kpiState) kpiState.innerText = 'ACTIVE';
+
+      if (targetedAlertCount > 0) {
+         const banner = document.getElementById('notam-warning-banner');
+         if (banner) {
+           banner.innerHTML = `<div style="display:flex; align-items:center; gap:12px;"><svg class="ic ic-lg" style="color:var(--status-warning);"><use href="#i-warn"/></svg><span>SYS ALERT: <strong>${targetedAlertCount}</strong> highly critical NOTAM(s) overlap with schedule. Auto-selected.</span></div><button onclick="this.parentElement.style.display='none'" aria-label="Dismiss NOTAM alert banner" style="background:none; border:none; color:var(--text-primary); cursor:pointer; opacity:0.7; display:flex; align-items:center; padding:4px;"><svg class="ic"><use href="#i-x"/></svg></button>`;
+           banner.style.display = 'flex';
+         }
+          if (stateModified) {
+              if (window.safeStorage) window.safeStorage.set('occ_notam_analysis', window.savedNotamAnalysis);
+              google.script.run.syncNotamAnalysisState(JSON.stringify(window.savedNotamAnalysis));
+          }
+      }
+
+      res.data.forEach((stnObj, idx) => window.updateTabBadge(`stn-${idx}`));
+      if(res.data.length > 0) window.switchStationTab(0, res.data[0].station, res.data[0].windowStr, res.data[0].gapWarning);
+    }
+
+    window.updateTabBadge = function(stnId) {
+      const checkedCount = document.querySelectorAll(`.cb-group-${stnId}:checked`).length;
+      const totalCount = document.querySelectorAll(`.cb-group-${stnId}`).length;
+      const badgeElem = document.getElementById(`tab-badge-${stnId}`);
+      const tabBtn = document.getElementById(`tab-btn-${stnId}`);
+      
+      if (badgeElem) {
+         badgeElem.innerText = `${checkedCount}/${totalCount}`;
+         const isActive = tabBtn && tabBtn.classList.contains('active-sector');
+         
+         if (isActive) {
+           // Contrast badge for active blue pill
+           badgeElem.style.background = 'rgba(0, 0, 0, 0.25)';
+           badgeElem.style.color = '#ffffff';
+           badgeElem.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+         } else {
+           if (totalCount === 0) {
+              badgeElem.style.background = 'var(--overlay)';
+              badgeElem.style.color = 'var(--text-muted)';
+              badgeElem.style.borderColor = 'transparent';
+           } else if (checkedCount === totalCount) {
+              // All checked -> Safe Green
+              badgeElem.style.background = 'var(--status-safe-bg)';
+              badgeElem.style.color = 'var(--status-safe)';
+              badgeElem.style.borderColor = 'var(--status-safe)';
+           } else if (checkedCount > 0) { 
+              // Partial -> Warning Orange
+              badgeElem.style.background = 'var(--status-warning-bg)'; 
+              badgeElem.style.color = 'var(--status-warning)'; 
+              badgeElem.style.borderColor = 'var(--status-warning)';
+           } else { 
+              // None checked -> Critical Red
+              badgeElem.style.background = 'var(--status-critical-bg)'; 
+              badgeElem.style.color = 'var(--status-critical)';
+              badgeElem.style.borderColor = 'rgba(255, 77, 77, 0.3)';
+           }
+         }
+      }
+    }
+
+    window.switchStationTab = function(idx, stationName, windowStr, gapWarning) {
+      const tabsBar = document.getElementById('station-tabs-bar');
+      if(tabsBar && tabsBar.children[idx]) {
+        tabsBar.querySelectorAll('.notam-tab-btn').forEach(btn => {
+          btn.classList.remove('active-sector');
+          btn.setAttribute('aria-selected', 'false');
+        });
+        tabsBar.children[idx].classList.add('active-sector');
+        tabsBar.children[idx].setAttribute('aria-selected', 'true');
+      }
+      document.querySelectorAll('.sector-view-panel').forEach(panel => panel.classList.remove('active-panel'));
+      const activePanel = document.getElementById(`panel-${idx}`);
+      if(activePanel) activePanel.classList.add('active-panel');
+
+      window.activeStationGlobalState = `stn-${idx}`;
+      const stnLabel = document.getElementById('sticky-active-stn');
+      const wndwLabel = document.getElementById('sticky-active-wndw');
+      const gapContainer = document.getElementById('sticky-gap-warning');
+      
+      if (stnLabel) stnLabel.innerText = stationName;
+      if (wndwLabel) wndwLabel.innerText = windowStr;
+      
+      if (gapContainer) {
+        if (gapWarning && gapWarning !== 'null' && gapWarning !== 'undefined' && gapWarning !== '') {
+          const safeGapWarning = window.escapeHtml ? window.escapeHtml(gapWarning) : 'Schedule gap detected';
+          gapContainer.innerHTML = `<span class="gap-warning-badge"><svg class="ic ic-sm"><use href="#i-warn"/></svg> ${safeGapWarning}</span>`;
+        } else {
+          gapContainer.innerHTML = '';
+        }
+      }
+      
+      const totLabel = document.getElementById('sticky-total-count');
+      const selLabel = document.getElementById('sticky-selected-count');
+      if (totLabel) totLabel.innerText = document.querySelectorAll(`.cb-group-stn-${idx}`).length;
+      if (selLabel) selLabel.innerText = document.querySelectorAll(`.cb-group-stn-${idx}:checked`).length;
+
+      // Refresh all badge colors to dynamically detect active-state changes on tab switch
+      document.querySelectorAll('.tab-badge').forEach(badge => {
+         const stnId = badge.id.replace('tab-badge-', '');
+         window.updateTabBadge(stnId);
+      });
+    }
+
+    window.toggleStationNotamSelection = function(stnId, uniqueCardId, notamNum, flightsInvolvedStr) {
+       const cardElem = document.getElementById(`card-${uniqueCardId}`);
+       if (!cardElem) return;
+       const cbElem = cardElem.querySelector('input[type="checkbox"]');
+       if (!cbElem) return;
+       
+       if(cbElem.checked) cardElem.classList.add('selected-card');
+       else cardElem.classList.remove('selected-card');
+
+       if (window.activeStationGlobalState === stnId) {
+          const selLabel = document.getElementById('sticky-selected-count');
+          if (selLabel) selLabel.innerText = document.querySelectorAll(`.cb-group-${stnId}:checked`).length;
+       }
+       updateTabBadge(stnId);
+
+        const flightsArr = (flightsInvolvedStr || '').split(',').map(s => s.trim());
+        flightsArr.forEach(fNum => {
+           if (!window.savedNotamAnalysis[fNum]) window.savedNotamAnalysis[fNum] = [];
+           if (cbElem.checked) { if (!window.savedNotamAnalysis[fNum].includes(notamNum)) window.savedNotamAnalysis[fNum].push(notamNum); }
+           else { window.savedNotamAnalysis[fNum] = window.savedNotamAnalysis[fNum].filter(id => id !== notamNum); }
+        });
+        
+        if (window.safeStorage) window.safeStorage.set('occ_notam_analysis', window.savedNotamAnalysis);
+        google.script.run.syncNotamAnalysisState(JSON.stringify(window.savedNotamAnalysis));
+    }
+
+    window.clearNotamAnalysis = function() {
+       if(!confirm("WARNING: Clear all selections?")) return;
+       window.savedNotamAnalysis = {};
+       if (window.safeStorage) window.safeStorage.remove('occ_notam_analysis');
+       google.script.run.syncNotamAnalysisState(JSON.stringify({}));
+       document.querySelectorAll('.cb-notam-container input').forEach(cb => cb.checked = false);
+       document.querySelectorAll('.notam-card').forEach(card => card.classList.remove('selected-card'));
+       if(window.activeStationGlobalState) {
+          const selLabel = document.getElementById('sticky-selected-count');
+          if (selLabel) selLabel.innerText = '0';
+          document.querySelectorAll('.tab-badge').forEach(badge => {
+            const stnId = badge.id.replace('tab-badge-', '');
+            updateTabBadge(stnId);
+          });
+       }
+       const banner = document.getElementById('notam-warning-banner');
+       if (banner) banner.style.display = 'none';
+       const sysAlert = document.getElementById('sys-alert-count');
+       const navBadge = document.getElementById('nav-notam-badge');
+       if (sysAlert) sysAlert.innerText = '0';
+       if (navBadge) { navBadge.innerText = '0'; navBadge.style.display = 'none'; }
+       const statusElem = document.getElementById('sync-status');
+       if (statusElem) statusElem.innerText = "✓ MEMORY CLEARED"; setTimeout(() => statusElem.innerText="", 2500);
+    }
+
+    // Scroll to top logic
+    window.addEventListener('scroll', () => {
+      const backToTopBtn = document.getElementById('notam-back-to-top');
+      if (!backToTopBtn) return;
+      
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      if (scrollTop > 300) {
+        backToTopBtn.classList.add('visible');
+      } else {
+        backToTopBtn.classList.remove('visible');
+      }
+    });
+
+    window.scrollToTopNotam = function() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  </script>
+
+  <!-- Back to top button -->
+  <button id="notam-back-to-top" class="back-to-top-btn" onclick="window.scrollToTopNotam()" aria-label="Back to top" title="Back to Top"><svg class="ic"><use href="#i-caret-up"/></svg></button>
+</div>

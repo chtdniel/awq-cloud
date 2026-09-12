@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<!-- PREVIEW ONLY — AI REVIEW v2.1 Opsi A + tema adaptif Titanium (tidak menyentuh produksi).
+     - Model picker native <select> langsung dari badge panel.
+     - Tema ikut web: :root = light, [data-theme="dark"] = Night Ops. Toggle demo di atas.
+     - Buka via file://. File produksi Taf_Ui.html TIDAK diubah. -->
+<html lang="id" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview — AI REVIEW v2.1 Opsi A + Tema</title>
+<style>
+  /* Titanium v2 tokens — disalin dari Index.html agar preview 1:1 dengan web */
+  :root{
+    --ease-out:cubic-bezier(0.23,1,0.32,1);
+    --bg-void:#F1F3F6; --bg-dark:#F8FAFC; --bg-panel:#FFFFFF;
+    --bg-panel-raised:#FFFFFF; --bg-panel-sunken:#EEF1F5; --bg-panel-alt:#F7F8FA;
+    --border-subtle:#E2E8F0; --border-light:#CBD5E1; --border-medium:#94A3B8;
+    --text-primary:#0F172A; --text-secondary:#334155; --text-muted:#5B6B7F;
+    --status-critical:#C8102E; --status-critical-bg:#FEF0F2;
+    --status-warning:#8A5F0E; --status-warning-bg:#FFF7E6;
+    --status-safe:#0E7A4B; --status-safe-bg:#E6F4ED;
+    --accent-primary:#C8102E; --accent-hover:#A50D26;
+    --font-ui:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono',Consolas,monospace;
+    --radius-sm:4px; --radius-lg:10px; --radius-pill:9999px;
+    --shadow-soft:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.07);
+  }
+  [data-theme="dark"]{
+    --bg-void:#030508; --bg-dark:#070A12; --bg-panel:#0F141E;
+    --bg-panel-raised:#141B2D; --bg-panel-sunken:#0B0F1A; --bg-panel-alt:#111827;
+    --border-subtle:#1E293B; --border-light:#243449; --border-medium:#334155;
+    --text-primary:#F1F5F9; --text-secondary:#CBD5E1; --text-muted:#94A3B8;
+    --status-critical:#FF5340; --status-critical-bg:rgba(255,83,64,.14);
+    --status-warning:#F59E0B; --status-warning-bg:rgba(245,158,11,.12);
+    --status-safe:#22C55E; --status-safe-bg:rgba(34,197,94,.12);
+    --accent-primary:#FF3B52; --accent-hover:#FF5A6E;
+    --shadow-soft:0 8px 32px rgba(0,0,0,.40);
+  }
+  *{box-sizing:border-box}
+  html,body{overflow-x:clip}
+  body{margin:0;background:var(--bg-void);color:var(--text-primary);
+    font-family:var(--font-ui);font-size:14px;line-height:1.5;transition:background .2s,color .2s}
+  .wrap{max-width:1120px;margin:0 auto;padding:24px 16px 64px}
+  .preview-note{font-size:12px;color:var(--text-muted);background:var(--bg-panel-sunken);
+    border:1px dashed var(--accent-primary);border-radius:10px;padding:10px 14px;margin-bottom:16px}
+  .preview-note b{color:var(--accent-primary)}
+  h1{font-size:26px;font-weight:800;letter-spacing:-.02em;margin:8px 0 2px}
+  h1 span{color:var(--accent-primary)}
+  .sub{color:var(--text-muted);font-size:12px;letter-spacing:.06em;font-weight:700;margin-bottom:12px}
+  p.desc{color:var(--text-muted);font-size:13px;max-width:78ch}
+
+  /* Toolbar demo tema */
+  .demo-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0 18px}
+  .demo-bar .lbl{font-size:11px;font-weight:800;letter-spacing:.08em;color:var(--text-muted)}
+  .seg{display:inline-flex;border:1px solid var(--border-light);border-radius:999px;overflow:hidden;background:var(--bg-panel)}
+  .seg button{border:0;background:transparent;color:var(--text-muted);font:inherit;font-size:11px;font-weight:800;
+    letter-spacing:.06em;padding:8px 14px;cursor:pointer;min-height:36px}
+  .seg button[aria-pressed="true"]{background:var(--text-primary);color:var(--bg-panel)}
+
+  /* Panel — pakai token produksi, otomatis ikut light/dark */
+  .panel{background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-lg);
+    overflow:hidden;box-shadow:var(--shadow-soft)}
+  .panel-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;
+    background:var(--bg-panel-alt);border-bottom:1px solid var(--border-subtle)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--status-safe);box-shadow:0 0 8px var(--status-safe)}
+  .ai-title{font-size:12px;font-weight:800;letter-spacing:.08em}
+
+  /* Opsi A: model picker native */
+  .model-picker{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.06em;
+    border:1px solid var(--border-light);border-radius:var(--radius-pill);padding:2px 4px 2px 10px;
+    background:var(--bg-panel-sunken);color:var(--text-primary);min-height:36px}
+  .model-picker .vendor{color:var(--accent-primary)}
+  .model-picker select{font:inherit;font-size:11px;font-weight:700;color:var(--text-primary);
+    background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-pill);
+    padding:6px 8px;min-height:32px;max-width:220px;cursor:pointer}
+  .model-picker select:hover{border-color:var(--accent-primary)}
+  .meta{font-family:var(--font-mono);font-size:11px;color:var(--text-muted)}
+  .head-right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pill{font-size:11px;font-weight:800;letter-spacing:.06em;padding:4px 10px;border-radius:var(--radius-pill);
+    border:1px solid transparent;white-space:nowrap}
+  .pill-ok{color:var(--status-safe);border-color:var(--status-safe);background:var(--status-safe-bg)}
+  .btn{background:transparent;border:1px solid var(--accent-primary);color:var(--accent-primary);
+    padding:8px 14px;border-radius:8px;font-weight:800;font-size:11px;letter-spacing:.06em;cursor:pointer;min-height:36px;font-family:inherit}
+  .btn:hover{background:var(--accent-primary);color:#fff}
+  .btn-ghost{border-color:var(--border-light);color:var(--text-muted)}
+  .btn-ghost:hover{border-color:var(--accent-primary);color:var(--accent-primary);background:transparent}
+  button:focus-visible,select:focus-visible,.src:focus-visible{outline:3px solid var(--accent-primary);outline-offset:2px}
+
+  .row{display:grid;grid-template-columns:150px minmax(0,1fr) 230px;
+    border-top:1px solid var(--border-subtle);border-left:4px solid var(--border-light);min-width:0;
+    opacity:0;transform:translateY(8px);animation:rise 320ms var(--ease-out) forwards}
+  .row:nth-child(2){animation-delay:0ms}.row:nth-child(3){animation-delay:60ms}.row:nth-child(4){animation-delay:120ms}
+  @keyframes rise{to{opacity:1;transform:translateY(0)}}
+  .row.st-danger{border-left-color:var(--status-critical)}
+  .row.st-warning{border-left-color:var(--status-warning)}
+  .row.st-ok{border-left-color:var(--status-safe)}
+  .c-status{padding:14px 14px 14px 16px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.06em;
+    padding:4px 10px;border-radius:var(--radius-pill);border:1px solid transparent;white-space:nowrap}
+  .badge svg{width:12px;height:12px;flex:none}
+  .b-danger{color:var(--status-critical);border-color:var(--status-critical);background:var(--status-critical-bg)}
+  .b-warning{color:var(--status-warning);border-color:var(--status-warning);background:var(--status-warning-bg)}
+  .b-ok{color:var(--status-safe);border-color:var(--status-safe);background:var(--status-safe-bg)}
+  .phase{font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--text-muted)}
+  .c-detail{padding:14px 18px;min-width:0;border-left:1px solid var(--border-subtle);border-right:1px solid var(--border-subtle)}
+  .raw{font-family:var(--font-mono);font-size:13px;font-weight:700;letter-spacing:.02em;color:var(--text-primary);overflow-wrap:anywhere}
+  .interp{font-size:13px;line-height:1.5;margin-top:4px;font-weight:600}
+  .interp::before{content:"→ ";font-weight:800}
+  .st-danger .interp{color:var(--status-critical)}
+  .st-warning .interp{color:var(--status-warning)}
+  .st-ok .interp{color:var(--status-safe)}
+  .c-src{padding:14px 16px;display:flex;align-items:flex-start;justify-content:flex-end}
+  .src{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--text-muted);
+    border:1px solid var(--border-light);border-radius:var(--radius-pill);padding:6px 10px;max-width:100%;
+    background:transparent;font-family:inherit;cursor:pointer;min-height:32px}
+  .src:hover{border-color:var(--accent-primary);color:var(--accent-primary)}
+  .src svg{width:12px;height:12px;flex:none}
+  .src span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .legend{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0;font-size:11px;color:var(--text-muted)}
+  .legend i{font-style:normal;border:1px solid var(--border-light);border-radius:6px;padding:2px 8px;background:var(--bg-panel)}
+
+  @media(max-width:860px){
+    .row{grid-template-columns:minmax(0,1fr)}
+    .c-detail{border-left:none;border-right:none;border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle)}
+    .c-src{justify-content:flex-start}
+    .src span{white-space:normal}
+    .model-picker select{max-width:140px}
+  }
+  @media(prefers-reduced-motion:reduce){.row{animation:none;opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="preview-note"><b>PREVIEW ONLY v2.1</b> — Opsi A (select native) + tema adaptif Titanium. Toggle di bawah untuk cek gelap/terang. Buka via <b>file://</b>.</div>
+  <h1>AI REVIEW <span>v2.1</span></h1>
+  <div class="sub">BADGE PANEL = MODEL PICKER · TEMA OTOMATIS IKUT WEB</div>
+  <p class="desc">Jawaban: <b>ya, bisa dan sudah adaptif</b>. Style baru tidak hardcode <b>#060D1D</b> lagi — semua pakai <b>var(--bg-panel, --text-primary, --status-*)</b> dari <b>Index.html</b>. Light = <b>:root</b>, dark = <b>[data-theme="dark"]</b>. Pilih model langsung dari badge, tersimpan di <b>localStorage</b>.</p>
+
+  <div class="demo-bar">
+    <span class="lbl">TEMA:</span>
+    <span class="seg">
+      <button type="button" id="t-light" aria-pressed="false">TERANG</button>
+      <button type="button" id="t-dark" aria-pressed="true">GELAP</button>
+    </span>
+    <span class="meta" id="theme-hint">data-theme="dark"</span>
+  </div>
+
+  <section class="panel" aria-label="AI Review TAF assessment">
+    <div class="panel-head">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="ai-title">AI REVIEW</span>
+      <label class="model-picker" title="Pilih model AI langsung dari panel">
+        <span class="vendor">GEMINI ·</span>
+        <select id="ai-model" aria-label="Pilih model AI">
+          <option value="gemini-3.5-flash-lite" selected>gemini-3.5-flash-lite</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+          <option value="gpt-4o-mini">gpt-4o-mini (fallback)</option>
+        </select>
+      </label>
+      <span class="meta" id="model-meta">06:18Z · conf High</span>
+      <span class="head-right">
+        <span class="pill pill-ok">2/3 ABOVE MINIMA</span>
+        <button class="btn btn-ghost" type="button">HISTORY</button>
+        <button class="btn" type="button" id="btn-regen">REGENERATE</button>
+      </span>
+    </div>
+
+    <article class="row st-danger">
+      <div class="c-status">
+        <span class="badge b-danger"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1 15 14H1L8 1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="12" r=".9" fill="currentColor"/></svg>DANGER</span>
+        <span class="phase">AI ARR · DEST</span>
+      </div>
+      <div class="c-detail">
+        <div class="raw">FM061800 16008KT 800 FG BKN003</div>
+        <div class="interp">Ensure main body forecast at destination is at or above landing minima during ETA; delay or divert if below.</div>
+      </div>
+      <div class="c-src">
+        <button class="src" type="button" title="Flight Dispatch Manual, Chapter 4.1.5 (B.1)"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>Dispatch Manual 4.1.5 (B.1)</span></button>
+      </div>
+    </article>
+
+    <article class="row st-warning">
+      <div class="c-status">
+        <span class="badge b-warning"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.8V8l2.2 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>WARNING</span>
+        <span class="phase">AI ALT · ALTN</span>
+      </div>
+      <div class="c-detail">
+        <div class="raw">TEMPO 0618/0623 200 FG BKN001</div>
+        <div class="interp">Apply conditional TAF terms evaluation and 50% rule for alternate visibility.</div>
+      </div>
+      <div class="c-src">
+        <button class="src" type="button" title="Flight Dispatch Manual, Chapter 4.1.5 (A.1)"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>Dispatch Manual 4.1.5 (A.1)</span></button>
+      </div>
+    </article>
+
+    <article class="row st-ok">
+      <div class="c-status">
+        <span class="badge b-ok"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="m5.5 8.2 1.8 1.8 3.2-3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>CLEAR</span>
+        <span class="phase">AI DEP · ORIGIN</span>
+      </div>
+      <div class="c-detail">
+        <div class="raw">14011KT 9999 SCT016</div>
+        <div class="interp">Proceed with departure as TAF conditions are above minima.</div>
+      </div>
+      <div class="c-src">
+        <button class="src" type="button" title="Operations Manual Part A, Chapter 8.1.2.2.1"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>Ops Manual A 8.1.2.2.1</span></button>
+      </div>
+    </article>
+  </section>
+
+  <div class="legend"><i>Select di header = ganti model + auto regenerate</i><i>Light: bg #FFFFFF / text #0F172A</i><i>Dark: bg #0F141E / text #F1F5F9</i></div>
+</div>
+<script>
+  (() => {
+    const root = document.documentElement;
+    const sel = document.getElementById('ai-model');
+    const meta = document.getElementById('model-meta');
+    const bL = document.getElementById('t-light');
+    const bD = document.getElementById('t-dark');
+    const hint = document.getElementById('theme-hint');
+    const regen = document.getElementById('btn-regen');
+    const syncTheme = () => {
+      const dark = root.getAttribute('data-theme') === 'dark';
+      bD.setAttribute('aria-pressed', String(dark));
+      bL.setAttribute('aria-pressed', String(!dark));
+      hint.textContent = dark ? 'data-theme="dark"' : 'light (default :root)';
+      try { localStorage.setItem('ai-review-theme', dark ? 'dark' : 'light'); } catch { /* ignore */ }
+    };
+    const syncModel = () => {
+      meta.textContent = `06:18Z · ${sel.value} · conf High`;
+      try { localStorage.setItem('ai-review-model', sel.value); } catch { /* ignore */ }
+    };
+    try {
+      const savedM = localStorage.getItem('ai-review-model');
+      if (savedM) sel.value = savedM;
+      const savedT = localStorage.getItem('ai-review-theme');
+      if (savedT === 'light') root.removeAttribute('data-theme');
+      else root.setAttribute('data-theme', 'dark');
+    } catch { /* ignore */ }
+    bL.addEventListener('click', () => { root.removeAttribute('data-theme'); syncTheme(); });
+    bD.addEventListener('click', () => { root.setAttribute('data-theme', 'dark'); syncTheme(); });
+    sel.addEventListener('change', syncModel);
+    regen.addEventListener('click', () => {
+      meta.textContent = `regenerating with ${sel.value}…`;
+      setTimeout(syncModel, 600);
+    });
+    syncTheme(); syncModel();
+  })();
+</script>
+</body>
+</html>

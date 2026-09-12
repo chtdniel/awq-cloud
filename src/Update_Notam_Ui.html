@@ -1,0 +1,361 @@
+<style>
+  /* fonts loaded via Index.html preconnect */
+  /* a11y: local focus ring (global lives in Index.html shell) */
+  #view-update-notam button:focus-visible, #view-update-notam [role="button"]:focus-visible { outline:3px solid var(--accent-primary); outline-offset:2px; }
+  /* =========================================================
+     AWQ :: NOTAM UPDATE CONSOLE
+     ========================================================= */
+  #view-update-notam { 
+    padding: 24px;
+    max-width: 100%;
+  }
+
+  .update-header {
+    margin-bottom: 32px;
+  }
+  /* Using global header-title & header-sub */
+  
+  .ingestion-console {
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 24px; margin-bottom: 32px;
+    box-shadow: var(--shadow-soft);
+  }
+
+  .ingestion-console label {
+    display: block; font-family: var(--font-mono); font-size: 11px;
+    font-weight: 700; color: var(--accent-primary); margin-bottom: 12px;
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+
+  .paste-area {
+    width: 100%; height: 160px; padding: 16px;
+    font-family: var(--font-mono); font-size: 12px;
+    background: var(--bg-void); color: var(--text-primary);
+    border: 1px solid var(--border-medium); border-radius: var(--radius-sm);
+    resize: vertical; line-height: 1.6; transition: border-color 0.2s;
+  }
+  .paste-area:focus { border-color: var(--accent-primary); outline: none; }
+  
+  .action-tray {
+    display: flex; gap: 16px; align-items: center; margin-top: 20px;
+  }
+
+  .status-badge {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+    padding: 6px 12px; border-radius: 4px; display: none;
+    text-transform: uppercase;
+  }
+  .status-loading { display: inline-block; background: var(--status-info-bg); color: var(--status-info); }
+  .status-success { display: inline-block; background: var(--status-safe-bg); color: var(--status-safe); }
+  .status-error   { display: inline-block; background: var(--status-critical-bg); color: var(--status-critical); }
+
+  /* DATA GRID */
+  .grid-container {
+    background: var(--bg-panel); border: 1px solid var(--border-light);
+    border-radius: var(--radius-md); overflow: hidden;
+  }
+  .grid-scroll { max-height: 600px; overflow: auto; }
+
+  .update-grid {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }
+  .update-grid thead th {
+    position: sticky; top: 0; background: linear-gradient(180deg, var(--bg-panel-alt), var(--bg-panel));
+    padding: 16px; text-align: left;
+    font-family: var(--font-ui); font-size: 11px; font-weight: 900; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.12em; border-bottom: 1px solid var(--border-light);
+    z-index: var(--z-header); /* Layer: Table header */
+    box-shadow: none;
+  }
+  .update-grid thead th:focus { outline: none; box-shadow: 0 0 0 4px rgba(200, 16, 46, 0.06); }
+  .update-grid tbody td {
+    padding: 12px 16px; border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+  .update-grid tbody tr {
+    transition: all 0.2s ease;
+  }
+  .update-grid tbody tr:hover { 
+    background: rgba(0, 163, 255, 0.05);
+    box-shadow: inset 0 0 20px rgba(0, 163, 255, 0.05);
+  }
+
+</style>
+
+<div id="view-update-notam" class="view-section">
+  <div class="update-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+      <h2 class="header-title">NOTAM UPDATE</h2>
+      <p class="header-sub">Upload raw FNS NOTAM strings to update the global registry</p>
+    </div>
+    <div id="latest-history-container" style="text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); background: var(--bg-panel-raised); padding: 8px 12px; border: 1px solid var(--border-light); border-radius: var(--radius-sm);">
+      Loading history...
+    </div>
+  </div>
+
+  <div class="ingestion-console">
+    <label for="update-notam-paste">Mission Data Ingestion (Paste Excel/CSV Content)</label>
+    <textarea class="paste-area" id="update-notam-paste" placeholder="Paste data directly from fnsNotams export..."></textarea>
+    
+    <div class="action-tray">
+      <button class="control-btn btn-solid-primary btn-preview"><svg class="ic ic-sm"><use href="#i-eye"/></svg> PREVIEW CHANGES</button>
+      <button class="control-btn btn-save" style="background: var(--status-safe); color: #fff; border:none; box-shadow: 0 0 15px rgba(0, 230, 118, 0.3);" disabled><svg class="ic ic-sm"><use href="#i-save"/></svg> COMMIT TO DATABASE</button>
+      <span class="status-badge"></span>
+    </div>
+  </div>
+
+  <div class="grid-container">
+    <div class="grid-scroll">
+      <div class="table-wrapper">
+        <table class="update-grid">
+          <thead>
+            <tr><th>System Standby :: Awaiting Input</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    const rootId = '#view-update-notam';
+    
+    window.addEventListener('DOMContentLoaded', () => {
+      const container = document.querySelector(rootId);
+      if (!container) return; 
+      
+      const dom = {
+        pasteArea: container.querySelector('.paste-area'),
+        btnPreview: container.querySelector('.btn-preview'),
+        btnSave: container.querySelector('.btn-save'),
+        statusBadge: container.querySelector('.status-badge'),
+        tableHead: container.querySelector('.update-grid thead'),
+        tableBody: container.querySelector('.update-grid tbody'),
+        latestHistory: container.querySelector('#latest-history-container')
+      };
+
+      let pendingData2DArray = null;
+
+      function init() {
+        showStatus("Fetching Registry...", "loading");
+        google.script.run
+          .withSuccessHandler(function(data) {
+            hideStatus(); 
+            renderTable(data);
+            loadHistory();
+          })
+          .withFailureHandler(function(error) {
+            showStatus("Fetch Error: " + error.message, "error");
+          })
+          .getNotamData();
+          
+        dom.btnPreview.addEventListener('click', handlePreview);
+        dom.btnSave.addEventListener('click', handleSave);
+      }
+
+      function loadHistory() {
+        google.script.run
+          .withSuccessHandler(function(historyData) {
+            renderHistory(historyData);
+          })
+          .withFailureHandler(function(error) {
+            if (dom.latestHistory) {
+               dom.latestHistory.innerHTML = '<span style="color: var(--status-critical);">Failed to load history</span>';
+            }
+          })
+          .getNotamUpdateHistory();
+      }
+
+      function renderHistory(historyData) {
+        if (!dom.latestHistory) return;
+        if (!historyData || historyData.length === 0) {
+          dom.latestHistory.innerHTML = 'No update history found';
+          return;
+        }
+        
+        const latest = historyData[0];
+        let queryText = latest.queryStr || "N/A";
+        
+        const historyText = `${latest.timestamp} | ${latest.user} | ${latest.rowCount} NOTAM | ${queryText}`;
+        dom.latestHistory.innerHTML = `<span style="color: var(--accent-primary); font-weight: 700;">LAST UPDATE:</span><br/>${historyText}`;
+      }
+
+      function handlePreview() {
+        const rawText = dom.pasteArea.value;
+        if (!rawText.trim()) {
+          showStatus("Buffer empty", "error");
+          return;
+        }
+        
+        try {
+          const parsedData = parseDelimitedText(rawText);
+          if (parsedData.length === 0) throw new Error("Null data");
+          
+          pendingData2DArray = parsedData;
+          renderTable(parsedData);
+          dom.btnSave.disabled = false;
+          showStatus("Preview Ready", "success");
+        } catch (err) {
+          showStatus("Parse Error", "error");
+          dom.btnSave.disabled = true;
+        }
+      }
+
+      function parseDelimitedText(text) {
+        const cleanText = text.trim();
+        if (!cleanText) return [];
+        const delimiter = cleanText.indexOf('\t') !== -1 ? '\t' : ',';
+        const result = [];
+        let row = [];
+        let cell = '';
+        let insideQuote = false;
+        
+        for (let i = 0; i < cleanText.length; i++) {
+          const char = cleanText[i];
+          const nextChar = cleanText[i + 1];
+          if (char === '"') {
+            if (insideQuote && nextChar === '"') { cell += '"'; i++; } 
+            else { insideQuote = !insideQuote; }
+          } else if (char === delimiter && !insideQuote) {
+            row.push(cell); cell = '';
+          } else if ((char === '\r' || char === '\n') && !insideQuote) {
+            if (char === '\r' && nextChar === '\n') i++;
+            row.push(cell); result.push(row); row = []; cell = '';
+          } else { cell += char; }
+        }
+        if (cell !== '' || row.length > 0) { row.push(cell); result.push(row); }
+        return result;
+      }
+
+      function renderTable(data2D) {
+        dom.tableHead.innerHTML = "";
+        dom.tableBody.innerHTML = "";
+        if (!data2D || data2D.length === 0) {
+          dom.tableHead.innerHTML = "<tr><th>No active data</th></tr>";
+          return;
+        }
+
+        // FIXED: Always render standard headers regardless of input data
+        const standardHeaders = [
+          "Location",
+          "NOTAM #/LTA #",
+          "Class",
+          "Issue Date (UTC)",
+          "Effective Date (UTC)",
+          "Expiration Date (UTC)",
+          "NOTAM Condition/LTA subject/Construction graphic title"
+        ];
+        const headerRow = document.createElement('tr');
+        standardHeaders.forEach(headerText => {
+          const th = document.createElement('th');
+          th.textContent = headerText;
+          headerRow.appendChild(th);
+        });
+        dom.tableHead.appendChild(headerRow);
+
+        // Determine where data starts (skip potential header/query rows)
+        let startIndex = 0;
+        
+        // Skip first row if it looks like a query timestamp or system message
+        if (data2D[0] && data2D[0].join("").toLowerCase().includes("query") || 
+            data2D[0] && data2D[0].join("").toLowerCase().includes("system")) {
+          startIndex = 1;
+        }
+        
+        // Try to detect if there's a NOTAM header row at index 4
+        if (data2D.length > 4 && data2D[4].join("").toUpperCase().includes("NOTAM")) {
+          startIndex = 5; // Start from row after the NOTAM header
+        } else if (data2D.length > 2) {
+          // Check if any row contains typical NOTAM pattern
+          for (let i = 0; i < Math.min(5, data2D.length); i++) {
+            if (data2D[i] && data2D[i][1] && data2D[i][1].match(/[A-Z]\d{4}\/\d{2}/i)) {
+              // Found NOTAM number pattern, so this is data row
+              startIndex = i;
+              break;
+            }
+          }
+          // If no NOTAM pattern found in first 5 rows, use row 0 as data
+          if (startIndex === 0) {
+            // Check if row 0 looks like header by checking content type
+            if (data2D[0] && data2D[0][1] && typeof data2D[0][1] === 'string' && 
+                (data2D[0][1].toLowerCase().includes("notam") || 
+                 data2D[0][1].toLowerCase().includes("lta"))) {
+              startIndex = 1; // Skip header-like row 0
+            }
+          }
+        }
+
+        // Render data rows with proper styling
+        for (let i = startIndex; i < data2D.length; i++) {
+          const rowData = data2D[i];
+          // Skip completely empty rows
+          if (!rowData || rowData.every(cell => !cell || String(cell).trim() === "")) continue;
+          
+          const tr = document.createElement('tr');
+          // Ensure we have exactly 7 columns to match headers
+          for (let col = 0; col < 7; col++) {
+            const td = document.createElement('td');
+            const cellText = rowData[col] !== undefined ? rowData[col] : '';
+            td.textContent = cellText || ' ';
+            td.style.whiteSpace = "pre-wrap";
+            tr.appendChild(td);
+          }
+          dom.tableBody.appendChild(tr);
+        }
+      }
+
+      function handleSave() {
+        if (!pendingData2DArray) return;
+        dom.btnSave.disabled = true;
+        dom.btnPreview.disabled = true;
+        dom.pasteArea.disabled = true;
+        showStatus("Saving...", "loading");
+
+        let queryStr = "";
+        if (pendingData2DArray.length > 0 && pendingData2DArray[0]) {
+           const rawFirstRow = pendingData2DArray[0].join(" ");
+           const match = rawFirstRow.match(/(Query ran at UTC.*)/i);
+           queryStr = match ? match[1].trim() : rawFirstRow.trim();
+        }
+
+        google.script.run
+          .withSuccessHandler(function(response) {
+            dom.btnPreview.disabled = false;
+            dom.pasteArea.disabled = false;
+            if (response.status === 'success') {
+              showStatus("Saved Successfully", "success");
+              dom.btnSave.disabled = true; 
+              dom.pasteArea.value = ""; 
+              loadHistory(); // Reload history after save
+            } else {
+              showStatus("Error: " + response.message, "error");
+              dom.btnSave.disabled = false;
+            }
+          })
+          .withFailureHandler(function(error) {
+            dom.btnPreview.disabled = false;
+            dom.pasteArea.disabled = false;
+            dom.btnSave.disabled = false;
+            showStatus("Critical Server Error", "error");
+          })
+          .saveNotamData(pendingData2DArray, queryStr);
+      }
+
+      function showStatus(message, type) {
+        dom.statusBadge.textContent = message;
+        dom.statusBadge.style.display = 'inline-block';
+        dom.statusBadge.className = 'status-badge status-' + type;
+      }
+      function hideStatus() {
+        dom.statusBadge.style.display = 'none';
+      }
+
+      init();
+    });
+  })();
+</script>
+

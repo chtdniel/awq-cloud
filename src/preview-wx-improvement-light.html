@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<!-- PREVIEW ONLY — WX Improvement LIGHT MODE (tidak menyentuh produksi).
+     Token: Titanium Light dari Index.html. Pendamping dari preview-wx-improvement-v2.html (dark). -->
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview — WX Improvement (Light)</title>
+<style>
+  :root{
+    --ease-out:cubic-bezier(0.23,1,0.32,1);
+    --paper:#F1F3F6; --card:#FFFFFF; --sunken:#EEF1F5;
+    --ink:#0F172A; --second:#334155; --muted:#5B6B7F;
+    --border:#CBD5E1; --subtle:#E2E8F0;
+    --accent:#C8102E;
+    --danger:#C8102E; --danger-bg:#FEF0F2;
+    --warn:#8A5F0E; --warn-bg:#FFF7E6;
+    --ok:#0E7A4B; --ok-bg:#E6F4ED;
+  }
+  *{box-sizing:border-box}
+  html,body{overflow-x:clip}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;line-height:1.5}
+  .wrap{max-width:1120px;margin:0 auto;padding:24px 16px 64px}
+  .preview-note{font-size:12px;color:var(--second);background:#fff;border:1px dashed var(--accent);border-radius:10px;padding:10px 14px;margin-bottom:16px}
+  .preview-note b{color:var(--accent)}
+  h1{font-size:28px;font-weight:900;letter-spacing:-.02em;margin:8px 0 2px}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--muted);font-size:12px;letter-spacing:.06em;font-weight:700;margin-bottom:18px}
+  h2{font-size:13px;letter-spacing:.1em;font-weight:900;color:var(--accent);margin:28px 0 10px}
+  p.desc{color:var(--second);font-size:13px;max-width:78ch}
+  .kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px}
+  .kpi{background:var(--card);border:1px solid var(--subtle);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;box-shadow:0 1px 3px rgba(15,23,42,.06)}
+  .kpi .l{font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--muted)}
+  .kpi .v{font-size:26px;font-weight:900}
+  .kpi .s{font-size:11px;color:var(--muted)}
+  .kpi.crit{border-left:3px solid var(--danger)}.kpi.warn{border-left:3px solid var(--warn)}.kpi.safe{border-left:3px solid var(--ok)}
+  @media(max-width:860px){.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .card{
+    background:var(--card);border:1px solid var(--subtle);border-radius:14px;overflow:hidden;margin-bottom:14px;
+    box-shadow:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.07);
+    opacity:0;transform:translateY(8px);animation:rise 320ms var(--ease-out) forwards;
+    transition:border-color 160ms ease-out,box-shadow 160ms ease-out,transform 160ms ease-out;
+  }
+  .stagger-1{animation-delay:40ms}.stagger-2{animation-delay:80ms}.stagger-3{animation-delay:120ms}.stagger-4{animation-delay:160ms}
+  @keyframes rise{to{opacity:1;transform:translateY(0)}}
+  .card:hover{border-color:var(--accent);box-shadow:0 8px 30px rgba(15,23,42,.10)}
+  .card-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--subtle)}
+  .flight-no{font-size:26px;font-weight:900}
+  .route{font-family:ui-monospace,Consolas,monospace;font-size:13px;color:var(--second)}
+  .head-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .pill{font-size:11px;font-weight:800;letter-spacing:.06em;padding:3px 10px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+  .pill-danger{color:var(--danger);border-color:var(--danger);background:var(--danger-bg)}
+  .pill-ok{color:var(--ok);border-color:var(--ok);background:var(--ok-bg)}
+  .pill-warn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+  .pill-nodata{color:var(--muted);border-color:var(--border);background:var(--sunken);border-style:dashed}
+  .lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  .lane{padding:14px 18px;border-left:4px solid var(--subtle);min-width:0;background:var(--card)}
+  .lane+.lane{border-left:1px solid var(--subtle)}
+  .lane.st-danger{border-left:4px solid var(--danger);background:linear-gradient(0deg,var(--danger-bg),var(--danger-bg)) padding-box}
+  .lane.st-warning{border-left:4px solid var(--warn)}
+  .lane.st-ok{border-left:4px solid var(--ok)}
+  .lane.st-nodata{border-left:4px dashed var(--border);background:var(--sunken)}
+  .lane-label{font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--muted)}
+  .lane-time{font-family:ui-monospace,Consolas,monospace;font-size:22px;font-weight:700;margin:2px 0 6px}
+  .lane-trigger{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--second);overflow-wrap:anywhere;margin-top:6px}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+  .chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid var(--border);color:var(--second);white-space:nowrap;background:#fff}
+  .chip.c-danger{border-color:var(--danger);color:var(--danger);background:var(--danger-bg)}
+  .chip.c-warn{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
+  .card-actions{display:flex;gap:8px;align-items:center}
+  .btn{background:#0F172A;border:1px solid #0F172A;color:#fff;padding:8px 14px;border-radius:8px;font-weight:800;font-size:11px;letter-spacing:.06em;cursor:pointer;transition:transform 120ms ease-out,background 160ms ease-out}
+  .btn.ghost{background:#fff;color:var(--accent);border-color:var(--accent)}
+  .btn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn:active{transform:scale(.97)}
+  @media(hover:hover) and (pointer:fine){.btn:hover{transform:translateY(-1px)}}
+  .drawer{display:grid;grid-template-rows:0fr;transition:grid-template-rows 220ms var(--ease-out),opacity 200ms ease-out;opacity:.4}
+  .drawer.open{grid-template-rows:1fr;opacity:1}
+  .drawer-inner{overflow:hidden;min-height:0}
+  .taf{background:var(--sunken);border-top:1px solid var(--subtle);padding:0 18px}
+  .drawer.open .taf{padding:12px 18px}
+  .taf-head{font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;padding-top:12px}
+  .taf pre{font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.7;margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink);background:#fff;border:1px solid var(--subtle);border-left:2px solid var(--border);border-radius:8px;padding:10px}
+  .taf .chg{display:block;padding-left:16px;text-indent:-8px}
+  mark{padding:0 3px;border-radius:3px}
+  mark.bad{background:#FDE68A;color:#1A1206}
+  mark.good{background:#FEF3C7;color:#92400E;border:1px solid #F59E0B}
+  .ai{border-top:1px solid var(--subtle);padding:12px 18px 14px;background:#fff;border:1px solid var(--subtle);border-radius:10px;margin:10px 0 12px}
+  .ai-row{display:grid;grid-template-columns:118px minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:7px 0;border-top:1px dashed var(--border)}
+  .ai-row:first-of-type{border-top:0}
+  .ai-leg{font-size:11px;font-weight:800;letter-spacing:.06em}
+  .ai-reason{font-family:ui-monospace,Consolas,monospace;font-size:12px;overflow-wrap:anywhere;min-width:0}
+  .ai-chapter{font-size:10px;color:var(--muted);text-align:right}
+  .ai-action{color:var(--danger);font-weight:700}
+  .skel{background:var(--card);border:1px solid var(--subtle);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+  .bar{height:12px;border-radius:6px;background:linear-gradient(90deg,#EEF1F5 25%,#E2E8F0 50%,#EEF1F5 75%);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid var(--subtle);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--subtle);vertical-align:top}
+  th{font-size:10px;letter-spacing:.08em;color:var(--accent)}
+  td code{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#8A5F0E;background:var(--warn-bg);padding:1px 4px;border-radius:4px}
+  .tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px}
+  .tag.high{background:var(--danger-bg);color:var(--danger);border:1px solid var(--danger)}
+  .tag.med{background:var(--warn-bg);color:var(--warn);border:1px solid var(--warn)}
+  .tag.low{background:var(--ok-bg);color:var(--ok);border:1px solid var(--ok)}
+  .plan{background:#fff;border:1px solid var(--subtle);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--second)}
+  .plan b{color:var(--ink)}
+  details.acuan{margin-top:14px;background:#fff;border:1px solid var(--subtle);border-radius:12px;padding:10px 16px;font-size:12px}
+  details.acuan summary{cursor:pointer;font-weight:900;letter-spacing:.08em;font-size:11px}
+  @media(max-width:720px){.lanes{grid-template-columns:minmax(0,1fr)}.lane+.lane{border-top:1px solid var(--subtle)}.ai-row{grid-template-columns:minmax(0,1fr);gap:2px}.ai-chapter{text-align:left}}
+  @media(prefers-reduced-motion:reduce){.card,.bar{animation:none;opacity:1;transform:none}.drawer{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="preview-note"><b>PREVIEW LIGHT — IMPLEMENTED Fase 1–3 di Weather_Warning_Ui.html</b>. Token Titanium Light. Pendamping dark: <b>preview-wx-improvement-v2.html</b>. Klik <b>Details</b> untuk drawer halus.</div>
+  <h1>WEATHER <span>WARNING</span> — Light Preview</h1>
+  <div class="sub">ACTIVE FLIGHT WATCH (UTC OPERATIONS) • LAST UPDATE: 06:22:31 Z • TITANIUM LIGHT</div>
+  <h2>KPI</h2>
+  <div class="kpi-grid">
+    <div class="kpi"><span class="l">Flights Watched</span><span class="v">4</span><span class="s">active on board</span></div>
+    <div class="kpi crit"><span class="l">Restricted</span><span class="v">1</span><span class="s">visibility / severe</span></div>
+    <div class="kpi warn"><span class="l">Monitor</span><span class="v">1</span><span class="s">ts / reduced</span></div>
+    <div class="kpi safe"><span class="l">Operational</span><span class="v">1</span><span class="s">no impact</span></div>
+    <div class="kpi"><span class="l">No TAF</span><span class="v">1</span><span class="s">unverified — check source</span></div>
+  </div>
+  <h2>KARTU 548 — DANGER</h2>
+  <p class="desc">Light mode memakai highlight amber lembut dengan teks coklat tua agar kontras AA (≥4.5) di atas putih. Lane DANGER diberi wash merah sangat tipis agar tetap terbaca di siang hari.</p>
+  <div class="card stagger-1">
+    <div class="card-head">
+      <span class="flight-no">548</span><span class="route">WADD → YPPH · ALT YPKG</span>
+      <span class="head-right"><span class="pill pill-danger">1 RESTRICTED</span>
+        <span class="card-actions"><button class="btn ghost" onclick="document.getElementById('l548').classList.toggle('open')">Details</button><button class="btn">AI Review</button></span></span>
+    </div>
+    <div class="lanes">
+      <div class="lane st-ok"><div class="lane-label">DEPARTURE · WADD · 17:00</div><div class="lane-time">17:00</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">14011KT 9999 SCT016</div></div>
+      <div class="lane st-ok"><div class="lane-label">ARRIVAL · YPPH · 20:45</div><div class="lane-time">20:45</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">16010KT CAVOK</div></div>
+      <div class="lane st-danger"><div class="lane-label">ALT WINDOW · YPKG · 21:00–23:00</div><div class="lane-time">21:00–23:00</div><span class="pill pill-danger">RESTRICTED</span><div class="lane-trigger">TEMPO 0618/0623 200 <mark class="good">FG</mark> BKN001</div><div class="chips"><span class="chip c-danger">OM-A 8.3 — Low vis</span><span class="chip">OM-A 8.4 — Monitoring</span></div><div class="lane-trigger" style="margin-top:8px">Lama: <mark class="bad">FG</mark> · Baru: <mark class="good">FG</mark> (border amber, teks #92400E)</div></div>
+    </div>
+    <div class="drawer open" id="l548"><div class="drawer-inner"><div class="taf">
+      <div class="taf-head">TAF RAW · 22:26–22:27 Z</div>
+      <pre>TAF WADD 061100Z 0612/0718 14011KT 9999 SCT016</pre>
+      <pre>TAF AMD YPPH 061108Z 0612/0718 16010KT CAVOK
+<span class="chg">FM061800 16008KT 9999 FEW018</span><span class="chg">FM070100 13008KT CAVOK</span></pre>
+      <pre style="margin-bottom:0">TAF AMD YPKG 061115Z 0612/0712 14008KT CAVOK
+<span class="chg">FM062000 14008KT 9999 -RA SCT040</span><span class="chg">TEMPO 0618/0623 200 <mark class="good">FG</mark> BKN001</span></pre>
+      <div class="ai"><div class="taf-head" style="padding:0">AI REVIEW · GEMINI · gemini-3.5-flash-lite</div>
+        <div class="ai-row"><span class="ai-leg">DEP — CLEAR</span><span class="ai-reason">14011KT 9999 SCT016</span><span></span></div>
+        <div class="ai-row"><span class="ai-leg">ARR — CLEAR</span><span class="ai-reason">16010KT CAVOK</span><span></span></div>
+        <div class="ai-row"><span class="ai-leg">ALT — DANGER</span><span class="ai-reason">TEMPO 0618/0623 200 FG BKN001<br><span class="ai-action">→ RESTRICTED — pertimbangkan ALT kedua</span></span><span class="ai-chapter">OM-A 8.3</span></div>
+      </div>
+    </div></div></div>
+  </div>
+  <h2>KARTU LAIN</h2>
+  <div class="card stagger-2">
+    <div class="card-head"><span class="flight-no">549</span><span class="route">WADD → WIII · ALT WARR</span><span class="head-right"><span class="pill pill-warn">1 MONITOR</span><span class="card-actions"><button class="btn ghost" onclick="document.getElementById('l549').classList.toggle('open')">Details</button></span></span></div>
+    <div class="lanes">
+      <div class="lane st-ok"><div class="lane-label">DEPARTURE · WADD</div><div class="lane-time">08:00</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">12008KT 9999 FEW020</div></div>
+      <div class="lane st-warning"><div class="lane-label">ARRIVAL · WIII</div><div class="lane-time">09:35</div><span class="pill pill-warn">MONITOR</span><div class="lane-trigger">TEMPO 0003/0007 <mark class="good">TS</mark> <mark class="good">RA</mark> BKN014</div><div class="chips"><span class="chip c-warn">OM-A 8.4 — TS monitor</span></div></div>
+      <div class="lane st-ok"><div class="lane-label">ALT WINDOW · WARR</div><div class="lane-time">10:00–12:00</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">9999 SCT020</div></div>
+    </div>
+    <div class="drawer" id="l549"><div class="drawer-inner"><div class="taf"><div class="taf-head">TAF RAW</div><pre>TAF WIII 060500Z 0606/0712 TEMPO 0003/0007 <mark class="good">TS</mark> <mark class="good">RA</mark> BKN014</pre></div></div></div>
+  </div>
+  <div class="card stagger-3">
+    <div class="card-head"><span class="flight-no">550</span><span class="route">YPPH → WADD · ALT YPKU</span><span class="head-right"><span class="pill pill-ok">OPERATIONAL</span><span class="card-actions"><button class="btn ghost" onclick="document.getElementById('l550').classList.toggle('open')">Details</button></span></span></div>
+    <div class="lanes">
+      <div class="lane st-ok"><div class="lane-label">DEPARTURE · YPPH</div><div class="lane-time">12:00</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">CAVOK</div></div>
+      <div class="lane st-ok"><div class="lane-label">ARRIVAL · WADD</div><div class="lane-time">15:20</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">9999 SCT016</div></div>
+      <div class="lane st-ok"><div class="lane-label">ALT WINDOW · YPKU</div><div class="lane-time">16:00–18:00</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">CAVOK</div></div>
+    </div>
+    <div class="drawer" id="l550"><div class="drawer-inner"><div class="taf"><div class="taf-head">TAF RAW</div><pre>TAF YPPH 060500Z 0606/0712 CAVOK</pre></div></div></div>
+  </div>
+  <div class="card stagger-4">
+    <div class="card-head"><span class="flight-no">551</span><span class="route">WADD → YMML · ALT YPED</span><span class="head-right"><span class="pill pill-nodata">NO TAF — CHECK SOURCE</span></span></div>
+    <div class="lanes">
+      <div class="lane st-ok"><div class="lane-label">DEPARTURE · WADD</div><div class="lane-time">18:00</div><span class="pill pill-ok">OPERATIONAL</span><div class="lane-trigger">9999 FEW018</div></div>
+      <div class="lane st-nodata"><div class="lane-label">ARRIVAL · YMML</div><div class="lane-time">23:10</div><span class="pill pill-nodata">NO TAF DATA</span><div class="lane-trigger">Fail-closed — jangan fabricate verdict</div></div>
+      <div class="lane st-nodata"><div class="lane-label">ALT WINDOW · YPED</div><div class="lane-time">00:00–02:00</div><span class="pill pill-nodata">NO TAF DATA</span><div class="lane-trigger">—</div></div>
+    </div>
+  </div>
+  <h2>SKELETON (LIGHT)</h2>
+  <div class="skel"><div class="bar" style="width:38%;margin-bottom:10px"></div><div class="bar" style="width:92%;margin-bottom:8px"></div><div class="bar" style="width:78%"></div></div>
+  <h2>CATATAN LIGHT vs DARK</h2>
+  <table>
+    <tr><th>Aspek</th><th>Light (file ini)</th><th>Dark (v2)</th></tr>
+    <tr><td><span class="tag med">WARNA</span></td><td>Paper #F1F3F6, kartu putih, aksen crimson #C8102E, teks slate #0F172A</td><td>Plate #0B1B33, aksen cyan #38E1FF, teks #EAF1FB</td></tr>
+    <tr><td><span class="tag med">MARK</span></td><td><code>#FEF3C7 + #92400E + border #F59E0B</code> — kontras AA di putih</td><td><code>rgba amber .25 + #FFD480</code> — tidak silau di night-ops</td></tr>
+    <tr><td><span class="tag low">LANE</span></td><td>DANGER wash <code>#FEF0F2</code> tipis agar tidak terlalu pekat di siang hari</td><td>DANGER border solid #FF5D5D + glow</td></tr>
+  </table>
+  <div class="plan" style="margin-top:12px"><b>Belum dieksekusi ke produksi.</b> Bandingkan file ini dengan <b>preview-wx-improvement-v2.html</b> lalu pilih tema yang dilanjut ke Fase 1–3, atau minta gabung (ikuti <i>prefers-color-scheme / data-theme</i> shell).</div>
+  <details class="acuan"><summary>ACUAN CUACA (STATIS) · CONTOH LIGHT</summary>
+    <ul><li>[OM-A 8.3] Vis &lt; 3000m / FG / SQ / FC / +RA → RESTRICTED → pertimbangkan alternate kedua</li>
+    <li>[OM-A 8.4] TS / RA / DZ / SH / HZ / BR / VCTS → MONITOR → brief crew</li></ul>
+  </details>
+</div>
+</body>
+</html>

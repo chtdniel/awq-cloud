@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<!-- PREVIEW ONLY — live harness for Taf_Ui.html P0+P1+P2 review.
+     Head = shell tokens + GAS stubs + fixture registry. Middle = BYTE COPY of
+     Taf_Ui.html. Open via http://127.0.0.1:8901/preview-taf-p0p1p2.html in a browser.
+     Delete after approval. Production file untouched. -->
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview — TAF P0+P1+P2 (live harness)</title>
+<style>
+  :root{
+    --bg-void:#F1F3F6;
+    --bg-panel:#FFFFFF; --bg-panel-raised:#FFFFFF; --bg-panel-sunken:#EEF1F5; --bg-panel-alt:#F7F8FA;
+    --border-light:#CBD5E1; --border-subtle:#E2E8F0; --border-medium:#94A3B8;
+    --radius-sm:4px; --radius-md:6px; --radius-lg:10px; --radius-pill:9999px;
+    --accent-primary:#C8102E;
+    --status-safe:#0E7A4B; --status-safe-bg:#E6F4ED;
+    --status-warning:#8A5F0E; --status-warning-bg:#FEF3C7;
+    --status-critical:#C8102E; --status-critical-bg:#FEF0F2;
+    --text-primary:#0F172A; --text-secondary:#334155; --text-muted:#5B6B7F; --text-disabled:#94A3B8;
+    --shadow-soft:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.07);
+    --shadow-lift:0 8px 30px rgba(15,23,42,.10),0 20px 60px rgba(15,23,42,.12);
+    --font-display:'Arial Narrow',sans-serif; --font-ui:system-ui,-apple-system,sans-serif; --font-mono:Consolas,monospace;
+  }
+  html,body{margin:0;background:var(--bg-void);color:var(--text-primary);font-family:var(--font-ui);}
+  .pv-wrap{max-width:1100px;margin:0 auto;padding:24px 16px 64px;}
+  .pv-bar{background:#fff;border:1px dashed #C8102E;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;line-height:2;}
+  .pv-bar button{margin:2px 6px 2px 0;padding:10px 14px;min-height:36px;cursor:pointer;font-weight:800;font-size:12px;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px;}
+  .kpi-card{background:#fff;border:1px solid var(--border-light);border-radius:6px;padding:8px 12px;display:flex;flex-direction:column;}
+  .kpi-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);}
+  .kpi-val{font-family:var(--font-mono);font-weight:700;font-size:22px;line-height:1;}
+  .kpi-sub{font-size:11px;color:var(--text-muted);}
+  .header-title{font-family:var(--font-display);font-size:22px;font-weight:800;margin:0;letter-spacing:.01em;}
+  .header-sub{font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.06em;margin:4px 0 0;}
+  .control-btn{font:inherit;font-size:10px;font-weight:800;letter-spacing:.06em;cursor:pointer;border-radius:999px;border:1px solid var(--border-light);background:#fff;padding:7px 12px;min-height:36px;display:inline-flex;align-items:center;gap:6px;}
+  .btn-solid-primary{background:var(--accent-primary);color:#fff;border-color:var(--accent-primary);}
+  .control-btn:disabled{opacity:.55;cursor:wait;}
+  .control-btn:focus-visible{outline:3px solid var(--accent-primary);outline-offset:2px;}
+  .ic{width:1em;height:1em;vertical-align:-.12em;}
+  .ic-sm{width:.9em;height:.9em;}
+</style>
+</head>
+<body><div class="pv-wrap">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="14" y2="14"/></g></symbol>
+<symbol id="i-sync" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 8a5.5 5.5 0 0 1-9.4 3.9M2.5 8a5.5 5.5 0 0 1 9.4-3.9"/><polyline points="12.5,1.5 12.5,5.5 8.5,5.5"/><polyline points="3.5,14.5 3.5,10.5 7.5,10.5"/></g></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.8"><line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/></g></symbol>
+<symbol id="i-bolt" viewBox="0 0 16 16"><polygon points="9,1 3,9 7,9 6,15 13,6 9,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></symbol>
+<symbol id="i-save" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><polyline points="5,2.5 5,6 11,6 11,2.5"/><rect x="5.5" y="9" width="5" height="4.5"/></g></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.8"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></g></symbol>
+</defs></svg>
+<div class="pv-bar"><strong>PREVIEW HARNESS</strong> — live Taf_Ui.html + stub GAS.<br>
+Mode: <button type="button" onclick="window.__tafMode='ok';window.initTafManager()">Reload OK</button><button type="button" onclick="window.__tafMode='fail-load';window.initTafManager()">Simulate load failure</button><button type="button" onclick="window.__tafMode='fail-save';window.initTafManager()">Simulate save failure</button><button type="button" onclick="window.__tafMode='fail-fetch';window.initTafManager()">Simulate fetch failure</button><br>
+Cek: search ICAO · SYNC WITH BOARD (tambah + hapus inline-confirm) · ADD STATION · FETCH LATEST (SYNCING) · SAVE ALL · toast sukses/gagal · confirm bar · legenda freshness · hapus station.</div>
+<script>
+window.__tafMode = 'ok';
+window.escapeHtml = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+window.activeBoardRowIds = [1, 2];
+window.allDbFlights = [
+  {rowIdx:1, DEP:'WADD', ARR:'WSSS', ALT:'WAJJ', ENR1:'WIII', ENR2:'', ENR3:''},
+  {rowIdx:2, DEP:'WIII', ARR:'WADD', ALT:'WARR', ENR1:'', ENR2:'', ENR3:''}
+];
+function __tafTsAgo(h){
+  var d = new Date(Date.now() - h * 3600 * 1000);
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+window.__tafFixtures = [
+  {STATION:'WADD', RAW_TAF:'TAF WADD 090600Z 0906/1012 9999 SCT018 BECMG 0910/0912 5000 BR', TIMESTAMP:__tafTsAgo(1)},
+  {STATION:'WIII', RAW_TAF:'TAF WIII 090000Z 0900/1006 8000 TSRA SCT014CB', TIMESTAMP:__tafTsAgo(8)},
+  {STATION:'WSSS', RAW_TAF:'TAF WSSS 080000Z 0800/0906 9999 FEW020', TIMESTAMP:__tafTsAgo(30)},
+  {STATION:'WARR', RAW_TAF:'', TIMESTAMP:''},
+  {STATION:'WAJJ', RAW_TAF:'', TIMESTAMP:'', IS_UNAVAILABLE:true}
+];
+function __tafRespond(method, call, arg){
+  var mode = window.__tafMode;
+  function ok(v){ if(call._ok) call._ok(v); }
+  function fail(){ if(call._fail) call._fail(); }
+  if(method === 'getTafData'){ if(mode === 'fail-load'){ fail(); return; } ok(JSON.parse(JSON.stringify(window.__tafFixtures))); return; }
+  if(method === 'saveTafData'){ if(mode === 'fail-save'){ fail(); return; } if(arg) window.__tafFixtures = JSON.parse(JSON.stringify(arg)); ok({ok:true}); return; }
+  if(method === 'fetchLatestTafFromApi'){
+    if(mode === 'fail-fetch'){ fail(); return; }
+    var map = {};
+    (arg || []).forEach(function(icao){
+      map[String(icao).toUpperCase()] = 'TAF ' + String(icao).toUpperCase() + ' 091200Z 0912/1018 9999 SCT020 (preview fetch)';
+    });
+    ok(map); return;
+  }
+  ok(null);
+}
+function __tafChild(){
+  var c = {};
+  var px = new Proxy(c, { get: function(t, p){ if(p in t) return t[p]; return function(a){ var self = px; var arg = a; setTimeout(function(){ __tafRespond(p, self, arg); }, 350); return self; }; } });
+  c.withSuccessHandler = function(h){ c._ok = h; return px; };
+  c.withFailureHandler = function(h){ c._fail = h; return px; };
+  return px;
+}
+function __tafMakeRunner(){
+  var root = {};
+  root.withSuccessHandler = function(h){ return __tafChild().withSuccessHandler(h); };
+  root.withFailureHandler = function(h){ return __tafChild().withFailureHandler(h); };
+  return new Proxy(root, { get: function(t, p){ if(p in t) return t[p]; return function(a){ var c = __tafChild(); var arg = a; setTimeout(function(){ __tafRespond(p, c, arg); }, 350); return c; }; } });
+}
+window.google = { script: { run: __tafMakeRunner() } };
+</script>
+
+<div id="view-taf" class="view-section">
+  <div class="header-container" style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 32px; flex-wrap: wrap; gap: 20px;">
+    <div>
+      <h2 class="header-title">TAF MANAGER</h2>
+      <p class="header-sub">Manage Terminal Aerodrome Forecasts for Station Registry</p>
+    </div>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+      <div style="position: relative; margin-right: 8px;">
+        <svg class="ic" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted);"><use href="#i-search"/></svg>
+        <input type="text" id="taf-search-input" onkeyup="window.renderTafTable()" placeholder="Search ICAO..." aria-label="Search TAF by ICAO"
+          style="background: var(--bg-panel-sunken); border: 1px solid var(--border-light); color: var(--text-primary); padding: 8px 12px 8px 32px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 12px; width: 140px; transition: all 0.2s;">
+      </div>
+      <button onclick="window.syncWithBoard()" class="control-btn" style="background: var(--bg-void); color: var(--status-warning); border-color: var(--status-warning);"><svg class="ic ic-sm"><use href="#i-sync"/></svg> SYNC WITH BOARD</button>
+      <button onclick="window.addNewTafRow()" class="control-btn" style="border-style: dashed;"><svg class="ic ic-sm"><use href="#i-plus"/></svg> ADD STATION</button>
+      <button onclick="window.fetchLatestTafs(event)" class="control-btn btn-solid-primary"><svg class="ic ic-sm"><use href="#i-bolt"/></svg> FETCH LATEST</button>
+      <button onclick="window.saveTafToSpreadsheet(event)" class="control-btn btn-solid-primary"><svg class="ic ic-sm"><use href="#i-save"/></svg> SAVE ALL</button>
+    </div>
+  </div>
+
+  <div id="taf-confirmbar" class="taf-confirmbar" role="alertdialog" aria-label="TAF confirmation" hidden>
+    <span id="taf-confirm-msg" class="taf-confirm-msg"></span>
+    <span class="taf-confirm-actions">
+      <button id="taf-confirm-no" class="control-btn" type="button">CANCEL</button>
+      <button id="taf-confirm-yes" class="control-btn btn-solid-primary" type="button">YES</button>
+    </span>
+  </div>
+  <div id="taf-toastbox" class="taf-toastbox" aria-live="polite"></div>
+
+  <p class="taf-legend" aria-label="Legenda freshness TAF">
+    <span class="lg-dot lg-fresh" aria-hidden="true"></span>FRESH &lt;6 h
+    <span class="lg-dot lg-stale" aria-hidden="true"></span>STALE 6–24 h
+    <span class="lg-dot lg-old" aria-hidden="true"></span>EXPIRED &gt;24 h / FUTURE
+    <span class="lg-dot lg-new" aria-hidden="true"></span>NEW no sync yet
+    <span aria-hidden="true">·</span>order: DEP→ARR→ALT→ENR→MANUAL
+  </p>
+
+  <div class="kpi-grid">
+    <div class="kpi-card accent"><span class="kpi-label">Registered Stations</span><span class="kpi-val" id="taf-kpi-stations">0</span><span class="kpi-sub">aerodrome registry</span></div>
+    <div class="kpi-card warn"><span class="kpi-label">On Active Board</span><span class="kpi-val" id="taf-kpi-active">0</span><span class="kpi-sub">stations in current ops</span></div>
+    <div class="kpi-card safe"><span class="kpi-label">Data Freshness</span><span class="kpi-val" style="font-size:16px; padding-top:6px;">TRACKING</span><span class="kpi-sub">auto age-check</span></div>
+  </div>
+
+  <div id="taf-grid" class="taf-grid">
+     <!-- Cards will be injected here -->
+  </div>
+</div>
+
+<style>
+  /* fonts loaded via Index.html preconnect */
+  .taf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+    min-width: 0;
+    gap: 24px;
+    align-items: stretch;
+  }
+
+  .taf-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-soft);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .taf-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 28px rgba(200, 16, 46, 0.14);
+    border-color: var(--accent-primary);
+  }
+
+  .taf-card-header {
+    padding: 14px 20px;
+    background: var(--bg-panel-alt);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+  }
+  .taf-card-header::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--accent-primary);
+  }
+  .taf-grip { width: 14px; height: 20px; flex: none; cursor: grab; border-radius: var(--radius-sm); }
+  .taf-grip::before { content: ''; display: block; width: 100%; height: 100%;
+    background-image: radial-gradient(circle, var(--text-muted) 1.2px, transparent 1.4px);
+    background-size: 5px 7px; background-position: center; }
+  .taf-grip:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+  .taf-card.is-dragging { opacity: .45; }
+  .taf-card.drop-swap { outline: 2px dashed var(--accent-primary); outline-offset: 2px; }
+  .taf-card { cursor: grab; }
+  .taf-card input, .taf-card textarea { cursor: text; }
+  .taf-card button { cursor: pointer; }
+
+  .taf-card-body {
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .taf-card-footer {
+    padding: 12px 20px;
+    background: var(--bg-panel-sunken);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+
+  .taf-input {
+    background: var(--bg-void);
+    border: 1px solid var(--border-light);
+    color: var(--accent-primary);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    width: 112px;
+    font-family: var(--font-mono);
+    font-weight: 900;
+    font-size: 17px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .taf-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(200, 16, 46, 0.16);
+  }
+  .taf-input:focus-visible, .taf-textarea:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+
+  .taf-textarea {
+    background: var(--bg-panel-sunken);
+    border: 1px solid var(--border-light);
+    color: var(--text-primary);
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    width: 100%;
+    box-sizing: border-box;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    min-height: 120px;
+    resize: vertical;
+    flex: 1;
+    margin-top: 8px;
+  }
+
+  .freshness-badge {
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    border: 1px solid transparent;
+  }
+
+  .fresh-safe { background: var(--status-safe-bg); color: var(--status-safe); border-color: var(--status-safe); }
+  .fresh-warn { background: var(--status-warning-bg); color: var(--status-warning); border-color: var(--status-warning); }
+  .fresh-old { background: var(--status-critical-bg); color: var(--status-critical); border-color: var(--status-critical); }
+  .fresh-new { background: var(--bg-void); color: var(--text-muted); border-color: var(--border-light); }
+
+  .taf-btn-delete {
+    background: none;
+    border: none;
+    color: var(--text-disabled);
+    cursor: pointer;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    transition: 0.2s;
+    opacity: 0.5;
+  }
+  .taf-btn-delete:hover {
+    color: var(--status-critical);
+    opacity: 1;
+  }
+  .taf-btn-delete:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+  .taf-confirmbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    background: var(--bg-panel); border: 1px solid var(--status-warning); border-radius: var(--radius-md);
+    padding: 10px 14px; margin-bottom: 14px; font-size: 12px; font-weight: 700; color: var(--text-primary); }
+  .taf-confirmbar[hidden] { display: none; }
+  .taf-confirm-actions { display: flex; gap: 8px; }
+  .taf-confirm-actions .control-btn { min-height: 36px; }
+  .taf-toastbox { position: fixed; right: 16px; bottom: 16px; z-index: 2000; display: flex;
+    flex-direction: column; gap: 8px; max-width: min(360px, 90vw); }
+  .taf-toast { background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-lift); padding: 10px 14px; font-size: 12px;
+    font-weight: 700; font-family: var(--font-mono); transition: opacity 0.3s ease; }
+  .taf-toast.tt-ok { border-color: var(--status-safe); }
+  .taf-toast.tt-error { border-color: var(--status-critical); color: var(--status-critical); }
+  .taf-toast.tt-out { opacity: 0; }
+  .taf-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 14px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--text-muted); }
+  .taf-legend .lg-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; flex: none; }
+  .taf-legend .lg-fresh { background: var(--status-safe); }
+  .taf-legend .lg-stale { background: var(--status-warning); }
+  .taf-legend .lg-old { background: var(--status-critical); }
+  .taf-legend .lg-new { background: var(--border-light); border: 1px solid var(--border-medium); }
+  .taf-role { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--text-muted);
+    border: 1px solid var(--border-medium); border-radius: var(--radius-sm); padding: 2px 6px; white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { .taf-toast { transition: none; } }
+  @media (max-width: 480px) {
+    #view-taf .header-container > div:last-child { width: 100%; align-items: stretch; }
+    #view-taf .header-container > div:last-child > * { flex: 1 1 100%; min-width: 0; }
+    #view-taf #taf-search-input { width: 100%; }
+    #view-taf .taf-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  }
+</style>
+
+  <script>
+    let localTafData = [];
+
+    window.tafToast = function(msg, kind) {
+      const box = document.getElementById('taf-toastbox');
+      if (!box) return;
+      const t = document.createElement('div');
+      t.className = 'taf-toast ' + (kind === 'error' ? 'tt-error' : kind === 'ok' ? 'tt-ok' : 'tt-info');
+      t.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+      t.textContent = msg;
+      box.appendChild(t);
+      while (box.children.length > 3) box.firstChild.remove();
+      setTimeout(function() {
+        t.classList.add('tt-out');
+        setTimeout(function() { t.remove(); }, 320);
+      }, 4200);
+    };
+
+    window.tafConfirm = function(msg, okLabel) {
+      return new Promise(function(resolve) {
+        const bar = document.getElementById('taf-confirmbar');
+        const m = document.getElementById('taf-confirm-msg');
+        const yes = document.getElementById('taf-confirm-yes');
+        const no = document.getElementById('taf-confirm-no');
+        if (!bar || !yes || !no) { resolve(window.confirm(msg)); return; }
+        m.textContent = msg;
+        yes.textContent = okLabel || 'YES';
+        bar.hidden = false;
+        no.focus();
+        const onKey = function(e) { if (e.key === 'Escape') done(false); };
+        function done(v) {
+          bar.hidden = true;
+          yes.onclick = null; no.onclick = null;
+          document.removeEventListener('keydown', onKey);
+          resolve(v);
+        }
+        document.addEventListener('keydown', onKey);
+        yes.onclick = function() { done(true); };
+        no.onclick = function() { done(false); };
+      });
+    };
+
+    window.tafBoardError = function(msg) {
+      const grid = document.getElementById('taf-grid');
+      if (!grid) return;
+      const e = window.escapeHtml || function(s) { return String(s == null ? '' : s); };
+      grid.innerHTML = '<div role="alert" style="grid-column: 1/-1; padding: 48px; text-align: center; color: var(--status-critical); font-family: var(--font-mono); border: 2px dashed var(--status-critical); border-radius: var(--radius-lg);">' + e(msg) + '<br><button type="button" class="control-btn btn-solid-primary" style="margin-top: 12px;" onclick="window.initTafManager()">RETRY LOAD</button></div>';
+    };
+
+    window.saveTafDataGuarded = function(data, opts) {
+      opts = opts || {};
+      // Skip empty-STATION rows for the backend payload - empty rows stay editable locally.
+      const payload = (data || []).filter(d => ((d && d.STATION) || '').trim() !== '');
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        if (!opts.silent) window.tafToast('BRIDGE UNAVAILABLE — changes are kept local only.', 'error');
+        if (opts.onErr) opts.onErr();
+        return;
+      }
+      let settled = false;
+      const to = setTimeout(function() {
+        if (settled) return; settled = true;
+        window.tafToast('SAVE TIMEOUT (15s) — click SAVE ALL to retry.', 'error');
+        if (opts.onErr) opts.onErr();
+      }, 15000);
+      try {
+        google.script.run
+          .withSuccessHandler(function() {
+            if (settled) return; settled = true; clearTimeout(to);
+            if (!opts.silent) window.tafToast('TAF registry saved.', 'ok');
+            if (opts.onOk) opts.onOk();
+          })
+          .withFailureHandler(function() {
+            if (settled) return; settled = true; clearTimeout(to);
+            window.tafToast('SAVE FAILED — click SAVE ALL to retry.', 'error');
+            if (opts.onErr) opts.onErr();
+          })
+          .saveTafData(payload);
+      } catch (e) {
+        if (settled) return; settled = true; clearTimeout(to);
+        window.tafToast('SAVE FAILED — click SAVE ALL to retry.', 'error');
+        if (opts.onErr) opts.onErr();
+      }
+    };
+
+    window.initTafManager = function() {
+      console.log('[TAF] Initializing Manager...');
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        window.tafBoardError('BRIDGE UNAVAILABLE — open via Index shell or click RETRY.');
+        return;
+      }
+      let settled = false;
+      const to = setTimeout(function() {
+        if (settled) return; settled = true;
+        window.tafBoardError('LOAD TIMEOUT (20s, getTafData did not respond) — click RETRY.');
+      }, 20000);
+      google.script.run
+        .withSuccessHandler(data => {
+          if (settled) return; settled = true; clearTimeout(to);
+          localTafData = data;
+          // Auto-sync missing airports from board on load
+          Promise.resolve(window.syncWithBoard(true)).catch(err => console.error('[TAF] sync error:', err));
+          window.renderTafTable();
+        })
+        .withFailureHandler(err => {
+          if (settled) return; settled = true; clearTimeout(to);
+          console.error('[TAF] Failed to load TAF data:', err);
+          window.tafBoardError('LOAD FAILED (getTafData request failed) — click RETRY.');
+        })
+        .getTafData();
+    }
+
+    window.tafBoardOrder = function() {
+      const activeIds = window.activeBoardRowIds || [];
+      const dbFlights = window.allDbFlights || [];
+      const rankOf = {}, seenAt = {}, roles = {};
+      function add(icao, role, rank) {
+        if (!icao) return;
+        const k = String(icao).trim().toUpperCase(); if (!k) return;
+        if (!roles[k]) roles[k] = [];
+        if (roles[k].indexOf(role) === -1) roles[k].push(role);
+        if (!(k in rankOf)) { rankOf[k] = rank; seenAt[k] = Object.keys(seenAt).length; }
+        else if (rank < rankOf[k]) rankOf[k] = rank;
+      }
+      dbFlights.filter(f => activeIds.includes(f.rowIdx)).forEach(function(f) {
+        add(f.DEP, 'DEP', 0); add(f.ARR, 'ARR', 1); add(f.ALT, 'ALT', 2);
+        add(f.ENR1, 'ENR', 3); add(f.ENR2, 'ENR', 3); add(f.ENR3, 'ENR', 3);
+      });
+      const ranked = Object.keys(rankOf).map(function(k) { return { icao: k, rank: rankOf[k] }; })
+        .sort(function(a, b) { return (a.rank - b.rank) || (seenAt[a.icao] - seenAt[b.icao]); });
+      return { ranked: ranked, rankOf: rankOf, roles: roles };
+    };
+
+    /**
+     * Gathers all unique ICAOs from the active board (DEP, ARR, ALT, ENR1-3)
+     * and ensures they exist in the localTafData list.
+     */
+    window.syncWithBoard = async function(silent = false) {
+      const order = window.tafBoardOrder();
+      window.tafRoles = order.roles;
+      const activeIcaos = new Set(order.ranked.map(function(e) { return e.icao; }));
+      const beforeSig = localTafData.map(function(d) { return ((d.STATION || '').trim()).toUpperCase(); }).join('|');
+
+      let addedCount = 0;
+      order.ranked.forEach(function(e) {
+        const exists = localTafData.some(d => ((d.STATION || '').trim().toUpperCase()) === e.icao);
+        if (!exists) {
+          localTafData.push({ STATION: e.icao, RAW_TAF: '', TIMESTAMP: '' });
+          addedCount++;
+        }
+      });
+
+      // Dedupe: keep first occurrence (case-insensitive), drop the rest
+      const seenDup = new Set();
+      let dupRemoved = 0;
+      localTafData = localTafData.filter(function(d) {
+        const k = ((d.STATION || '').trim()).toUpperCase();
+        if (k && seenDup.has(k)) { dupRemoved++; return false; }
+        if (k) seenDup.add(k);
+        return true;
+      });
+
+      // Default order: DEP -> ARR -> ALT -> ENR (board order); MANUAL/stale keep relative order at end
+      const boardPos = {};
+      order.ranked.forEach(function(e, i) { if (!(e.icao in boardPos)) boardPos[e.icao] = i; });
+      const onBoard = [], manual = [];
+      localTafData.forEach(function(d) {
+        const k = ((d.STATION || '').trim()).toUpperCase();
+        if (k && (k in boardPos)) onBoard.push(d); else manual.push(d);
+      });
+      onBoard.sort(function(a, b) {
+        const ka = ((a.STATION || '').trim()).toUpperCase(), kb = ((b.STATION || '').trim()).toUpperCase();
+        return (order.rankOf[ka] - order.rankOf[kb]) || (boardPos[ka] - boardPos[kb]);
+      });
+      localTafData = onBoard.concat(manual);
+      const afterSig = localTafData.map(function(d) { return ((d.STATION || '').trim()).toUpperCase(); }).join('|');
+      const orderChanged = afterSig !== beforeSig;
+
+      // Identify stations in registry that are no longer on the board
+      const staleStations = localTafData.filter(d => d.STATION && !activeIcaos.has(d.STATION.trim().toUpperCase()));
+
+      if (!silent) {
+        const dupMsg = dupRemoved > 0 ? ` ${dupRemoved} duplicate(s) removed.` : '';
+        if (staleStations.length > 0) {
+          let msg = '';
+          if (addedCount > 0) msg += `Added ${addedCount} missing station(s) from the Active Board. `;
+          const ok = await window.tafConfirm(msg + `Remove ${staleStations.length} station(s) missing from the Flight Board from the TAF list?`, 'REMOVE');
+          if (ok) {
+            // UPDATE the local array FIRST
+            localTafData = localTafData.filter(d => d.STATION && activeIcaos.has(d.STATION.trim().toUpperCase()));
+            // Save changes to backend immediately (guarded)
+            window.saveTafDataGuarded(localTafData, { silent: true });
+            window.tafToast(`Sync complete: +${addedCount} station, -${staleStations.length} station.${dupMsg} Order: DEP→ARR→ALT→ENR→MANUAL.`, 'ok');
+          } else {
+            window.saveTafDataGuarded(localTafData, { silent: true });
+          }
+        } else if (addedCount === 0 && dupRemoved === 0 && !orderChanged) {
+          window.tafToast('Registry is already in sync with the Flight Board.', 'info');
+        } else {
+          // If only added, save it as well (guarded)
+          window.saveTafDataGuarded(localTafData, { silent: true });
+          window.tafToast(`Sync complete: +${addedCount} station dari Active Board.${dupMsg} Order: DEP→ARR→ALT→ENR→MANUAL.`, 'ok');
+        }
+
+        // Render ONLY AFTER the array is updated
+        window.renderTafTable();
+      } else {
+        // For silent auto-sync on load, we don't ask for permission to delete, we just render
+        if (addedCount > 0 || dupRemoved > 0 || orderChanged) {
+          window.saveTafDataGuarded(localTafData, { silent: true });
+        }
+        window.renderTafTable();
+      }
+    };
+
+    window.renderTafTable = function() {
+      const grid = document.getElementById('taf-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+      const esc = window.escapeHtml || function(s) { return String(s == null ? '' : s); };
+
+      // Board order + roles from single source (ranked DEP->ARR->ALT->ENR)
+      const order = window.tafBoardOrder();
+      window.tafRoles = order.roles;
+      const activeIcaos = new Set(order.ranked.map(function(e) { return e.icao; }));
+
+      // Get search query
+      const searchInput = document.getElementById('taf-search-input');
+      const query = searchInput ? searchInput.value.toUpperCase() : '';
+
+      if (localTafData.length === 0) {
+        grid.innerHTML = `<div style="grid-column: 1/-1; padding: 60px; text-align: center; color: var(--text-muted); font-family: var(--font-mono); border: 2px dashed var(--border-light); border-radius: var(--radius-lg);">[ NO AERODROME REGISTRY FOUND ]</div>`;
+        return;
+      }
+
+      let displayedCount = 0;
+
+      localTafData.forEach((item, index) => {
+        const stationIcao = ((item.STATION || '').trim()).toUpperCase();
+        
+        // Apply search filter
+        if (query && !stationIcao.includes(query)) {
+          return; // Skip rendering this card
+        }
+        
+        displayedCount++;
+        const isActive = activeIcaos.has(stationIcao);
+        const card = document.createElement('div');
+        card.className = 'taf-card';
+        card.setAttribute('draggable', 'true');
+        if (isActive) card.style.borderColor = 'var(--status-warning)';
+        
+        // Freshness uses UTC interpretation of stored timestamps
+        let freshnessClass = 'fresh-new';
+        let freshnessText = 'NEW ENTRY';
+        if (item.TIMESTAMP) {
+          try {
+            var rawTs = String(item.TIMESTAMP).trim();
+            var tsISO = rawTs.replace(' ', 'T').replace(/\//g, '-');
+            if (tsISO && tsISO.slice(-1) !== 'Z' && tsISO.indexOf('+') === -1 && /T\d{2}:\d{2}/.test(tsISO)) tsISO += 'Z';
+            var updateTime = new Date(tsISO);
+            var now = new Date();
+            if (!isNaN(updateTime.getTime())) {
+              var diffHours = (now - updateTime) / (1000 * 60 * 60);
+              if (diffHours < 0) { freshnessClass = 'fresh-old'; freshnessText = 'FUTURE'; }
+              else if (diffHours < 6) { freshnessClass = 'fresh-safe'; freshnessText = 'FRESH'; }
+              else if (diffHours < 24) { freshnessClass = 'fresh-warn'; freshnessText = 'STALE'; }
+              else { freshnessClass = 'fresh-old'; freshnessText = 'EXPIRED'; }
+            }
+          } catch(e) { console.warn("Date parse error:", e); }
+        }
+
+        card.innerHTML = 
+          '<div class="taf-card-header">' +
+            '<div style="display:flex; align-items:center; gap:8px;">' +
+              '<span class="taf-grip" data-grip tabindex="0" role="button" title="Drag to reorder" aria-label="Move station ' + esc(item.STATION || 'empty') + '"></span>' +
+              '<input type="text" class="taf-input" value="' + esc(item.STATION) + '" ' +
+                'onchange="window.updateLocalTaf(' + index + ', \'STATION\', this.value, this)" ' +
+                'placeholder="ICAO" title="Station ICAO" aria-label="TAF station ICAO">' +
+              (function() {
+                const rls = (window.tafRoles && window.tafRoles[stationIcao]) || [];
+                const prim = ['DEP', 'ARR', 'ALT', 'ENR'].find(function(r) { return rls.indexOf(r) !== -1; });
+                if (prim) return '<span class="taf-role" title="' + esc(rls.join('/')) + '">' + prim + '</span>';
+                if (stationIcao) return '<span class="taf-role manual" title="Added manually">MANUAL</span>';
+                return '';
+              })() +
+              (isActive ? '<span style="color:var(--status-warning); font-size:10px; font-weight:900;">[ACTIVE]</span>' : '') +
+              (item.IS_UNAVAILABLE ? '<span style="color:var(--status-critical); background:var(--status-critical-bg); padding: 2px 6px; border-radius: 4px; font-size:10px; font-weight:900; margin-left: 6px;">[ N/A ]</span>' : '') +
+            '</div>' +
+            '<button onclick="window.removeTafRow(' + index + ')" class="taf-btn-delete" title="Remove Station" aria-label="Remove TAF station"><svg class="ic"><use href="#i-x"/></svg></button>' +
+          '</div>' +
+          '<div class="taf-card-body">' +
+            '<span style="font-size: 9px; font-weight: 800; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase;">Raw Forecast</span>' +
+            '<textarea class="taf-textarea" spellcheck="false" aria-label="Raw TAF forecast" ' +
+              'onchange="window.updateLocalTaf(' + index + ', \'RAW_TAF\', this.value)">' + esc(item.RAW_TAF) + '</textarea>' +
+          '</div>' +
+          '<div class="taf-card-footer">' +
+            '<div style="display: flex; flex-direction: column; gap: 2px;">' +
+              '<span>LATEST SYNC (Z)</span>' +
+              '<span style="color:var(--text-primary); font-weight:700;">' + esc(item.TIMESTAMP) + '</span>' +
+            '</div>' +
+            '<span class="freshness-badge ' + freshnessClass + '">' + freshnessText + '</span>' +
+          '</div>';
+
+        grid.appendChild(card);
+      });
+
+      if (displayedCount === 0 && query) {
+        grid.innerHTML = `<div style="grid-column: 1/-1; padding: 60px; text-align: center; color: var(--text-muted); font-family: var(--font-mono); border: 2px dashed var(--border-light); border-radius: var(--radius-lg);">[ NO STATIONS MATCHING '${esc(query)}' ]</div>`;
+      }
+
+      const kpiStations = document.getElementById('taf-kpi-stations');
+      if (kpiStations) kpiStations.innerText = localTafData.length;
+      const kpiActive = document.getElementById('taf-kpi-active');
+      if (kpiActive) kpiActive.innerText = activeIcaos.size;
+    };
+
+  window.occFormatUtcTimestamp_ = function(d) {
+    var dd = d instanceof Date ? d : new Date();
+    return dd.toISOString().slice(0, 19).replace('T', ' ') + 'Z';
+  };
+  window.updateLocalTaf = function(index, field, value, el) {
+    if (!localTafData[index]) return;
+    if (field === 'STATION') {
+      const newVal = value.trim().toUpperCase();
+      const isDuplicate = localTafData.some((item, i) => i !== index && (item.STATION || "").toUpperCase() === newVal);
+      if (isDuplicate && newVal !== "") {
+        window.tafToast(`Station ${newVal} is already in the list!`, 'error');
+        if (el) el.value = localTafData[index].STATION;
+        return;
+      }
+      localTafData[index].STATION = newVal;
+      window.renderTafTable();
+    } 
+    else if (field === 'RAW_TAF') {
+      localTafData[index].RAW_TAF = value;
+      localTafData[index].IS_UNAVAILABLE = false;
+      localTafData[index].TIMESTAMP = window.occFormatUtcTimestamp_(new Date());
+      window.renderTafTable(); 
+    }
+  }
+
+  window.addNewTafRow = function() {
+    localTafData.unshift({
+      STATION: '',
+      RAW_TAF: '',
+      TIMESTAMP: ''
+    });
+    window.renderTafTable();
+  }
+
+    window.removeTafRow = async function(index) {
+      const st = (localTafData[index] && localTafData[index].STATION) || '';
+      const ok = await window.tafConfirm(`Remove station ${st || '(empty)'} from the TAF registry?`, 'REMOVE');
+      if (ok) {
+        localTafData.splice(index, 1);
+        window.renderTafTable();
+      }
+    }
+
+  window.fetchLatestTafs = function(event) {
+    const icaoList = localTafData.map(d => d.STATION).filter(s => s.length >= 3);
+    if (icaoList.length === 0) {
+      window.tafToast('Please add station ICAO codes first.', 'info');
+      return;
+    }
+
+    const fetchBtn = event?.currentTarget || event?.srcElement || document.activeElement;
+    const originalText = fetchBtn ? fetchBtn.innerText : 'FETCH LATEST';
+    if (fetchBtn) {
+      fetchBtn.innerText = 'SYNCING...';
+      fetchBtn.disabled = true;
+    }
+
+    google.script.run
+      .withSuccessHandler(tafMap => {
+        if (fetchBtn) {
+          fetchBtn.innerText = originalText;
+          fetchBtn.disabled = false;
+        }
+        
+        let updateCount = 0;
+        localTafData.forEach(item => {
+          const key = item.STATION.toUpperCase();
+          if (tafMap[key]) {
+            item.RAW_TAF = tafMap[key];
+            item.IS_UNAVAILABLE = false;
+            item.TIMESTAMP = window.occFormatUtcTimestamp_(new Date());
+            updateCount++;
+          } else if (key.length >= 3) {
+            item.IS_UNAVAILABLE = true;
+          }
+        });
+        
+        window.renderTafTable();
+      })
+      .withFailureHandler(err => {
+        if (fetchBtn) {
+          fetchBtn.innerText = originalText;
+          fetchBtn.disabled = false;
+        }
+        window.tafToast('TAF fetch failed — API might be unreachable.', 'error');
+      })
+      .fetchLatestTafFromApi(icaoList);
+  }
+
+  window.saveTafToSpreadsheet = function(event) {
+    const saveBtn = event?.currentTarget || event?.srcElement || document.activeElement;
+    const originalText = saveBtn ? saveBtn.innerText : 'SAVE ALL';
+    if (saveBtn) {
+      saveBtn.innerText = 'SAVING...';
+      saveBtn.disabled = true;
+    }
+
+    window.saveTafDataGuarded(localTafData, {
+      silent: true,
+      onOk: function() {
+        if (saveBtn) {
+          saveBtn.innerText = originalText;
+          saveBtn.disabled = false;
+        }
+        window.initTafManager();
+      },
+      onErr: function() {
+        if (saveBtn) {
+          saveBtn.innerText = originalText;
+          saveBtn.disabled = false;
+        }
+      }
+    });
+  }
+
+  window.tafPersistOrder = function() {
+    const grid = document.getElementById('taf-grid');
+    if (!grid || !grid.querySelectorAll) return;
+    const order = [];
+    const cards = grid.querySelectorAll('#taf-grid > .taf-card');
+    for (let i = 0; i < cards.length; i++) {
+      const inp = cards[i].querySelector ? cards[i].querySelector('.taf-input') : null;
+      order.push(inp ? inp.value : '');
+    }
+    const pool = localTafData.slice();
+    const next = [];
+    order.forEach(function(st) {
+      const key = (st || '').toUpperCase();
+      for (let i = 0; i < pool.length; i++) {
+        if (((pool[i].STATION || '').toUpperCase()) === key) { next.push(pool.splice(i, 1)[0]); break; }
+      }
+    });
+    localTafData.length = 0;
+    next.concat(pool).forEach(function(d) { localTafData.push(d); });
+    window.saveTafDataGuarded(localTafData, { silent: true,
+      onOk: function() { window.tafToast('Station order saved.', 'ok'); window.renderTafTable(); },
+      onErr: function() { window.renderTafTable(); }
+    });
+  };
+
+  window.tafMoveStation = function(station, dir) {
+    const key = (station || '').toUpperCase();
+    const i = localTafData.findIndex(function(d) { return ((d.STATION || '').toUpperCase()) === key; });
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= localTafData.length) return false;
+    const tmp = localTafData[i]; localTafData[i] = localTafData[j]; localTafData[j] = tmp;
+    window.saveTafDataGuarded(localTafData, { silent: true,
+      onOk: function() { window.tafToast('Station order saved.', 'ok'); window.renderTafTable(); focusGrip(key); },
+      onErr: function() { window.renderTafTable(); }
+    });
+    return true;
+    function focusGrip(k) {
+      try {
+        const grid = document.getElementById('taf-grid');
+        if (!grid || !grid.querySelectorAll) return;
+        const inputs = grid.querySelectorAll('.taf-card .taf-input');
+        for (let n = 0; n < inputs.length; n++) {
+          if (((inputs[n].value || '').toUpperCase()) === k) {
+            const card = inputs[n].closest ? inputs[n].closest('.taf-card') : null;
+            const grip = card && card.querySelector ? card.querySelector('[data-grip]') : null;
+            if (grip && grip.focus) grip.focus();
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+  };
+
+  (function tafReorderInit() {
+    if (window.__tafReorder) return; window.__tafReorder = true;
+    let dragCard = null;
+    function inGrid(el) {
+      if (!el || !el.closest) return null;
+      const card = el.closest('.taf-card');
+      if (!card) return null;
+      const grid = document.getElementById('taf-grid');
+      if (!grid || !grid.contains(card)) return null;
+      return card;
+    }
+    document.addEventListener('dragstart', function(e) {
+      const card = inGrid(e.target);
+      if (!card) return;
+      const fromInteractive = pressEl && pressEl.closest ? pressEl.closest('input,textarea,select,button,a') : null;
+      const pressInCard = pressEl && card.contains ? card.contains(pressEl) : true;
+      if (fromInteractive || !pressInCard) { if (e.preventDefault) e.preventDefault(); return; }
+      dragCard = card;
+      try { e.dataTransfer.setData('text/plain', 'taf-card'); e.dataTransfer.effectAllowed = 'move'; } catch (_) {}
+      setTimeout(function() { card.classList.add('is-dragging'); }, 0);
+    });
+    document.addEventListener('dragend', function() {
+      try {
+        if (dragCard) dragCard.classList.remove('is-dragging');
+        const grid = document.getElementById('taf-grid');
+        if (grid) grid.querySelectorAll('.drop-swap').forEach(function(x) { x.classList.remove('drop-swap'); });
+      } catch (_) {}
+      dragCard = null;
+    });
+    function targetUnder(grid, x, y) {
+      const cards = grid.querySelectorAll('#taf-grid > .taf-card');
+      for (let i = 0; i < cards.length; i++) {
+        if (cards[i] === dragCard) continue;
+        const r = cards[i].getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return cards[i];
+      }
+      return null;
+    }
+    document.addEventListener('dragover', function(e) {
+      const grid = document.getElementById('taf-grid');
+      if (!grid || !dragCard || !grid.contains(dragCard)) return;
+      if (!e.target.closest || !e.target.closest('#taf-grid')) return;
+      if (e.preventDefault) e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      grid.querySelectorAll('.drop-swap').forEach(function(x) { x.classList.remove('drop-swap'); });
+      const target = targetUnder(grid, e.clientX, e.clientY);
+      if (target) target.classList.add('drop-swap');
+    });
+    document.addEventListener('drop', function(e) {
+      const grid = document.getElementById('taf-grid');
+      if (!grid || !dragCard || !grid.contains(dragCard)) return;
+      if (!e.target.closest || !e.target.closest('#taf-grid')) return;
+      if (e.preventDefault) e.preventDefault();
+      const target = targetUnder(grid, e.clientX, e.clientY);
+      if (!target) { try { dragCard.classList.remove('is-dragging'); } catch (_) {} dragCard = null; return; }
+      const marker = document.createTextNode('');
+      grid.insertBefore(marker, dragCard);
+      grid.insertBefore(dragCard, target);
+      grid.insertBefore(target, marker);
+      if (marker.remove) marker.remove(); else marker.parentNode.removeChild(marker);
+      try { dragCard.classList.remove('is-dragging'); } catch (_) {}
+      dragCard = null;
+      window.tafPersistOrder();
+    });
+    let pressEl = null;
+    document.addEventListener('mousedown', function(e) {
+      pressEl = (e.target && e.target.closest) ? e.target : null;
+    });
+    document.addEventListener('mouseup', function() {
+      pressEl = null;
+    });
+    document.addEventListener('keydown', function(e) {
+      const t = e.target; if (!t || !t.closest) return;
+      const g = t.closest('[data-grip]'); if (!g) return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      if (e.preventDefault) e.preventDefault();
+      const card = g.closest('.taf-card'); if (!card) return;
+      const inp = card.querySelector ? card.querySelector('.taf-input') : null;
+      window.tafMoveStation(inp ? inp.value : '', e.key === 'ArrowUp' ? -1 : 1);
+    });
+  })();
+</script>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){ if(window.initTafManager) window.initTafManager(); });
+</script>
+</div></body></html>

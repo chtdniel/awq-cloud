@@ -1,0 +1,706 @@
+<style>
+  #view-settings .eyebrow{display:inline-flex;align-items:center;gap:8px;padding:5px 10px;border-radius:999px;background:var(--bg-panel);border:1px solid var(--border-light);font:700 9px var(--font-ui);letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted)}
+  #view-settings .eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent-primary)}
+  #view-settings .bezel{padding:6px;background:rgba(15,23,42,.04);border:1px solid rgba(15,23,42,.06);border-radius:var(--radius-outer);box-shadow:inset 0 1px 0 rgba(255,255,255,.6)}
+  [data-theme="dark"] #view-settings .bezel{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.06)}
+  #view-settings .bezel-inner{background:var(--bg-panel);border-radius:var(--radius-inner);border:1px solid var(--border-subtle);box-shadow:inset 0 1px 0 rgba(255,255,255,.7), var(--shadow-soft);overflow:hidden}
+  [data-theme="dark"] #view-settings .bezel-inner{box-shadow:inset 0 1px 0 rgba(255,255,255,.06), var(--shadow-soft)}
+  #view-settings .kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  @media(max-width:760px){#view-settings .kpi-grid{grid-template-columns:1fr}}
+  #view-settings .kpi-card{background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-md);padding:10px 12px;border-left:3px solid var(--border-medium);display:grid;gap:2px}
+  #view-settings .kpi-card.safe{border-left-color:var(--status-safe)} #view-settings .kpi-card.crit{border-left-color:var(--status-critical)} #view-settings .kpi-card.info{border-left-color:var(--status-info)}
+  #view-settings .kpi-label{font:700 9px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+  #view-settings .kpi-val{font:700 13px var(--font-mono);color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #view-settings .kpi-sub{font:500 10px var(--font-mono);color:var(--text-muted)}
+  #view-settings .badge{font:800 10px var(--font-mono);padding:4px 8px;border-radius:999px;letter-spacing:.04em;text-transform:uppercase}
+  #view-settings .badge-safe{background:var(--status-safe-bg);color:var(--status-safe);border:1px solid var(--status-safe)}
+  #view-settings .badge-crit{background:var(--status-critical-bg);color:var(--status-critical);border:1px solid var(--status-critical)}
+  #view-settings .badge-warn{background:var(--status-warning-bg);color:var(--status-warning);border:1px solid var(--status-warning)}
+  #view-settings .settings-panel{background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-md);box-shadow:var(--shadow-soft)}
+  #view-settings .settings-head{padding:12px 14px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  #view-settings .settings-title{font-size:10px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:var(--text-secondary)}
+  #view-settings .settings-chips{display:flex;flex-wrap:wrap;gap:8px}
+  #view-settings .settings-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--border-light);border-radius:999px;background:var(--bg-panel-alt);font:600 12px var(--font-mono);color:var(--text-secondary)}
+  #view-settings .settings-chip b{color:var(--text-primary)}
+  #view-settings .settings-hint{font:500 10px var(--font-mono);color:var(--text-muted)}
+  #view-settings .settings-note{padding:10px 14px;font-size:11px;color:var(--text-secondary);line-height:1.6;background:var(--bg-panel-sunken);border:1px dashed var(--border-light);border-radius:var(--radius-md)}
+  #view-settings .in{width:100%;background:var(--bg-panel-alt);color:var(--text-primary);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:9px 10px;font-family:var(--font-mono);font-size:12px}
+  #view-settings .in:focus{outline:none;border-color:var(--accent-primary)}
+  #view-settings textarea.in{resize:vertical;min-height:96px}
+  #view-settings .btn{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:9px 14px;border:1px solid var(--border-light);background:var(--bg-panel-raised);color:var(--text-secondary);border-radius:var(--radius-sm);cursor:pointer}
+  #view-settings .btn:hover{border-color:var(--accent-primary);color:var(--accent-primary)}
+  #view-settings .btn.primary{background:var(--accent-primary);color:#fff;border-color:var(--accent-primary)}
+  #view-settings .btn:disabled{opacity:.45;cursor:not-allowed}
+  #view-settings .btn:focus-visible{outline:3px solid var(--accent-primary);outline-offset:2px}
+  #view-settings .sys-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+  #view-settings .sys-item{background:var(--bg-panel-alt);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:9px 10px;display:grid;gap:3px;min-width:0}
+  #view-settings .sys-key{font:700 9px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+  #view-settings .sys-val{font:600 12px var(--font-mono);color:var(--text-primary);word-break:break-all}
+  #view-settings .badge-depr{background:var(--bg-panel-alt);color:var(--text-muted);border:1px dashed var(--border-medium)}
+  #view-settings .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:var(--z-modal);padding:16px}
+  #view-settings .modal-backdrop.open{display:flex}
+  #view-settings .modal{background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-md);box-shadow:var(--shadow-lift);max-width:420px;width:100%;padding:18px;display:grid;gap:12px}
+  #view-settings .modal-title{font:700 14px var(--font-ui);color:var(--text-primary)}
+  #view-settings .modal-body{font:500 12px var(--font-mono);color:var(--text-secondary);line-height:1.6}
+  #view-settings .modal-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+  #view-settings .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--bg-panel-raised);border:1px solid var(--border-light);color:var(--text-primary);font:600 12px var(--font-mono);padding:9px 16px;border-radius:999px;box-shadow:var(--shadow-lift);opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;z-index:var(--z-tooltip)}
+  #view-settings .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+  <span class="eyebrow">Security — Access Control (ADMIN ONLY)</span>
+  <span class="settings-hint">Script Property • ANYONE_ANONYMOUS + allowlist</span>
+</div>
+
+<div class="bezel" style="margin-bottom:14px">
+  <div class="bezel-inner" style="padding:16px;display:grid;gap:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div>
+        <div style="font:700 18px var(--font-display);letter-spacing:.02em">OCC Access — Allowed Emails</div>
+        <div class="settings-hint" style="margin-top:4px">Property: <code style="font-family:var(--font-mono)">OCC_ALLOWED_EMAILS</code> — empty = open, set = only listed emails can write (<code>requireAuthorized()</code>)</div>
+      </div>
+      <span id="settings-mode-badge" class="badge badge-warn">Loading…</span>
+    </div>
+    <div class="kpi-grid" id="settings-kpis">
+      <div class="kpi-card info"><span class="kpi-label">Current user</span><span class="kpi-val" id="settings-kpi-user">—</span><span class="kpi-sub">Session.getActiveUser().getEmail()</span></div>
+      <div class="kpi-card info"><span class="kpi-label">Mode</span><span class="kpi-val" id="settings-kpi-mode">—</span><span class="kpi-sub" id="settings-kpi-mode-sub">—</span></div>
+      <div class="kpi-card info"><span class="kpi-label">Your access</span><span class="kpi-val" id="settings-kpi-auth">—</span><span class="kpi-sub" id="settings-kpi-auth-sub">—</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="settings-panel" style="margin-bottom:14px">
+  <div class="settings-head">
+    <span class="settings-title">Current Allowlist</span>
+    <span class="settings-hint" id="settings-count">—</span>
+  </div>
+  <div style="padding:14px;display:grid;gap:10px">
+    <div id="settings-chips" class="settings-chips"></div>
+    <div id="settings-empty" class="settings-note" style="display:none"><b>Open mode</b> — <code>OCC_ALLOWED_EMAILS</code> is empty. Anyone (including anonymous) can write. Add emails to lock.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button class="btn" onclick="settingsCopyRaw()" aria-label="Copy raw allowlist">⎘ Copy Raw</button>
+      <span class="settings-hint">Raw: <code id="settings-raw" style="font-family:var(--font-mono)"></code></span>
+      <button class="btn" onclick="settingsRefresh()" style="margin-left:auto" aria-label="Refresh allowlist">⟳ Refresh</button>
+    </div>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-edit-panel">
+  <div class="settings-head">
+    <span class="settings-title">Edit Allowlist</span>
+    <span id="settings-auth-badge" class="badge badge-safe">—</span>
+  </div>
+  <div style="padding:14px;display:grid;gap:10px">
+    <label style="display:grid;gap:6px" for="settings-edit">
+      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Allowed emails — one per line or comma</span>
+      <textarea id="settings-edit" class="in" placeholder="ops@airasia.com&#10;supervisor@airasia.com&#10;chtdniel@gmail.com"></textarea>
+      <span class="settings-hint">Leave empty and Save to switch back to OPEN. Duplicates and spaces are normalized, invalid emails are rejected.</span>
+      <span id="settings-own-warn" class="settings-hint" style="color:var(--status-critical);display:none">⚠ You are removing your own email (<span id="settings-own-email"></span>) — you will lose write access after save.</span>
+    </label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button id="settings-save" class="btn primary" onclick="settingsSave()" aria-label="Save OCC allowlist">💾 Save</button>
+      <button class="btn" onclick="settingsCancel()" aria-label="Revert OCC allowlist edits">↩ Cancel</button>
+      <span id="settings-edit-status" class="settings-hint" style="align-self:center" role="status" aria-live="polite"></span>
+    </div>
+    <div id="settings-locked-note" class="settings-note" style="display:none;border-color:var(--status-critical);background:var(--status-critical-bg);color:var(--status-critical)"><b>Not authorized</b> — your email is not in the allowlist. Save is blocked. Ask a listed admin to update, or edit via GAS editor → Project Settings → Script properties manually.</div>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-admin-panel" style="margin-bottom:14px">
+  <div class="settings-head">
+    <span class="settings-title">Settings Admins</span>
+    <span id="settings-admin-badge" class="badge badge-warn">—</span>
+  </div>
+  <div style="padding:14px;display:grid;gap:10px">
+    <div class="settings-note">Controls who can <b>view this page</b> and manage <code>SETTINGS_ADMIN_EMAILS</code>. Separate from the OCC write allowlist above. Empty = page locked for everyone.</div>
+    <div id="settings-admin-chips" class="settings-chips"></div>
+    <label style="display:grid;gap:6px" for="settings-admin-edit">
+      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Admin emails — one per line or comma</span>
+      <textarea id="settings-admin-edit" class="in" placeholder="admin@airasia.com&#10;supervisor@airasia.com"></textarea>
+      <span class="settings-hint">Leave empty and Save to lock the page. Duplicates and spaces are normalized, invalid emails are rejected.</span>
+      <span id="settings-admin-own-warn" class="settings-hint" style="color:var(--status-critical);display:none">⚠ You are removing your own email (<span id="settings-admin-own-email"></span>) — you will lose settings access after save.</span>
+    </label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button id="settings-admin-save" class="btn primary" onclick="settingsAdminSave()" aria-label="Save admin list">💾 Save Admins</button>
+      <button class="btn" onclick="settingsAdminCancel()" aria-label="Revert admin list edits">↩ Cancel</button>
+      <span id="settings-admin-status" class="settings-hint" style="align-self:center" role="status" aria-live="polite"></span>
+      <button class="btn" onclick="settingsAdminRefresh()" style="margin-left:auto" aria-label="Refresh admin list">⟳ Refresh</button>
+    </div>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-wxai-panel" style="margin-bottom:14px">
+  <div class="settings-head">
+    <span class="settings-title">WX AI Models</span>
+    <span id="settings-wxai-badge" class="badge badge-warn">—</span>
+  </div>
+  <div style="padding:14px;display:grid;gap:10px">
+    <div class="settings-note">Katalog model AI halaman WX + master kill-switch. Tersimpan di Script Properties <code>WX_AI_CATALOG</code> / <code>WX_AI_ENABLED</code>. API key tidak pernah disimpan di sini.</div>
+    <label style="display:flex;align-items:center;gap:8px;font:700 12px var(--font-mono);color:var(--text-primary)" for="settings-wxai-enabled">
+      <input type="checkbox" id="settings-wxai-enabled" style="width:16px;height:16px"> AI Enabled (master kill-switch)
+    </label>
+    <div id="settings-wxai-rows" style="display:grid;gap:8px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn" onclick="wxAiAddRow()" aria-label="Add WX AI model">+ Add model</button>
+      <button type="button" class="btn" onclick="wxAiReset()" aria-label="Load default WX AI catalog into editor">Reset to default</button>
+      <span id="settings-wxai-status" class="settings-hint" style="align-self:center" role="status" aria-live="polite"></span>
+      <button type="button" class="btn" onclick="wxAiRefresh()" style="margin-left:auto" aria-label="Refresh WX AI catalog">⟳ Refresh</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" id="settings-wxai-save" class="btn primary" onclick="wxAiSave()" aria-label="Save WX AI catalog">💾 Save</button>
+      <button type="button" class="btn" onclick="wxAiCancel()" aria-label="Revert WX AI catalog edits">↩ Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="settings-panel" id="settings-system-panel" style="margin-bottom:14px">
+  <div class="settings-head">
+    <span class="settings-title">System — Read Only</span>
+    <span class="settings-hint" id="settings-system-status" role="status" aria-live="polite">—</span>
+  </div>
+  <div style="padding:14px;display:grid;gap:10px">
+    <div class="sys-grid">
+      <div class="sys-item"><span class="sys-key">Spreadsheet</span><span class="sys-val" id="settings-sys-sheet">—</span></div>
+      <div class="sys-item"><span class="sys-key">Spreadsheet ID</span><span class="sys-val" id="settings-sys-sheetid">—</span></div>
+      <div class="sys-item"><span class="sys-key">Timezone</span><span class="sys-val" id="settings-sys-tz">—</span></div>
+      <div class="sys-item"><span class="sys-key">OCC_FIR_LINK <span class="badge badge-depr" style="margin-left:4px">deprecated</span></span><span class="sys-val" id="settings-sys-firlink">—</span></div>
+    </div>
+    <div class="settings-note">FIR uses the integrated internal view — <code>OCC_FIR_LINK</code> is not used by navigation. Change spreadsheet/timezone via Script Properties in the GAS editor.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="settingsSystemRefresh()" aria-label="Refresh system info">⟳ Refresh</button>
+      <button id="settings-firlink-clear" class="btn" onclick="settingsFirLinkClear()" style="display:none" aria-label="Clear legacy FIR link">Clear legacy link</button>
+    </div>
+  </div>
+</div>
+
+<div id="settings-modal-backdrop" class="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal-title" id="settings-modal-title">Confirm</div>
+    <div class="modal-body" id="settings-modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn" id="settings-modal-cancel" aria-label="Cancel action">Cancel</button>
+      <button class="btn primary" id="settings-modal-ok" aria-label="Confirm action">Confirm</button>
+    </div>
+  </div>
+</div>
+<div id="settings-toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  var state = null;
+  function esc(s){ return String(s||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  var refreshInFlight = false;
+  window.settingsRefresh = function(force){
+    if (refreshInFlight && !force) return; // ponytail: observer fires per class change — skip overlap
+    refreshInFlight = true;
+    var btn = document.getElementById('settings-edit-status');
+    if(btn) btn.textContent = 'Loading…';
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      // Mock for local preview
+      setTimeout(function(){
+        var mock = {ok:true, raw:'chtdniel@gmail.com, ops@airasia.com', allowed:['chtdniel@gmail.com','ops@airasia.com'], currentUser:'chtdniel@gmail.com', isAuthorized:true, isOpen:false};
+        apply(mock); if(btn) btn.textContent='Loaded (mock)';
+        refreshInFlight = false;
+      }, 400);
+      return;
+    }
+    google.script.run.withSuccessHandler(function(res){
+      refreshInFlight = false;
+      if (typeof res === 'string') { try { res = JSON.parse(res); } catch (e) { /* fall through to error below */ } }
+      if(!res || !res.ok){ if(btn) btn.textContent = res && res.error ? res.error : 'Failed to load'; return; }
+      try { apply(res); } catch (e) { if(btn) btn.textContent = 'Render error: ' + (e && e.message || e); return; }
+      if(btn) btn.textContent = '';
+    }).withFailureHandler(function(err){
+      refreshInFlight = false;
+      if(btn) btn.textContent = (err && err.message) ? err.message : String(err);
+    }).getOccSettings();
+  };
+
+  function apply(res){
+    state = res;
+    var badge = document.getElementById('settings-mode-badge');
+    badge.textContent = res.isOpen ? 'OPEN — NO RESTRICTION' : 'RESTRICTED — ' + res.allowed.length + ' EMAILS';
+    badge.className = 'badge ' + (res.isOpen ? 'badge-warn' : res.isAuthorized ? 'badge-safe' : 'badge-crit');
+    document.getElementById('settings-kpi-user').textContent = res.currentUser || '(anonymous / no login)';
+    document.getElementById('settings-kpi-user').title = res.currentUser || '';
+    document.getElementById('settings-kpi-mode').textContent = res.isOpen ? 'OPEN' : 'RESTRICTED';
+    document.getElementById('settings-kpi-mode-sub').textContent = res.isOpen ? 'allowlist empty' : 'allowlist enforced';
+    var authEl = document.getElementById('settings-kpi-auth');
+    authEl.textContent = res.isAuthorized ? 'AUTHORIZED' : 'NOT AUTHORIZED';
+    authEl.parentElement.className = 'kpi-card ' + (res.isAuthorized ? 'safe' : 'crit');
+    document.getElementById('settings-kpi-auth-sub').textContent = res.isAuthorized ? 'can save' : 'view only';
+
+    var chips = document.getElementById('settings-chips');
+    var empty = document.getElementById('settings-empty');
+    var count = document.getElementById('settings-count');
+    if(res.allowed.length===0){
+      chips.innerHTML=''; empty.style.display=''; count.textContent='0 emails — open';
+    } else {
+      empty.style.display='none';
+      chips.innerHTML = res.allowed.map(function(e){ return '<span class="settings-chip"><b>'+esc(e)+'</b></span>'; }).join('');
+      count.textContent = res.allowed.length + ' emails';
+    }
+    document.getElementById('settings-raw').textContent = res.raw || '(empty)';
+    document.getElementById('settings-edit').value = res.allowed.join('\n');
+    document.getElementById('settings-own-email').textContent = res.currentUser || '';
+    var isAuth = !!res.isAuthorized;
+    var authBadge = document.getElementById('settings-auth-badge');
+    authBadge.textContent = isAuth ? 'YOU: AUTHORIZED' : 'YOU: NOT AUTHORIZED';
+    authBadge.className = 'badge ' + (isAuth ? 'badge-safe' : 'badge-crit');
+    document.getElementById('settings-save').disabled = !isAuth;
+    document.getElementById('settings-edit').disabled = !isAuth;
+    document.getElementById('settings-locked-note').style.display = isAuth ? 'none' : '';
+    checkOwn();
+  }
+
+  window.settingsCopyRaw = function(){
+    var raw = state ? state.raw : '';
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(raw).then(function(){
+        var el=document.getElementById('settings-raw'); var old=el.textContent;
+        el.textContent='copied!'; setTimeout(function(){ el.textContent = raw || '(empty)'; },900);
+      });
+    }
+  };
+
+  function checkOwn(){
+    if(!state) return;
+    var txt = document.getElementById('settings-edit').value;
+    var list = txt.split(/[\n,]+/).map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
+    var own = String(state.currentUser||'').toLowerCase();
+    var warn = list.length>0 && own && list.indexOf(own)===-1;
+    document.getElementById('settings-own-warn').style.display = warn ? '' : 'none';
+  }
+  document.getElementById('settings-edit').addEventListener('input', checkOwn);
+
+  var toastTimer = null;
+  window.settingsToast = function(msg){
+    var t = document.getElementById('settings-toast');
+    if(!t) return;
+    t.textContent = msg;
+    t.classList.add('show');
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2000);
+  };
+
+  // Inline confirm modal (replaces blocking confirm()).
+  var modalOkCb = null;
+  function settingsModal(title, body, okLabel, cb){
+    document.getElementById('settings-modal-title').textContent = title;
+    document.getElementById('settings-modal-body').textContent = body;
+    document.getElementById('settings-modal-ok').textContent = okLabel || 'Confirm';
+    modalOkCb = cb;
+    document.getElementById('settings-modal-backdrop').classList.add('open');
+    document.getElementById('settings-modal-ok').focus();
+  }
+  function settingsModalClose(){
+    document.getElementById('settings-modal-backdrop').classList.remove('open');
+    modalOkCb = null;
+  }
+  document.getElementById('settings-modal-cancel').addEventListener('click', function(){
+    settingsModalClose();
+    var status = document.getElementById('settings-edit-status');
+    if(status) status.textContent = 'Cancelled';
+  });
+  document.getElementById('settings-modal-ok').addEventListener('click', function(){
+    var cb = modalOkCb;
+    settingsModalClose();
+    if(cb) cb();
+  });
+  document.getElementById('settings-modal-backdrop').addEventListener('click', function(e){
+    if(e.target === this) settingsModalClose();
+  });
+
+  window.settingsSave = function(){
+    var status = document.getElementById('settings-edit-status');
+    var txt = document.getElementById('settings-edit').value;
+    if(!state || !state.isAuthorized){ status.textContent='Not authorized'; settingsToast('Not authorized'); return; }
+    var trimmed = txt.trim();
+    var doSave = function(){ settingsSaveCommit(txt, status); };
+    if(!trimmed){
+      settingsModal('Clear allowlist?', 'Clear allowlist → open to anyone. Continue?', 'Clear & Save', doSave);
+      return;
+    }
+    doSave();
+  };
+
+  function settingsSaveCommit(txt, status){
+    status.textContent='Saving…';
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      status.textContent='Saved (mock)';
+      return;
+    }
+    // Send as comma-separated to backend (backend also handles newlines)
+    var csv = txt.split(/[\n]+/).join(', ');
+    google.script.run.withSuccessHandler(function(res){
+      if(!res || !res.ok){ status.textContent = res && res.error ? res.error : 'Save failed'; return; }
+      apply(res); status.textContent='Saved';
+      setTimeout(function(){ status.textContent=''; },1500);
+    }).withFailureHandler(function(err){
+      status.textContent = (err && err.message) ? err.message : String(err);
+    }).setOccAllowedEmails(csv);
+  };
+
+  window.settingsCancel = function(){
+    if(state) document.getElementById('settings-edit').value = state.allowed.join('\n');
+    document.getElementById('settings-edit-status').textContent='Reverted';
+    settingsToast('Reverted');
+    checkOwn();
+  };
+
+  // ---- Settings admin allowlist (SETTINGS_ADMIN_EMAILS) ----
+  var adminState = null;
+  window.settingsAdminRefresh = function(){
+    var status = document.getElementById('settings-admin-status');
+    if(status) status.textContent = 'Loading…';
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      setTimeout(function(){
+        var mock = {ok:true, user:'chtdniel@gmail.com', canView:true, canEdit:true};
+        applyAdmin(mock, ['chtdniel@gmail.com']);
+        if(status) status.textContent = 'Loaded (mock)';
+      }, 300);
+      return;
+    }
+    google.script.run.withSuccessHandler(function(access){
+      if(!access || !access.ok){ if(status) status.textContent = access && access.error ? access.error : 'Failed to load'; return; }
+      try {
+        var isAdmin = !!(access.canView || access.canEdit);
+        adminState = { isAdmin: isAdmin, user: access.user || '' };
+        var badge = document.getElementById('settings-admin-badge');
+        badge.textContent = isAdmin ? 'YOU: ADMIN' : 'YOU: NOT ADMIN';
+        badge.className = 'badge ' + (isAdmin ? 'badge-safe' : 'badge-crit');
+        document.getElementById('settings-admin-own-email').textContent = adminState.user || '';
+        document.getElementById('settings-admin-save').disabled = !isAdmin;
+        document.getElementById('settings-admin-edit').disabled = !isAdmin;
+        google.script.run.withSuccessHandler(function(list){
+          if(!list || !list.ok){ if(status) status.textContent = list && list.error ? list.error : 'Failed to load'; return; }
+          applyAdminList(list.admins || []);
+          if(status) status.textContent = '';
+        }).withFailureHandler(function(err){
+          if(status) status.textContent = (err && err.message) ? err.message : String(err);
+        }).getSettingsAdminList();
+      } catch (e) { if(status) status.textContent = 'Render error: ' + (e && e.message || e); return; }
+    }).withFailureHandler(function(err){
+      if(status) status.textContent = (err && err.message) ? err.message : String(err);
+    }).getSettingsAccessInfo();
+  };
+
+  function applyAdminList(list){
+    var chips = document.getElementById('settings-admin-chips');
+    chips.innerHTML = list.map(function(e){ return '<span class="settings-chip"><b>'+esc(e)+'</b></span>'; }).join('');
+    document.getElementById('settings-admin-edit').value = list.join('\n');
+    checkAdminOwn();
+  }
+
+  function applyAdmin(res, mockList){
+    var isAdmin = !!(res.canView || res.canEdit);
+    adminState = { isAdmin: isAdmin, user: res.user || '' };
+    var badge = document.getElementById('settings-admin-badge');
+    badge.textContent = isAdmin ? 'YOU: ADMIN' : 'YOU: NOT ADMIN';
+    badge.className = 'badge ' + (isAdmin ? 'badge-safe' : 'badge-crit');
+    applyAdminList(mockList || []);
+    document.getElementById('settings-admin-own-email').textContent = adminState.user || '';
+    document.getElementById('settings-admin-save').disabled = !isAdmin;
+    document.getElementById('settings-admin-edit').disabled = !isAdmin;
+  }
+
+  function checkAdminOwn(){
+    var warn = document.getElementById('settings-admin-own-warn');
+    if(!warn || !adminState) return;
+    var txt = document.getElementById('settings-admin-edit').value;
+    var list = txt.split(/[\n,]+/).map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
+    var own = String(adminState.user || '').toLowerCase();
+    warn.style.display = (list.length >= 0 && own && list.indexOf(own) === -1) ? '' : 'none';
+  }
+
+  window.settingsAdminSave = function(){
+    var status = document.getElementById('settings-admin-status');
+    var txt = document.getElementById('settings-admin-edit').value;
+    if(!adminState || !adminState.isAdmin){ status.textContent = 'Not authorized'; settingsToast('Not authorized'); return; }
+    var doSave = function(){
+      status.textContent = 'Saving…';
+      if(typeof google==='undefined' || !google.script || !google.script.run){
+        status.textContent = 'Saved (mock)';
+        settingsToast('Saved (mock)');
+        var list = txt.split(/[\n,]+/).map(function(x){return x.trim();}).filter(Boolean);
+        document.getElementById('settings-admin-chips').innerHTML = list.map(function(e){ return '<span class="settings-chip"><b>'+esc(e)+'</b></span>'; }).join('');
+        checkAdminOwn();
+        return;
+      }
+      var csv = txt.split(/[\n]+/).join(', ');
+      google.script.run.withSuccessHandler(function(res){
+        if(!res || !res.ok){ status.textContent = res && res.error ? res.error : 'Save failed'; settingsToast(status.textContent); return; }
+        status.textContent = 'Saved';
+        settingsToast('Admins saved');
+        setTimeout(function(){ status.textContent = ''; }, 1500);
+        settingsAdminRefresh();
+      }).withFailureHandler(function(err){
+        status.textContent = (err && err.message) ? err.message : String(err);
+        settingsToast(status.textContent);
+      }).setSettingsAdminEmails(csv);
+    };
+    if(!txt.trim()){
+      settingsModal('Lock settings page?', 'Empty admin list locks this page for everyone. Continue?', 'Lock & Save', doSave);
+      return;
+    }
+    doSave();
+  };
+
+  window.settingsAdminCancel = function(){
+    settingsAdminRefresh();
+    settingsToast('Reverted');
+  };
+
+  // ---- System panel (read-only, getOccSystemSettings) ----
+  window.settingsSystemRefresh = function(){
+    var status = document.getElementById('settings-system-status');
+    if(status) status.textContent = 'Loading…';
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      setTimeout(function(){
+        applySystem({ok:true, spreadsheetId:'1PAV7…(mock)', spreadsheetName:'AWQ OCC (mock)', timezone:'Asia/Makassar', occFirLink:'', occFirLinkDeprecated:true});
+        if(status) status.textContent = 'Loaded (mock)';
+      }, 300);
+      return;
+    }
+    google.script.run.withSuccessHandler(function(res){
+      if(!res || !res.ok){ if(status) status.textContent = res && res.error ? res.error : 'Failed to load'; return; }
+      try { applySystem(res); } catch (e) { if(status) status.textContent = 'Render error: ' + (e && e.message || e); return; }
+      if(status) status.textContent = '';
+    }).withFailureHandler(function(err){
+      if(status) status.textContent = (err && err.message) ? err.message : String(err);
+    }).getOccSystemSettings();
+  };
+
+  function applySystem(res){
+    document.getElementById('settings-sys-sheet').textContent = res.spreadsheetName || '(unknown)';
+    document.getElementById('settings-sys-sheetid').textContent = res.spreadsheetId || '(not set)';
+    document.getElementById('settings-sys-sheetid').title = res.spreadsheetId || '';
+    document.getElementById('settings-sys-tz').textContent = res.timezone || '—';
+    document.getElementById('settings-sys-firlink').textContent = res.occFirLink || '(empty)';
+    document.getElementById('settings-firlink-clear').style.display = res.occFirLink ? '' : 'none';
+  }
+
+  window.settingsFirLinkClear = function(){
+    settingsModal('Clear legacy FIR link?', 'OCC_FIR_LINK is deprecated and unused. Clear it?', 'Clear', function(){
+      if(typeof google==='undefined' || !google.script || !google.script.run){
+        document.getElementById('settings-sys-firlink').textContent = '(empty)';
+        document.getElementById('settings-firlink-clear').style.display = 'none';
+        settingsToast('Cleared (mock)');
+        return;
+      }
+      google.script.run.withSuccessHandler(function(v){
+        settingsToast('Legacy link cleared');
+        settingsSystemRefresh();
+      }).withFailureHandler(function(err){
+        settingsToast((err && err.message) ? err.message : String(err));
+      }).saveFirLink('');
+    });
+  };
+
+  document.getElementById('settings-admin-edit').addEventListener('input', checkAdminOwn);
+
+  window.settingsRefreshAll = function(){
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      settingsRefresh(true);
+      settingsAdminRefresh();
+      settingsSystemRefresh();
+      return;
+    }
+    google.script.run.withSuccessHandler(function(bundle){
+      if(!bundle || !bundle.ok){ settingsRefresh(true); settingsAdminRefresh(); settingsSystemRefresh(); return; }
+      try {
+        if(bundle.settings) apply(bundle.settings);
+        if(bundle.admins && bundle.admins.admins) {
+          adminState = { isAdmin: !!(bundle.access && (bundle.access.canView || bundle.access.canEdit)), user: (bundle.access && bundle.access.user) || '' };
+          var badge = document.getElementById('settings-admin-badge');
+          badge.textContent = adminState.isAdmin ? 'YOU: ADMIN' : 'YOU: NOT ADMIN';
+          badge.className = 'badge ' + (adminState.isAdmin ? 'badge-safe' : 'badge-crit');
+          document.getElementById('settings-admin-own-email').textContent = adminState.user || '';
+          document.getElementById('settings-admin-save').disabled = !adminState.isAdmin;
+          document.getElementById('settings-admin-edit').disabled = !adminState.isAdmin;
+          applyAdminList(bundle.admins.admins || []);
+          document.getElementById('settings-admin-status').textContent = '';
+        }
+        if(bundle.system) applySystem(bundle.system);
+        if(window.wxAiApplyBundle) { try { window.wxAiApplyBundle(bundle); } catch (e) { /* WX panel renders on standalone refresh */ } }
+        document.getElementById('settings-edit-status').textContent = '';
+        document.getElementById('settings-system-status').textContent = '';
+      } catch (e) { settingsRefresh(true); settingsAdminRefresh(); settingsSystemRefresh(); }
+    }).withFailureHandler(function(){
+      settingsRefresh(true); settingsAdminRefresh(); settingsSystemRefresh();
+    }).getSettingsBundle();
+  };
+
+  // Auto-load when tab becomes visible (ponytail: observe the view only — body-wide observer re-fires on every class change and loops Loading)
+  var settingsWasActive = false;
+  var obs = new MutationObserver(function(){
+    var view = document.getElementById('view-settings');
+    var isActive = !!(view && view.classList.contains('active'));
+    if (isActive && !settingsWasActive) window.settingsRefreshAll();
+    settingsWasActive = isActive;
+  });
+  (function(){
+    var view = document.getElementById('view-settings');
+    if (view) { obs.observe(view, {attributes:true, attributeFilter:['class']}); settingsWasActive = view.classList.contains('active'); }
+  })();
+  // Initial if already active (direct load)
+  setTimeout(function(){
+    var view = document.getElementById('view-settings');
+    if(view && view.classList.contains('active')) window.settingsRefreshAll();
+  }, 400);
+})();
+</script>
+<script>
+(function(){
+  // Mirror of WX_AI_CATALOG_DEFAULT in Constants.gs (server = source of truth).
+  // Dipakai untuk mock preview + tombol Reset; Save selalu lewat validasi server.
+  var WXAI_DEFAULTS = [
+    {id:'gemini-flash-lite', provider:'gemini', model:'gemini-3.5-flash-lite', label:'Gemini · 3.5-flash-lite', enabled:true},
+    {id:'kl-deepseek-v32', provider:'custom', model:'kl/deepseek-v3.2', label:'CIZ-AI · deepseek-v3.2', enabled:true},
+    {id:'kl-hy3', provider:'custom', model:'kl/hy3', label:'CIZ-AI · hy3', enabled:true},
+    {id:'kl-gemini-38-flash', provider:'custom', model:'kl/gemini-3.8-flash', label:'CIZ-AI · gemini-3.8-flash', enabled:true},
+    {id:'kl-gemini-31-pro', provider:'custom', model:'kl/gemini-3.1-pro', label:'CIZ-AI · gemini-3.1-pro', enabled:true}
+  ];
+  var wxAiState = null; // last applied {enabled, catalog}
+  var wxAiCanEdit = false;
+
+  function esc(s){ return String(s||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function status(t){ var el=document.getElementById('settings-wxai-status'); if(el) el.textContent=t; }
+  function toast(m){ if(window.settingsToast) window.settingsToast(m); }
+  function clone(o){ return JSON.parse(JSON.stringify(o)); }
+
+  function rowHtml(m, i){
+    var prov = ['gemini','openrouter','custom'].map(function(p){
+      return '<option value="'+p+'"'+(m.provider===p?' selected':'')+'>'+p+'</option>';
+    }).join('');
+    return '<div data-wxrow="'+i+'" style="display:grid;gap:6px;background:var(--bg-panel-alt);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;">'
+      + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+      + '<input type="checkbox" data-f="enabled" style="width:15px;height:15px"'+(m.enabled!==false?' checked':'')+' aria-label="Model enabled">'
+      + '<input class="in" data-f="id" value="'+esc(m.id)+'" placeholder="id-slug" style="max-width:170px" aria-label="Model id">'
+      + '<select class="in" data-f="provider" style="max-width:130px" aria-label="Provider">'+prov+'</select>'
+      + '<button type="button" class="btn" onclick="wxAiDelRow('+i+')" aria-label="Delete model">✕</button>'
+      + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
+      + '<input class="in" data-f="label" value="'+esc(m.label)+'" placeholder="Label tampil" aria-label="Model label">'
+      + '<input class="in" data-f="model" value="'+esc(m.model)+'" placeholder="model-id" aria-label="Model id value">'
+      + '</div></div>';
+  }
+
+  function render(list){
+    var box = document.getElementById('settings-wxai-rows');
+    if(!list.length){ box.innerHTML = '<div class="settings-note">Katalog kosong — hanya Auto (default server) yang tampil di WX.</div>'; return; }
+    box.innerHTML = list.map(rowHtml).join('');
+  }
+
+  function collect(){
+    var out = [];
+    document.querySelectorAll('#settings-wxai-rows [data-wxrow]').forEach(function(row){
+      var g = function(f){ var el = row.querySelector('[data-f="'+f+'"]'); return el ? el.value : ''; };
+      out.push({
+        id: g('id'),
+        provider: g('provider'),
+        model: g('model'),
+        label: g('label'),
+        enabled: !!row.querySelector('[data-f="enabled"]').checked
+      });
+    });
+    return out;
+  }
+
+  function applyWxAi(res){
+    wxAiState = { enabled: !!res.enabled, catalog: clone(res.catalog || []) };
+    document.getElementById('settings-wxai-enabled').checked = wxAiState.enabled;
+    document.getElementById('settings-wxai-enabled').disabled = !wxAiCanEdit;
+    render(wxAiState.catalog);
+    var badge = document.getElementById('settings-wxai-badge');
+    badge.textContent = (wxAiState.enabled ? 'AI ON' : 'AI OFF') + ' — ' + wxAiState.catalog.length + ' MODELS'
+      + (res.source && res.source !== 'property' ? ' (' + res.source + ')' : '');
+    badge.className = 'badge ' + (wxAiState.enabled ? 'badge-safe' : 'badge-crit');
+    if(res.warning) status(res.warning);
+  }
+
+  function applyAccess(access){
+    wxAiCanEdit = !!(access && (access.canView || access.canEdit));
+    document.getElementById('settings-wxai-save').disabled = !wxAiCanEdit;
+    document.getElementById('settings-wxai-enabled').disabled = !wxAiCanEdit;
+  }
+
+  window.wxAiApplyBundle = function(bundle){
+    applyAccess(bundle.access);
+    if(bundle.wx && bundle.wx.ok){ applyWxAi(bundle.wx); status(''); }
+    else status('Server tidak mengekspos katalog WX (push Fase 1 dulu).');
+  };
+
+  window.wxAiRefresh = function(){
+    status('Loading…');
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      wxAiCanEdit = true;
+      document.getElementById('settings-wxai-save').disabled = false;
+      applyWxAi({ok:true, enabled:true, catalog: clone(WXAI_DEFAULTS), source:'mock', warning:''});
+      status('Loaded (mock)');
+      return;
+    }
+    google.script.run.withSuccessHandler(function(access){
+      try { applyAccess(access); } catch (e) {}
+      google.script.run.withSuccessHandler(function(res){
+        if(!res || !res.ok){ status(res && res.error ? res.error : 'Failed to load'); return; }
+        try { applyWxAi(res); } catch (e) { status('Render error: ' + (e && e.message || e)); return; }
+        status('');
+      }).withFailureHandler(function(err){
+        status((err && err.message) ? err.message : String(err));
+      }).wxAiGetCatalog();
+    }).withFailureHandler(function(err){
+      status((err && err.message) ? err.message : String(err));
+    }).getSettingsAccessInfo();
+  };
+
+  window.wxAiAddRow = function(){
+    var list = collect();
+    list.push({id:'', provider:'custom', model:'', label:'', enabled:true});
+    render(list);
+    status('');
+  };
+
+  window.wxAiDelRow = function(i){
+    var list = collect();
+    list.splice(i, 1);
+    render(list);
+  };
+
+  window.wxAiReset = function(){
+    document.getElementById('settings-wxai-enabled').checked = true;
+    render(clone(WXAI_DEFAULTS));
+    status('Defaults loaded — press Save to apply.');
+  };
+
+  window.wxAiCancel = function(){
+    if(!wxAiState) return;
+    document.getElementById('settings-wxai-enabled').checked = wxAiState.enabled;
+    render(clone(wxAiState.catalog));
+    status('Reverted');
+    toast('Reverted');
+  };
+
+  window.wxAiSave = function(){
+    if(!wxAiCanEdit){ status('Not authorized'); toast('Not authorized'); return; }
+    var payload = { enabled: document.getElementById('settings-wxai-enabled').checked, catalog: collect() };
+    status('Saving…');
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      wxAiState = clone(payload);
+      applyWxAi({ok:true, enabled: payload.enabled, catalog: payload.catalog, source:'mock', warning:''});
+      status('Saved (mock)');
+      return;
+    }
+    google.script.run.withSuccessHandler(function(res){
+      if(!res || !res.ok){ status(res && res.error ? res.error : 'Save failed'); toast(status.textContent || 'Save failed'); return; }
+      applyWxAi(res);
+      status('Saved');
+      toast('WX AI saved');
+      setTimeout(function(){ status(''); }, 1500);
+    }).withFailureHandler(function(err){
+      status((err && err.message) ? err.message : String(err));
+    }).wxAiSetCatalog(payload);
+  };
+})();
+</script>

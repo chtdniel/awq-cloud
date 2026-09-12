@@ -1,0 +1,1472 @@
+<!--
+  FIR_Notam_Ui.html — Web-based FIR NOTAM editor.
+  Add / edit / delete FIR NOTAM rows directly from the dashboard, without
+  opening the spreadsheet. Loaded into #view-fir-notam via Index.html. Leaflet loads lazily via window.occEnsureLeaflet.
+-->
+<style>
+  .fir-notam-ui { display: none; }
+  .view-section.active .fir-notam-ui { display: block; }
+  /* ponytail: legacy .firn-wrap — editor now single column, kept for backward compat */
+  .fir-notam-ui .firn-wrap { display:grid; grid-template-columns: 1fr; gap:16px; align-items:start; }
+  .fir-notam-ui .firn-fir-panel { margin-bottom:14px; padding:12px 14px; background:var(--bg-panel); border:1px solid var(--border-light); border-radius:var(--radius-md); }
+  .fir-notam-ui .firn-fir-title { margin-bottom:10px; font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); }
+  .fir-notam-ui .firn-fir-content { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+  .fir-notam-ui .firn-fir-list { display:flex; flex:1; flex-wrap:wrap; gap:8px; }
+  .fir-notam-ui .firn-fir-code { padding:7px 12px; border:1px solid var(--border-light); border-radius:var(--radius-sm); background:var(--bg-panel-alt); color:var(--text-primary); font:800 12px var(--font-mono); cursor:pointer; user-select:none; transition: all .15s var(--ease-spring, ease); display:inline-flex; align-items:center; gap:6px; }
+  .fir-notam-ui .firn-fir-code:hover { border-color:var(--accent-primary); color:var(--accent-primary); background:var(--nav-bg-active); transform: translateY(-1px); }
+  .fir-notam-ui .firn-fir-code:active { transform: scale(0.97); }
+  .fir-notam-ui .firn-fir-code.active { background:var(--accent-primary); color:#fff; border-color:var(--accent-primary); box-shadow: var(--accent-glow, 0 4px 12px rgba(200,16,46,.18)); }
+  .fir-notam-ui .firn-fir-code.active:hover { color:#fff; opacity:.92; }
+  .fir-notam-ui .firn-fir-code .firn-fir-cnt { font-size:10px; font-weight:700; opacity:.7; background:rgba(0,0,0,.08); padding:1px 6px; border-radius:999px; min-width:14px; text-align:center; }
+  .fir-notam-ui .firn-fir-code.active .firn-fir-cnt { background:rgba(255,255,255,.22); opacity:1; color:#fff; }
+  .fir-notam-ui .firn-fir-status { min-width:250px; padding-left:16px; border-left:1px solid var(--border-subtle); font:10px/1.6 var(--font-mono); color:var(--text-muted); }
+  .fir-notam-ui .firn-fir-clear { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:6px 10px; border:1px solid var(--border-light); background:var(--bg-panel-raised); color:var(--text-muted); border-radius:var(--radius-sm); cursor:pointer; min-width:44px; min-height:44px; justify-content:center; }
+  .fir-notam-ui .firn-fir-clear:focus-visible { outline:3px solid var(--accent-primary); outline-offset:2px; }
+  .fir-notam-ui .firn-fir-clear:hover { border-color:var(--accent-primary); color:var(--accent-primary); }
+  .fir-notam-ui .firn-fir-filter-info { font-size:10px; color:var(--accent-primary); font-family:var(--font-mono); font-weight:700; margin-top:8px; display:block; }
+  .fir-notam-ui .firn-fir-filter-info.show { display:block; }
+  .fir-notam-ui .firn-panel {
+    background: var(--bg-panel); border:1px solid var(--border-light); border-radius:var(--radius-md);
+  }
+  .fir-notam-ui .firn-panel-head { padding:12px 14px; border-bottom:1px solid var(--border-subtle); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .fir-notam-ui .firn-list-head { display:block; }
+  .fir-notam-ui .firn-list-meta { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  .fir-notam-ui .firn-list-meta .firn-count { white-space:nowrap; }
+  .fir-notam-ui .firn-list-status { padding:10px 14px; border-bottom:1px solid var(--border-subtle); font:10px/1.6 var(--font-mono); color:var(--text-muted); }
+  .fir-notam-ui .firn-panel-title { font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); }
+  .fir-notam-ui .firn-form { padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .fir-notam-ui .firn-field label { display:block; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); margin-bottom:4px; }
+  .fir-notam-ui .firn-field input, .fir-notam-ui .firn-field textarea, .fir-notam-ui .firn-field select {
+    width:100%; box-sizing:border-box; background:var(--bg-panel-alt); color:var(--text-primary);
+    border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:8px 10px;
+    font-family:var(--font-mono); font-size:12px;
+  }
+  .fir-notam-ui .firn-field input:focus, .fir-notam-ui .firn-field textarea:focus, .fir-notam-ui .firn-field select:focus {
+    outline:none; border-color:var(--accent-primary);
+  }
+  .fir-notam-ui .firn-field textarea { min-height:110px; resize:vertical; line-height:1.5; }
+  .fir-notam-ui .firn-row2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .fir-notam-ui .firn-actions { display:flex; gap:8px; margin-top:4px; }
+  .fir-notam-ui .firn-btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:44px; min-height:44px; font-size:10px; font-weight:800; letter-spacing:.05em;
+    text-transform:uppercase; padding:8px 14px; border:1px solid var(--border-light); background:var(--bg-panel-raised);
+    color:var(--text-secondary); border-radius:var(--radius-sm); cursor:pointer;
+  }
+  .fir-notam-ui .firn-btn:hover { border-color:var(--accent-primary); color:var(--accent-primary); }
+  .fir-notam-ui .firn-btn:focus-visible,
+  .fir-notam-ui .firn-drawer-bar:focus-visible,
+  .fir-notam-ui .firn-fir-code:focus-visible,
+  .fir-notam-ui .firn-map-btn:focus-visible { outline:3px solid var(--accent-primary); outline-offset:2px; }
+  .fir-notam-ui .firn-btn.primary { background:var(--accent-primary); color:#fff; border-color:var(--accent-primary); }
+  .fir-notam-ui .firn-btn.primary:hover { opacity:.9; color:#fff; }
+  .fir-notam-ui .firn-btn.danger { color:var(--status-critical); border-color:var(--status-critical); }
+  .fir-notam-ui .firn-btn.danger:hover { background:var(--status-critical); color:#fff; }
+  .fir-notam-ui .firn-btn:disabled { opacity:.5; cursor:not-allowed; }
+  /* ponytail: legacy list scroll — no list in editor anymore */
+  .fir-notam-ui .firn-list-scroll { display:none; }
+  .fir-notam-ui .firn-item { padding:10px 14px; border-bottom:1px solid var(--border-subtle); cursor:pointer; transition:background .15s; }
+  .fir-notam-ui .firn-item:hover { background: var(--overlay-hover); }
+  .fir-notam-ui .firn-item.active { background: var(--nav-bg-active); border-left:3px solid var(--accent-primary); }
+  .fir-notam-ui .firn-item-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .fir-notam-ui .firn-loc { font-weight:800; color:var(--text-primary); font-family:var(--font-mono); font-size:13px; }
+  .fir-notam-ui .firn-num { color:var(--text-secondary); font-size:11px; font-family:var(--font-mono); }
+  .fir-notam-ui .firn-cls { font-size:9px; font-weight:900; padding:2px 8px; border-radius:999px; color:#fff; background:var(--status-warning); }
+  .fir-notam-ui .firn-item-sub { display:flex; justify-content:space-between; margin-top:4px; font-size:10px; color:var(--text-muted); font-family:var(--font-mono); }
+  .fir-notam-ui .firn-item-text { font-size:11px; color:var(--text-secondary); font-family:var(--font-mono); white-space:pre-wrap; word-break:break-word; margin-top:6px; }
+  .fir-notam-ui .firn-empty { padding:20px; text-align:center; color:var(--text-muted); font-size:12px; }
+  .fir-notam-ui .firn-toolbar { padding:10px 14px; border-bottom:1px solid var(--border-subtle); display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .fir-notam-ui .firn-search { flex:1; min-width:160px; background:var(--bg-panel-alt); color:var(--text-primary); border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:7px 10px; font-family:var(--font-mono); font-size:12px; }
+  .fir-notam-ui .firn-count { font-size:10px; color:var(--text-muted); font-family:var(--font-mono); }
+  .fir-notam-ui .firn-toast, .firn-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); /* Layer: Tooltip/toast */ box-shadow:0 8px 24px rgba(0,0,0,.18); }
+  .fir-notam-ui .firn-hint { font-size:10px; color:var(--text-muted); font-family:var(--font-mono); line-height:1.5; }
+  /* ---- Bento: Results + Map side-by-side; Editor/Bulk as collapsible drawers ---- */
+  .fir-notam-ui .firn-tabview { display:none; }
+  .fir-notam-ui .firn-bento { display:grid; grid-template-columns: 1fr 1fr; gap:16px; align-items:start; margin-top:16px; }
+  .fir-notam-ui .firn-bento .firn-tabview { display:block; }
+  .fir-notam-ui .firn-col-map { position:sticky; top:12px; }
+  .fir-notam-ui .firn-drawers { margin-top:16px; display:grid; gap:12px; }
+  .fir-notam-ui .firn-drawer-bar { width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); background:var(--bg-panel); border:1px solid var(--border-light); border-radius:var(--radius-md); cursor:pointer; }
+  .fir-notam-ui .firn-drawer-bar:hover, .fir-notam-ui .firn-drawer-bar.open { border-color:var(--accent-primary); color:var(--accent-primary); }
+  .fir-notam-ui .firn-drawer-bar .firn-drawer-hint { font-weight:700; letter-spacing:.04em; text-transform:none; color:var(--text-muted); font-family:var(--font-mono); }
+  .fir-notam-ui .firn-drawer { display:none; }
+  .fir-notam-ui .firn-drawer.open { display:block; }
+  /* ---- Results tab ---- */
+  .fir-notam-ui .firn-results { padding:14px; display:grid; gap:12px; }
+  .fir-notam-ui .firn-results-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .fir-notam-ui .firn-results-title { font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); }
+  .fir-notam-ui .firn-results-title b { color:var(--text-primary); }
+   .fir-notam-ui .firn-results-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+   .fir-notam-ui .firn-filter-bar { padding:10px 14px; border-bottom:1px solid var(--border-subtle); display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+   .fir-notam-ui .firn-filter-group { display:flex; flex-direction:column; gap:4px; min-width:140px; }
+   .fir-notam-ui .firn-filter-group label { font-size:9px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
+   .fir-notam-ui .firn-filter-group select { min-height:36px; padding:6px 9px; border:1px solid var(--border-light); border-radius:var(--radius-sm); background:var(--bg-panel-alt); color:var(--text-primary); font:11px var(--font-mono); }
+   .fir-notam-ui .firn-filter-group select:focus { outline:3px solid var(--accent-primary); outline-offset:1px; border-color:var(--accent-primary); }
+   .fir-notam-ui .firn-filter-clear { min-height:36px; padding:6px 10px; border:1px solid var(--border-light); border-radius:var(--radius-sm); background:var(--bg-panel-raised); color:var(--text-secondary); font-size:10px; font-weight:800; text-transform:uppercase; cursor:pointer; }
+   .fir-notam-ui .firn-filter-clear:hover { border-color:var(--accent-primary); color:var(--accent-primary); }
+   .fir-notam-ui .firn-filter-summary { font:10px var(--font-mono); color:var(--accent-primary); min-height:20px; display:flex; align-items:center; }
+  .fir-notam-ui .firn-card { border:1px solid var(--border-light); border-radius:var(--radius-md); background:var(--bg-panel); overflow:hidden; }
+  /* ponytail: cards always show full NOTAM text — no expand/collapse */
+  .fir-notam-ui .firn-card-head { position:relative; z-index:var(--z-base); /* Layer: Base card header */ background:var(--bg-panel); padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; border-bottom:1px solid var(--border-subtle); }
+  .fir-notam-ui .firn-card-id { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .fir-notam-ui .firn-card-loc { font-weight:800; color:var(--text-primary); font-family:var(--font-mono); font-size:14px; }
+  .fir-notam-ui .firn-card-num { color:var(--text-secondary); font-size:12px; font-family:var(--font-mono); }
+  .fir-notam-ui .firn-badges { display:flex; gap:6px; flex-wrap:wrap; }
+  .fir-notam-ui .firn-b { font-size:9px; font-weight:900; padding:3px 9px; border-radius:999px; letter-spacing:.04em; text-transform:uppercase; color:#fff; }
+  .fir-notam-ui .firn-b-status-active { background:var(--status-safe); color:#d1fae5; }
+  .fir-notam-ui .firn-b-status-expired { background:var(--status-critical); color:#fecaca; }
+  .fir-notam-ui .firn-b-cls { background:var(--status-info); color:#eaf2f9; }
+  .fir-notam-ui .firn-b-risk-high { background:var(--status-critical); }
+  .fir-notam-ui .firn-b-risk-medium { background:var(--status-warning); color:#1c1917; }
+  .fir-notam-ui .firn-b-risk-low { background:var(--status-safe); }
+  .fir-notam-ui .firn-b-type-new { background:#6d28d9; color:#e9d5ff; }
+  .fir-notam-ui .firn-b-type-rpl { background:#0e7490; color:#cffafe; }
+  .fir-notam-ui .firn-b-type-cnl { background:#4b5563; color:#e5e7eb; }
+  .fir-notam-ui .firn-card-body { padding:12px 14px; }
+  .fir-notam-ui .firn-card-text { overflow-wrap:anywhere; word-break:break-word; }
+  .fir-notam-ui .firn-card-meta { display:flex; gap:16px; flex-wrap:wrap; font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin-bottom:8px; }
+  .fir-notam-ui .firn-card-text { font-size:11px; color:var(--text-secondary); font-family:var(--font-mono); white-space:pre-wrap; line-height:1.5; overflow-wrap:anywhere; word-break:break-word; }
+  .fir-notam-ui .firn-card-foot { padding:10px 14px; border-top:1px solid var(--border-subtle); display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .fir-notam-ui .firn-card-foot .firn-when { font-size:10px; color:var(--text-muted); font-family:var(--font-mono); }
+  .fir-notam-ui .firn-btn.map { color:var(--accent-primary); border-color:var(--accent-primary); }
+  .fir-notam-ui .firn-btn.map:hover { background:var(--accent-primary); color:#fff; }
+  .fir-notam-ui .firn-btn.edit { color:var(--status-warning); border-color:var(--status-warning); }
+  .fir-notam-ui .firn-btn.edit:hover { background:var(--status-warning); color:#1c1917; }
+  .fir-notam-ui .firn-field input.is-invalid, .fir-notam-ui .firn-field textarea.is-invalid, .fir-notam-ui .firn-field select.is-invalid { border-color: var(--status-critical); background: var(--status-critical-bg); }
+  .fir-notam-ui .firn-field .firn-err { font-size:9px; color:var(--status-critical); font-family:var(--font-mono); margin-top:3px; display:none; }
+  .fir-notam-ui .firn-field .firn-err.show { display:block; }
+  .fir-notam-ui .firn-field input:focus.is-invalid, .fir-notam-ui .firn-field textarea:focus.is-invalid { box-shadow: 0 0 0 3px var(--status-critical-glow); }
+  /* ---- Map panel (dedicated FIR NOTAM map) ---- */
+  .fir-notam-ui .firn-map-panel { background: var(--bg-panel); border:1px solid var(--border-light); border-radius:var(--radius-md); overflow:hidden; margin-bottom:14px; display:flex; flex-direction:column; }
+  .fir-notam-ui .firn-map-head { padding:10px 14px; border-bottom:1px solid var(--border-subtle); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .fir-notam-ui .firn-map-title { font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); }
+  .fir-notam-ui .firn-map-status { font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin-left:auto; }
+  .fir-notam-ui .firn-map-legend { display:flex; gap:12px; align-items:center; font-size:10px; color:var(--text-muted); font-family:var(--font-mono); }
+  .fir-notam-ui .firn-map-legend-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .fir-notam-ui .firn-map-wrap { position:relative; height:580px; min-height:480px; background: var(--bg-panel-sunken); }
+  /* Map tab variant — even larger when map has its own page */
+  #firn-tab-map .firn-map-wrap { height:520px; min-height:440px; }
+  .fir-notam-ui .firn-map-wrap #firn-map { position:absolute; inset:0; width:100%; height:100%; }
+  .fir-notam-ui .firn-map-wrap.is-fullscreen { position:fixed; inset:0; z-index:var(--z-modal); /* Layer: Modal/fullscreen */ background:var(--bg-panel); }
+  .fir-notam-ui .firn-map-wrap.is-fullscreen #firn-map { height:100vh; }
+  .fir-notam-ui .firn-map-tools { display:flex; gap:8px; align-items:center; }
+  .fir-notam-ui .firn-map-btn { display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; padding:6px 12px; border:1px solid var(--border-light); background:var(--bg-panel-raised); color:var(--text-secondary); border-radius:var(--radius-sm); cursor:pointer; }
+  .fir-notam-ui .firn-map-btn:hover { border-color:var(--accent-primary); color:var(--accent-primary); }
+  .fir-notam-ui .firn-map-btn.active { background:var(--accent-primary); color:#fff; border-color:var(--accent-primary); }
+  .fir-notam-ui .leaflet-container { font-family: var(--font-mono); }
+  /* Leaflet tooltip - map labels */
+  .fir-notam-ui .leaflet-tooltip {
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-medium);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lift);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-top:before {
+    border-top-color: var(--border-medium);
+  }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-bottom:before {
+    border-bottom-color: var(--border-medium);
+  }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-left:before {
+    border-left-color: var(--border-medium);
+  }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-right:before {
+    border-right-color: var(--border-medium);
+  }
+  /* Leaflet popup - detailed NOTAM info */
+  .fir-notam-ui .leaflet-popup-content-wrapper {
+    background: var(--bg-panel-raised);
+    color: var(--text-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lift);
+    padding: 0;
+  }
+  .fir-notam-ui .leaflet-popup-content {
+    margin: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+  .fir-notam-ui .leaflet-popup-tip {
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-medium);
+  }
+  [data-theme="dark"] .fir-notam-ui .leaflet-tooltip, [data-theme="dark"] .fir-notam-ui .leaflet-tooltip-content { background: var(--bg-panel-raised) !important; border: 1px solid var(--border-medium) !important; color: var(--text-primary) !important; box-shadow: var(--shadow-lift) !important; } @media (max-width: 900px) { .fir-notam-ui .firn-map-wrap { height:340px; } }
+  @media (max-width: 1000px) { .fir-notam-ui .firn-bento { grid-template-columns:minmax(0,1fr); } .fir-notam-ui .firn-col-map { position:static; } }
+  @media (max-width: 600px) {
+    .fir-notam-ui .firn-fir-content { flex-direction:column; }
+    .fir-notam-ui .firn-fir-status { min-width:0; width:100%; padding:8px 0 0; border-left:0; border-top:1px solid var(--border-subtle); }
+    .fir-notam-ui .firn-row2 { grid-template-columns:minmax(0,1fr); }
+    .fir-notam-ui .firn-card-head { position:relative; }
+    .fir-notam-ui .firn-card-foot { align-items:stretch; }
+    .fir-notam-ui .firn-card-foot .firn-actions { width:100%; }
+    .fir-notam-ui .firn-card-foot .firn-btn { flex:1; min-height:44px; }
+  }
+</style>
+
+<div class="fir-notam-ui" id="fir-notam-ui-root">
+  <div class="firn-fir-panel">
+    <div class="firn-fir-title">FIR Monitoring Area</div>
+    <div class="firn-fir-content">
+      <div class="firn-fir-list" id="firn-fir-list" aria-label="FIR monitoring area"></div>
+      <div class="firn-fir-status">
+        <div id="firn-last-update">LAST UPDATE: —</div>
+        <div id="firn-query-time">Query ran at UTC: —</div>
+      </div>
+    </div>
+    <div class="firn-toolbar">
+      <input class="firn-search" id="firn-search" type="text" aria-label="Search FIR NOTAM by location, number or text" placeholder="Search location / number / text…">
+      <button type="button" class="firn-btn" id="firn-refresh">⟳ REFRESH</button>
+      <button type="button" class="firn-fir-clear" id="firn-fir-clear" style="display:none;">✕ CLEAR FIR</button>
+    </div>
+    <div class="firn-fir-filter-info" id="firn-fir-filter-info"></div>
+  </div>
+
+  <div class="firn-drawers">
+    <button type="button" class="firn-drawer-bar" id="firn-drawer-editor-bar">＋ NEW FIR NOTAM <span class="firn-drawer-hint">add / edit rows</span></button>
+
+    <!-- Drawer: Editor (form) -->
+    <div class="firn-drawer" id="firn-tab-editor">
+    <div class="firn-panel">
+      <div class="firn-panel-head">
+        <span class="firn-panel-title" id="firn-form-title">New FIR NOTAM</span>
+        <button type="button" class="firn-btn" id="firn-new">＋ NEW</button>
+      </div>
+      <div class="firn-form">
+        <div class="firn-row2">
+          <div class="firn-field">
+            <label for="firn-location">Location / FIR (ICAO) <span style="color:var(--status-critical)">*</span></label>
+            <input id="firn-location" type="text" maxlength="4" placeholder="WIII" autocomplete="off" style="text-transform:uppercase;">
+            <div class="firn-err" id="err-firn-location">4-letter ICAO required (e.g. WIII)</div>
+          </div>
+          <div class="firn-field">
+            <label for="firn-number">NOTAM # <span style="color:var(--status-critical)">*</span></label>
+            <input id="firn-number" type="text" maxlength="12" placeholder="A1234/26" autocomplete="off" style="text-transform:uppercase;">
+            <div class="firn-err" id="err-firn-number">Format A1234/26 required</div>
+          </div>
+        </div>
+        <div class="firn-row2">
+          <div class="firn-field">
+            <label for="firn-class">Class <span style="color:var(--status-critical)">*</span></label>
+            <select id="firn-class">
+              <option value="">— select —</option>
+              <option value="A">A</option>
+              <option value="B">B</option>
+              <option value="C">C</option>
+              <option value="D">D</option>
+              <option value="E">E</option>
+              <option value="F">F</option>
+              <option value="O">O</option>
+            </select>
+            <div class="firn-err" id="err-firn-class">Class required</div>
+          </div>
+          <div class="firn-field">
+            <label for="firn-issue">Issue Date</label>
+            <input id="firn-issue" type="datetime-local" autocomplete="off">
+          </div>
+        </div>
+        <div class="firn-row2">
+          <div class="firn-field">
+            <label for="firn-effective">Effective Date</label>
+            <input id="firn-effective" type="datetime-local" autocomplete="off">
+          </div>
+          <div class="firn-field">
+            <label for="firn-expiration">Expiration Date</label>
+            <input id="firn-expiration" type="datetime-local" autocomplete="off">
+            <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);cursor:pointer;"><input type="checkbox" id="firn-expiration-perm" aria-label="Permanent NOTAM, no expiration" style="width:14px;height:14px;"> PERM (permanent)</label>
+          </div>
+        </div>
+        <div class="firn-field">
+          <label for="firn-text">NOTAM Text <span style="color:var(--status-critical)">*</span> <span id="firn-text-count" style="float:right; font-weight:400; color:var(--text-muted);">0 chars</span></label>
+          <textarea id="firn-text" placeholder="Q)WIII/QWULW/IV/NBO/E/000/999/&#10;A)WIII B)2608221200 C)2608231200&#10;E)RWY 09 CLSD DUE WIP"></textarea>
+          <div class="firn-err" id="err-firn-text">NOTAM Text required</div>
+        </div>
+        <div class="firn-hint">Dates are stored as UTC. Use the format YYYY-MM-DD HH:MM (or leave blank).</div>
+        <div class="firn-actions">
+          <button type="button" class="firn-btn primary" id="firn-save">💾 SAVE</button>
+          <button type="button" class="firn-btn danger" id="firn-delete" style="display:none;">🗑 DELETE</button>
+          <button type="button" class="firn-btn" id="firn-cancel" style="display:none;">CANCEL</button>
+        </div>
+        <div style="border-top:1px solid var(--border-subtle);margin-top:6px;padding-top:12px;">
+          <div class="firn-field">
+            <label for="firn-paste">Paste raw NOTAM → auto-fill</label>
+            <textarea id="firn-paste" placeholder="Paste full NOTAM here, e.g.&#10;A1234/26 NOTAMN&#10;Q)WIII/QWULW/IV/NBO/E/000/999/&#10;A)WIII B)2608221200 C)2608231200&#10;E)RWY 09 CLSD DUE WIP"></textarea>
+          </div>
+          <div class="firn-actions"><button type="button" class="firn-btn" id="firn-parse">⚡ PARSE &amp; FILL</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
+  <div class="firn-bento">
+    <!-- Bento col: Results -->
+    <div class="firn-tabview firn-col-results" id="firn-tab-results">
+    <div class="firn-panel">
+      <div class="firn-results">
+         <div class="firn-results-head">
+          <div class="firn-results-title">Updated NOTAM Results <b id="firn-results-count">(0)</b></div>
+          <div class="firn-results-tools">
+            <button type="button" class="firn-btn" id="firn-results-refresh">⟳ REFRESH</button>
+          </div>
+         </div>
+         <div class="firn-filter-bar" id="firn-filter-bar" aria-label="Filter NOTAM results">
+           <div class="firn-filter-group"><label for="firn-filter-status">Status</label><select id="firn-filter-status"><option value="">All</option></select></div>
+           <div class="firn-filter-group"><label for="firn-filter-risk">Risk</label><select id="firn-filter-risk"><option value="">All</option></select></div>
+           <div class="firn-filter-group"><label for="firn-filter-type">NOTAM Type</label><select id="firn-filter-type"><option value="">All</option></select></div>
+           <div class="firn-filter-group"><label for="firn-filter-class">Class</label><select id="firn-filter-class"><option value="">All</option></select></div>
+           <button type="button" class="firn-filter-clear" id="firn-filter-clear">Clear</button>
+           <div class="firn-filter-summary" id="firn-filter-summary" aria-live="polite"></div>
+         </div>
+         <div id="firn-results-list">
+          <div class="firn-empty">Loading results…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+    <!-- Bento col: Map -->
+    <div class="firn-tabview firn-col-map" id="firn-tab-map">
+    <div class="firn-map-panel" id="firn-map-panel">
+      <div class="firn-map-head">
+        <span class="firn-map-title">FIR NOTAM Map</span>
+        <div class="firn-map-tools">
+          <button type="button" class="firn-map-btn" id="firn-map-showall" title="Show all filtered NOTAMs on map">◎ SHOW ALL</button>
+          <button type="button" class="firn-map-btn" id="firn-map-toggle">◉ NOTAM LAYER</button>
+          <button type="button" class="firn-map-btn" id="firn-map-expand" title="Expand map (F / ESC)">⛶ EXPAND</button>
+        </div>
+        <span class="firn-map-status" id="firn-map-status">MAP: —</span>
+        <span class="firn-map-legend" style="margin-left:auto;">
+          <span><span class="firn-map-legend-dot" style="background:var(--status-critical);"></span>High</span>
+          <span><span class="firn-map-legend-dot" style="background:var(--status-warning);"></span>Med</span>
+          <span><span class="firn-map-legend-dot" style="background:var(--status-safe);"></span>Low</span>
+          <span><span class="firn-map-legend-dot" style="background:#5a5f66;"></span>Exp</span>
+        </span>
+      </div>
+      <div class="firn-map-wrap" id="firn-map-wrap">
+        <div id="firn-map"></div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  if (window.firNotamUiInited) return;
+  window.firNotamUiInited = true;
+
+  var state = {
+    notams: [],
+    results: [],
+    editingRowId: null,
+     filter: '',
+     selectedFir: null,
+     statusFilter: '',
+     riskFilter: '',
+     typeFilter: '',
+     classFilter: '',
+    initialized: false,
+    loading: false,
+    lastLoad: 0,
+    lastResultsLoad: 0,
+    firnMap: null,
+    firnMapLayer: null,
+    firnMapGeomLayer: null,
+    firnMapShow: true,
+    firnMapShowAll: false,
+    firnMapPopup: null,
+    firnMapFocused: null
+  };
+
+  function getFirCounts() {
+    // ponytail: counts from enriched results (have ACTIVE/EXPIRED) when loaded
+    var src = state.results.length ? state.results : state.notams;
+    var counts = {};
+    src.forEach(function (n) {
+      var loc = String(n.Location || '').trim().toUpperCase();
+      if (!/^[A-Z]{4}$/.test(loc)) return;
+      counts[loc] = (counts[loc] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function setFirFilter(loc) {
+    var next = loc ? String(loc).trim().toUpperCase() : null;
+    if (state.selectedFir === next) next = null;
+    state.selectedFir = next;
+    // sync top search input visual — if FIR selected, mirror to results search placeholder hint
+    renderFirLocations();
+    updateFirFilterInfo();
+    // bento: Results + Map always visible — re-render (fetch only if stale)
+    refreshResultsIfStale();
+    // NOTE: FIR filter on the FIR NOTAM page no longer affects the map on the FIR page (view-fir)
+    // so intentionally not calling window.firSetMapFirFilter
+  }
+
+  function clearFirFilter() { setFirFilter(null); }
+
+  function updateFirFilterInfo() {
+    var info = $('firn-fir-filter-info');
+    var btn = $('firn-fir-clear');
+    if (!info) return;
+    if (state.selectedFir) {
+      var counts = getFirCounts();
+      var total = counts[state.selectedFir] || 0;
+      info.textContent = '▸ Filter: ' + state.selectedFir + ' — ' + total + ' NOTAM' + (total !== 1 ? 's' : '') + ' (click again to clear)';
+      info.classList.add('show');
+      if (btn) btn.style.display = '';
+    } else {
+      info.textContent = '';
+      info.classList.remove('show');
+      if (btn) btn.style.display = 'none';
+    }
+  }
+
+  // ---- Dedicated FIR NOTAM Map helpers ----
+  var firnFallbackCoords = {
+    'WAAF':[119.9,-5.1],'WAAZ':[106.8,-5.5],'WAPP':[128.2,-3.7],'WIMZ':[98.7,3.5],'WIIF':[115.0,-2.0],
+    'WIIZ':[106.8,-6.2],'WRRZ':[106.8,-6.2],'WIBZ':[110.0,-3.0],'WIDD':[104.1,1.1],'WIKK':[110.0,-2.0],
+    'WATC':[122.2,-8.3],'WABP':[136.0,-3.0],'WAOO':[116.9,-1.3],'WRBB':[106.6,-6.1],
+    'WMFC':[101.7,2.7],'WSJC':[103.8,1.3],'WSXX':[103.8,1.2],'WMFP':[114.5,4.9],'WSSS':[104.0,1.4],
+    'VTBB':[100.6,13.7],'VVVV':[105.8,21.0],'VDPP':[104.9,11.5],'VLXX':[102.6,18.0],'VYYF':[96.2,16.8],
+    'VTSR':[98.3,8.1],'VVTS':[106.7,10.8],'RPHI':[122.0,14.0],'RPHL':[120.0,16.0],'RPLL':[121.0,14.5],
+    'YBBB':[133.0,-22.0],'YMMM':[144.8,-37.7],'YSSY':[151.2,-33.9],'YBBN':[153.0,-27.5],'YPAD':[138.5,-34.9],
+    'WIII':[106.66,-6.12],'WADD':[115.17,-8.75],'WARR':[112.79,-7.38]
+  };
+  function firnParseCoordFromText(text) {
+    try {
+      if (!text || typeof text !== 'string') return null;
+      var toDec = function(digits, hemi, isLat){
+        var deg=0,min=0,sec=0; var n=digits.length;
+        if(isLat){ if(n===6){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseInt(digits.slice(4,6),10);} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else deg=parseInt(digits,10); }
+        else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else deg=parseInt(digits,10); }
+        var dec = deg + min/60 + sec/3600; if(/S|W/i.test(hemi)) dec=-dec; return Math.round(dec*10000)/10000;
+      };
+      var m1=text.match(/(\d{6})\s*([NS])\s*(\d{7})\s*([EW])/i); if(m1) return {lat:toDec(m1[1],m1[2],true), lon:toDec(m1[3],m1[4],false)};
+      var m2=text.match(/(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/i); if(m2) return {lat:toDec(m2[1],m2[2],true), lon:toDec(m2[3],m2[4],false)};
+      return null;
+    } catch(e){return null;}
+  }
+  function firnParseNotamGeometry(text){
+    try{
+      if(!text||typeof text!=='string') return {center:null, radiusNm:null, polygon:[]};
+      var toDec=function(digits,hemi,isLat){
+        var deg=0,min=0,sec=0; var n=digits.length;
+        if(isLat){ if(n===6){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseInt(digits.slice(4,6),10);} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else deg=parseInt(digits,10); }
+        else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else deg=parseInt(digits,10); }
+        var dec=deg+min/60+sec/3600; if(/S|W/i.test(hemi)) dec=-dec; return Math.round(dec*10000)/10000;
+      };
+      var qLine=(text.match(/^Q\)[^\n]*/m)||[''])[0];
+      var center=null, radiusNm=null;
+      var qDMS=qLine.match(/(\d{6})([NS])(\d{7})([EW])(\d{3})?/i);
+      var qDM=qLine.match(/(\d{4})([NS])(\d{5})([EW])(\d{3})?/i);
+      var qm=qDMS||qDM;
+      if(qm){
+        center=[toDec(qm[3],qm[4],false), toDec(qm[1],qm[2],true)];
+        if(qm[5] && parseInt(qm[5],10)>0 && parseInt(qm[5],10)!==999) radiusNm=parseInt(qm[5],10);
+      }
+      var eIdx=text.indexOf('E)');
+      var eText=eIdx>=0? text.slice(eIdx) : '';
+      var polygon=[];
+      var re=/(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
+      var m;
+      while((m=re.exec(eText))!==null){
+        var latD=m[1]||m[5], latH=m[2]||m[6];
+        var lonD=m[3]||m[7], lonH=m[4]||m[8];
+        var lat=toDec(latD,latH,true);
+        var lon=toDec(lonD,lonH,false);
+        if(lat===null||lon===null) continue;
+        var last=polygon[polygon.length-1];
+        if(last && last[0]===lon && last[1]===lat) continue;
+        polygon.push([lon,lat]);
+      }
+      if(polygon.length<2) return {center:center, radiusNm:radiusNm, polygon:[]};
+      return {center:center, radiusNm:radiusNm, polygon:polygon};
+    }catch(e){ return {center:null, radiusNm:null, polygon:[]}; }
+  }
+  function firnBuildGeomCoords(geom){
+    if(!geom) return [];
+    var polygon=geom.polygon||[];
+    var center=geom.center;
+    var rNm=geom.radiusNm;
+    var coords=[];
+    if(polygon.length>=2){
+      coords=polygon.map(function(c){ return [c[0],c[1]]; });
+      if(coords[0][0]!==coords[coords.length-1][0] || coords[0][1]!==coords[coords.length-1][1]) coords.push([coords[0][0],coords[0][1]]);
+    } else if(rNm && center){
+      var lon=center[0], lat=center[1];
+      var rLat=rNm/60;
+      var rLon=rLat/Math.max(0.01, Math.cos((lat*Math.PI)/180));
+      for(var i=0;i<=64;i++){ var a=(i/64)*2*Math.PI; coords.push([lon+rLon*Math.sin(a), lat+rLat*Math.cos(a)]); }
+    }
+    return coords;
+  }
+
+  function firnGetLatLon(n){
+    var loc = String(n.Location||'').trim().toUpperCase();
+    // ponytail: YMMM E3257/26 must be 0407S08909E Hindia, not FIR centre Melbourne — parse Q/E first
+    var parsed = firnParseCoordFromText(n['NOTAM Text']);
+    if (parsed) return [parsed.lat, parsed.lon];
+    var fb = firnFallbackCoords[loc];
+    if (fb) return [fb[1], fb[0]];
+    return null;
+  }
+  function firnRiskColor(risk, status){
+    if (status==='EXPIRED') return '#5a5f66';
+    var r=String(risk||'LOW').toUpperCase();
+    if (r==='HIGH') return '#ef5350';
+    if (r==='MEDIUM' || r==='MED') return '#fb923c';
+    return '#34d399';
+  }
+  function firnBuildPopup(n){
+    var risk = n.risk || 'LOW';
+    var color = firnRiskColor(risk, n.status);
+    var h='<div style="min-width:220px;font-family:var(--font-mono);">';
+    h+='<div style="font-weight:800;color:var(--text-primary);">'+esc(n.Location)+' - '+esc(n['NOTAM #'])+' <span style="color:'+color+';">● '+esc(risk)+'</span></div>';
+    h+='<div style="color:var(--text-muted);font-size:10px;">'+esc(n.status||'ACTIVE')+(n.Class?' · Class '+esc(n.Class):'')+'</div>';
+    if(n['Effective Date']) h+='<div style="color:var(--text-muted);font-size:10px;">Eff '+esc(fmtDate(n['Effective Date']))+'</div>';
+    if(n['Expiration Date']) h+='<div style="color:var(--text-muted);font-size:10px;">Exp '+esc(fmtDate(n['Expiration Date']))+'</div>';
+    var _g=firnParseNotamGeometry(n['NOTAM Text']||''); if(_g && _g.radiusNm) h+='<div style="color:var(--text-muted);font-size:10px;">◯ Radius '+esc(_g.radiusNm)+' NM</div>'; if(_g && _g.polygon && _g.polygon.length>=3) h+='<div style="color:var(--text-muted);font-size:10px;">△ Polygon '+_g.polygon.length+' points</div>';
+    h+='<div style="white-space:pre-wrap;margin-top:6px;color:var(--text-secondary);font-size:11px;">'+esc(n['NOTAM Text']||'')+'</div>';
+    h+='<div style="margin-top:8px;display:flex;gap:6px;">';
+    h+='<button onclick="(function(){var id='+n.rowId+'; if(window.firnEditFromMap) window.firnEditFromMap(id);})()" style="padding:4px 8px;font-size:10px;font-weight:800;border:1px solid var(--status-warning);color:var(--status-warning);background:#fff;border-radius:4px;cursor:pointer;">✏ Edit</button>';
+    h+='</div></div>';
+    return h;
+  }
+  function ensureFirnMap(){
+    if (state.firnMap || typeof L==='undefined') return state.firnMap;
+    var el = $('firn-map');
+    if (!el) return null;
+    try {
+      state.firnMap = L.map('firn-map', {center:[-2.5,118.0], zoom:4, zoomControl:true, attributionControl:false});
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {subdomains:'abc', maxZoom:19, attribution:'&copy; OpenStreetMap'}).addTo(state.firnMap);
+      state.firnMapLayer = L.layerGroup().addTo(state.firnMap);
+      state.firnMapGeomLayer = L.layerGroup().addTo(state.firnMap);
+      state.firnMapGeomLayer = L.layerGroup().addTo(state.firnMap);
+      // fix size after render
+      setTimeout(function(){ try{ state.firnMap.invalidateSize(); }catch(e){} }, 120);
+      setTimeout(function(){ try{ state.firnMap.invalidateSize(); }catch(e){} }, 400);
+    } catch(e){ console.warn('firnMap init failed', e); }
+    return state.firnMap;
+  }
+  function clearFirnMap(){
+    if (state.firnMapLayer) try{ state.firnMapLayer.clearLayers(); }catch(e){}
+    if (state.firnMapGeomLayer) try{ state.firnMapGeomLayer.clearLayers(); }catch(e){}
+    if (state.firnMap && state.firnMapPopup) try{ state.firnMap.closePopup(state.firnMapPopup); }catch(e){}
+    state.firnMapPopup=null;
+  }
+  function updateFirnMap(){
+    if (!ensureFirnMap()) return;
+    var map = state.firnMap;
+    clearFirnMap();
+    var list = state.firnMapShowAll ? getFilteredResults() : (state.firnMapFocused ? [state.results.find(function(x){ return x.rowId===state.firnMapFocused; })].filter(Boolean) : []);
+    if (!list.length) {
+      var st = $('firn-map-status');
+      if (st) st.textContent = state.firnMapShowAll ? 'MAP: 0 — no filtered NOTAMs' : 'MAP: —  (select a NOTAM in Results → Show on Map or click SHOW ALL)';
+      var btn0=$('firn-map-toggle'); if(btn0) btn0.classList.toggle('active', !!state.firnMapShow);
+      var btnAll=$('firn-map-showall'); if(btnAll) btnAll.classList.toggle('active', !!state.firnMapShowAll);
+      return;
+    }
+    if (!state.firnMapShow){
+      var st3=$('firn-map-status');
+      if(st3) st3.textContent='MAP: hidden — ' + list.length + ' NOTAM' + (list.length!==1?'s':'');
+      var btn3=$('firn-map-toggle'); if(btn3) btn3.classList.toggle('active', false);
+      var btnAll3=$('firn-map-showall'); if(btnAll3) btnAll3.classList.toggle('active', !!state.firnMapShowAll);
+      return;
+    }
+    var bounds = [];
+    var plotted = 0;
+    var geomCount=0;
+    list.forEach(function(n){
+      var ll = firnGetLatLon(n);
+      if (!ll) return;
+      var lat=ll[0], lon=ll[1];
+      var color=firnRiskColor(n.risk, n.status);
+      var active = n.active!==false && n.status!=='EXPIRED';
+      var radius = !active?4:n.risk==='HIGH'?9:n.risk==='MEDIUM'?7:5;
+      var geom=firnParseNotamGeometry(n['NOTAM Text']||'');
+      var geomCoords=firnBuildGeomCoords(geom);
+      if(geomCoords.length>=2 && state.firnMapGeomLayer){
+        var latlngs=geomCoords.map(function(c){ return [c[1],c[0]]; });
+        var isPoly = geom.polygon && geom.polygon.length>=3;
+        var shape = isPoly ? L.polygon(latlngs, {color:color, weight:active?2:1, dashArray:'4 3', fillColor:color, fillOpacity:active?0.12:0.05}) : L.polyline(latlngs, {color:color, weight:2, dashArray:'4 3'});
+        shape.bindTooltip(esc(n.Location)+' '+esc(n['NOTAM #']), {direction:'top'});
+        shape.on('click', function(){
+          if(state.firnMapPopup) try{ map.closePopup(state.firnMapPopup);}catch(e){}
+          state.firnMapPopup = L.popup({maxWidth:320}).setLatLng([lat,lon]).setContent(firnBuildPopup(n)).openOn(map);
+        });
+        shape.addTo(state.firnMapGeomLayer);
+        geomCount++;
+        // extend bounds with geom
+        geomCoords.forEach(function(c){ bounds.push([c[1],c[0]]); });
+      }
+      var marker = L.circleMarker([lat,lon], {radius:radius, color:'#0b0d12', weight:active?1.2:0.5, fillColor:color, fillOpacity:0.92});
+      marker.bindTooltip(esc(n.Location)+' '+esc(n['NOTAM #']), {direction:'top', offset:[0,-radius]});
+      marker.on('click', function(){
+        if(state.firnMapPopup) try{ map.closePopup(state.firnMapPopup);}catch(e){}
+        state.firnMapPopup = L.popup({maxWidth:320}).setLatLng([lat,lon]).setContent(firnBuildPopup(n)).openOn(map);
+      });
+      marker.addTo(state.firnMapLayer);
+      bounds.push([lat,lon]);
+      plotted++;
+    });
+    var st=$('firn-map-status');
+    if(st) {
+      if (state.firnMapShowAll) st.textContent='MAP: ' + plotted + ' / ' + list.length + ' plotted' + (state.selectedFir ? ' · ' + state.selectedFir : '') ;
+      else st.textContent='MAP: 1 · '+esc(list[0].Location)+' '+esc(list[0]['NOTAM #'])+' · '+esc(list[0].risk||'LOW')+' '+(list[0].status||'ACTIVE');
+    }
+    try{
+      if (state.firnMapShowAll && bounds.length) {
+        if (bounds.length===1) map.setView(bounds[0], 7, {animate:true});
+        else map.fitBounds(bounds, {padding:[30,30], maxZoom: 8});
+      } else if (!state.firnMapShowAll && bounds.length) {
+        map.setView(bounds[0], 7, {animate:true});
+      }
+    }catch(e){}
+    var btn=$('firn-map-toggle');
+    if(btn) btn.classList.toggle('active', !!state.firnMapShow);
+    var btnAll=$('firn-map-showall'); if(btnAll) btnAll.classList.toggle('active', !!state.firnMapShowAll);
+  }
+  function toggleFirnShowAll(){
+    state.firnMapShowAll = !state.firnMapShowAll;
+    if (state.firnMapShowAll) state.firnMapFocused = null;
+    updateFirnMap();
+  }
+  function firnFocusOnMap(rowId){
+    var n = state.results.find(function(x){ return x.rowId===rowId; });
+    if(!n) return;
+    if(!ensureFirnMap()) return;
+    var ll=firnGetLatLon(n);
+    if(!ll) { addToast('No coordinates for '+n.Location); return; }
+    if(!state.firnMapShow){ state.firnMapShow=true; updateFirnMap(); }
+    try{
+      state.firnMap.setView(ll, 8, {animate:true});
+      setTimeout(function(){
+        if(state.firnMapPopup) try{ state.firnMap.closePopup(state.firnMapPopup);}catch(e){}
+        state.firnMapPopup = L.popup({maxWidth:320}).setLatLng(ll).setContent(firnBuildPopup(n)).openOn(state.firnMap);
+        state.firnMapFocused=rowId;
+      }, 250);
+    }catch(e){}
+    // scroll map into view
+    try{ $('firn-map-panel').scrollIntoView({behavior:'smooth', block:'start'});}catch(e){}
+  }
+  function toggleFirnMapLayer(){
+    state.firnMapShow=!state.firnMapShow;
+    var btn=$('firn-map-toggle');
+    if(btn) btn.classList.toggle('active', state.firnMapShow);
+    updateFirnMap();
+  }
+  function isFirnMapExpanded(){
+    var w=$('firn-map-wrap');
+    return w && (w.classList.contains('is-fullscreen') || document.fullscreenElement===w || document.webkitFullscreenElement===w);
+  }
+  function syncFirnExpandBtn(){
+    var btn=$('firn-map-expand');
+    if(!btn) return;
+    btn.textContent = isFirnMapExpanded() ? '✕ CLOSE' : '⛶ EXPAND';
+    btn.classList.toggle('active', isFirnMapExpanded());
+  }
+  function expandFirnMap(){
+    var w=$('firn-map-wrap');
+    var req=w.requestFullscreen||w.webkitRequestFullscreen;
+    if(req){
+      var p=req.call(w);
+      if(p&&p.catch) p.catch(function(){ w.classList.add('is-fullscreen'); syncFirnExpandBtn(); setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); },80); });
+      else setTimeout(function(){ if(!document.fullscreenElement && !document.webkitFullscreenElement && !w.classList.contains('is-fullscreen')){ w.classList.add('is-fullscreen'); syncFirnExpandBtn(); if(state.firnMap) state.firnMap.invalidateSize(); } },250);
+    } else { w.classList.add('is-fullscreen'); syncFirnExpandBtn(); }
+    setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); },120);
+    setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); },350);
+  }
+  function closeFirnMapExpand(){
+    var w=$('firn-map-wrap');
+    if(document.fullscreenElement||document.webkitFullscreenElement){ var ex=document.exitFullscreen||document.webkitExitFullscreen; if(ex) ex.call(document); }
+    w.classList.remove('is-fullscreen');
+    syncFirnExpandBtn();
+    setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); },80);
+  }
+  function toggleFirnMapExpand(){ if(isFirnMapExpanded()) closeFirnMapExpand(); else expandFirnMap(); }
+
+  function $(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+
+  function addToast(msg) {
+    var t = document.querySelector('.firn-toast');
+    if (!t) { t = document.createElement('div'); t.className = 'firn-toast'; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(window.__firnToastTimer);
+    window.__firnToastTimer = setTimeout(function () { t.style.display = 'none'; }, 2600);
+  }
+
+  function run(fnName) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    // ponytail: bulk ops need longer (TSV 700 rows ~ 20s on first run)
+    var timeoutMs = /Bulk/i.test(fnName) ? 60000 : 15000;
+    return new Promise(function (resolve) {
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        resolve({ error: 'google.script.run unavailable (local preview).' });
+        return;
+      }
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        resolve({ error: fnName + ' timed out after '+(timeoutMs/1000)+' seconds. Check Apps Script deployment and execution log.' });
+      }, timeoutMs);
+      var ok = function (data) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (data === null || data === undefined) {
+          resolve({ error: fnName + ' returned null - redeploy Apps Script as new version.' });
+        } else { resolve(data); }
+      };
+      var fail = function (e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ error: (e && e.message) || String(e) || 'Server error' });
+      };
+      var chain = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
+      try { chain[fnName].apply(chain, args); } catch (e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ error: String(e && e.message || e) });
+      }
+    });
+  }
+
+  function fmtDate(v) {
+    if (!v) return '';
+    var s = String(v);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 16);
+    return s;
+  }
+  function setLastUpdate(data, issueDate, locations) {
+    var el = $('firn-last-update');
+    var query = $('firn-query-time');
+    var stamp = issueDate || (data && (data.lastUpdate || data.queryTime));
+    if (!stamp) stamp = new Date().toISOString();
+    var match = String(stamp).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+    var now = match ? new Date(Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5], +(match[6] || 0))) : new Date(stamp);
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    var text = now.getUTCFullYear() + '-' + p(now.getUTCMonth() + 1) + '-' + p(now.getUTCDate()) + ' ' + p(now.getUTCHours()) + ':' + p(now.getUTCMinutes()) + ':' + p(now.getUTCSeconds()) + 'Z';
+    if (query) query.textContent = 'Query ran at UTC: ' + text.replace(/[-: ]/g, '_').replace(/Z$/, '');
+    if (el) el.textContent = issueDate ? 'NOTAM ISSUE: ' + text : 'LAST UPDATE: ' + text;
+  }
+  function toLocalInput(v) {
+    if (!v) return '';
+    var s = String(v);
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if (!m) return '';
+    // datetime-local expects local time; we treat stored value as UTC and
+    // convert to the browser's local timezone for editing.
+    var utc = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5]));
+    if (isNaN(utc.getTime())) return '';
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return utc.getFullYear() + '-' + p(utc.getMonth()+1) + '-' + p(utc.getDate()) + 'T' + p(utc.getHours()) + ':' + p(utc.getMinutes());
+  }
+  function fromLocalInput(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getUTCFullYear() + '-' + p(d.getUTCMonth()+1) + '-' + p(d.getUTCDate()) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
+  }
+
+  function renderFirLocations(extra) {
+    var counts = getFirCounts();
+    var allLocs = [];
+    // union of notams + results to cover empty states
+    state.notams.forEach(function (n) { allLocs.push(String(n.Location || '').trim().toUpperCase()); });
+    state.results.forEach(function (n) { allLocs.push(String(n.Location || '').trim().toUpperCase()); });
+    if (extra) allLocs.push(String(extra).trim().toUpperCase());
+    var locations = Array.from(new Set(allLocs.filter(function (x) { return /^[A-Z]{4}$/.test(x); }))).sort();
+    if (!locations.length) {
+      $('firn-fir-list').innerHTML = '<span style="font:10px var(--font-mono); color:var(--text-muted);">No FIR — add NOTAMs to see tabs</span>';
+      updateFirFilterInfo();
+      return;
+    }
+    $('firn-fir-list').innerHTML = locations.map(function (location) {
+      var active = state.selectedFir === location ? ' active' : '';
+      var cnt = counts[location] || 0;
+      var cntHtml = cnt ? '<span class="firn-fir-cnt">' + cnt + '</span>' : '';
+      return '<button type="button" class="firn-fir-code' + active + '" data-fir="' + esc(location) + '" title="Filter ' + esc(location) + ' — ' + cnt + ' NOTAMs">' + esc(location) + cntHtml + '</button>';
+    }).join('');
+    // bind click
+    $('firn-fir-list').querySelectorAll('[data-fir]').forEach(function (el) {
+      el.addEventListener('click', function () { setFirFilter(el.getAttribute('data-fir')); });
+    });
+    updateFirFilterInfo();
+  }
+
+  function getFilteredResults() {
+    var q = (state.filter || '').trim().toLowerCase();
+    var fir = state.selectedFir ? String(state.selectedFir).trim().toUpperCase() : null;
+    var status = String(state.statusFilter || '').toUpperCase();
+    var risk = String(state.riskFilter || '').toUpperCase();
+    var type = String(state.typeFilter || '').toUpperCase();
+    var cls = String(state.classFilter || '').toUpperCase();
+    return state.results.filter(function (n) {
+      if (fir && String(n.Location || '').trim().toUpperCase() !== fir) return false;
+      if (status && String(n.status || 'ACTIVE').trim().toUpperCase() !== status) return false;
+      if (risk && String(n.risk || 'LOW').trim().toUpperCase() !== risk) return false;
+      if (type && String(n.type || 'NEW').trim().toUpperCase() !== type) return false;
+      if (cls && String(n.Class || '').trim().toUpperCase() !== cls) return false;
+      if (!q) return true;
+      var hay = (n.Location + ' ' + n['NOTAM #'] + ' ' + (n['NOTAM Text'] || '') + ' ' + (n.Class || '')).toLowerCase();
+      return hay.indexOf(q) > -1;
+    });
+  }
+
+  /* ---- Bento: drawer toggle (Editor/Bulk) + results refresh cache-aware ---- */
+  function refreshResultsIfStale(force) {
+    var age = Date.now() - (state.lastResultsLoad || 0);
+    if (force || !state.results.length || age > 30000) loadResults(force);
+    else renderResults(); // use cache, no loading spinner
+  }
+  function openDrawer(name) {
+    var d = $('firn-tab-' + name);
+    if (!d) return;
+    d.classList.add('open');
+    var bar = $('firn-drawer-' + name + '-bar');
+    if (bar) bar.classList.add('open');
+  }
+  function toggleDrawer(name) {
+    var d = $('firn-tab-' + name);
+    if (!d) return;
+    var open = d.classList.toggle('open');
+    var bar = $('firn-drawer-' + name + '-bar');
+    if (bar) bar.classList.toggle('open', open);
+    if (open && name === 'editor') { try { $('firn-location').focus(); } catch(e){} }
+    if (open) setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); }, 80);
+  }
+
+  /* ---- Results tab ---- */
+  function badgeHtml(n) {
+    var status = n.status === 'EXPIRED' ? 'expired' : 'active';
+    var risk = String(n.risk || 'LOW').toLowerCase();
+    var type = String(n.type || 'NEW').toLowerCase();
+    var cls = String(n.Class || 'N/A').toUpperCase();
+    var h = '<div class="firn-badges">';
+    h += '<span class="firn-b firn-b-status-' + status + '">● ' + (status === 'active' ? 'Active' : 'Expired') + '</span>';
+    h += '<span class="firn-b firn-b-cls">Class ' + esc(cls) + '</span>';
+    h += '<span class="firn-b firn-b-risk-' + risk + '">' + esc(n.risk || 'LOW') + '</span>';
+    h += '<span class="firn-b firn-b-type-' + type + '">' + esc(n.type || 'NEW') + '</span>';
+    h += '</div>';
+    return h;
+  }
+
+  function renderFilterControls() {
+    var defs = [
+      {key:'status', id:'firn-filter-status', state:'statusFilter', values:['ACTIVE','EXPIRED']},
+      {key:'risk', id:'firn-filter-risk', state:'riskFilter', values:['HIGH','MEDIUM','LOW']},
+      {key:'type', id:'firn-filter-type', state:'typeFilter', values:['NEW','RPL','CNL']},
+      {key:'class', id:'firn-filter-class', state:'classFilter', values:['A','B','C','D','E','F','O']}
+    ];
+    defs.forEach(function(def) {
+      var select = $(def.id);
+      if (!select) return;
+      var current = state[def.state] || '';
+      var html = '<option value="">All (' + state.results.length + ')</option>';
+      def.values.forEach(function(value) {
+        var count = state.results.filter(function(n) {
+          var actual = def.key === 'status' ? (n.status || 'ACTIVE') : def.key === 'risk' ? (n.risk || 'LOW') : def.key === 'type' ? (n.type || 'NEW') : n.Class;
+          return String(actual || '').trim().toUpperCase() === value;
+        }).length;
+        html += '<option value="' + value + '">' + value + ' (' + count + ')</option>';
+      });
+      select.innerHTML = html;
+      select.value = current;
+    });
+    var applied = [];
+    if (state.statusFilter) applied.push('STATUS=' + state.statusFilter);
+    if (state.riskFilter) applied.push('RISK=' + state.riskFilter);
+    if (state.typeFilter) applied.push('TYPE=' + state.typeFilter);
+    if (state.classFilter) applied.push('CLASS=' + state.classFilter);
+    var summary = $('firn-filter-summary');
+    if (summary) summary.textContent = applied.length ? 'FILTER: ' + applied.join(' · ') : '';
+  }
+
+  function setFilterValue(key, value) {
+    state[key] = String(value || '').toUpperCase();
+    renderFilterControls();
+    renderResults();
+  }
+
+  function clearNotamFilters() {
+    state.statusFilter = '';
+    state.riskFilter = '';
+    state.typeFilter = '';
+    state.classFilter = '';
+    renderFilterControls();
+    renderResults();
+  }
+
+  function renderResults() {
+    var box = $('firn-results-list');
+    var list = getFilteredResults();
+    var cnt = $('firn-results-count');
+    renderFilterControls();
+    if (cnt) {
+      var suffix = state.selectedFir ? ' · ' + esc(state.selectedFir) : '';
+      cnt.textContent = '(' + list.length + '/' + state.results.length + suffix + ')';
+    }
+    // map count handled by updateFirnMap() (status in map head)
+    // re-render FIR tabs to update counts after results loaded
+    if (box && box._lastFirRender !== state.selectedFir) { /* no-op, tabs updated via renderFirLocations elsewhere */ }
+    if (!list.length) {
+      var emptyMsg = 'No FIR NOTAM results found.';
+      if (state.results.length) {
+        if (state.selectedFir && state.filter) emptyMsg = 'No match for FIR ' + esc(state.selectedFir) + ' + search "' + esc(state.filter) + '".';
+        else if (state.selectedFir) emptyMsg = 'No NOTAMs for FIR ' + esc(state.selectedFir) + '. <button type="button" onclick="clearFirFilter()" style="margin-top:8px;" class="firn-btn">Clear FIR filter</button>';
+        else emptyMsg = 'No match for "' + esc(state.filter) + '".';
+      }
+      box.innerHTML = '<div class="firn-empty">' + emptyMsg + '</div>';
+      // also bind clear button inside empty if present
+      var clearBtn = box.querySelector('button');
+      if (clearBtn) clearBtn.addEventListener('click', clearFirFilter);
+      try { updateFirnMap(); } catch(e){}
+      return;
+    }
+    var h = '';
+    list.forEach(function (n) {
+      h += '<div class="firn-card">';
+      h += '<div class="firn-card-head">';
+      h += '<div class="firn-card-id"><span class="firn-card-loc">' + esc(n.Location) + '</span><span class="firn-card-num">' + esc(n['NOTAM #']) + '</span></div>';
+      h += badgeHtml(n);
+      h += '</div>';
+      h += '<div class="firn-card-body">';
+      h += '<div class="firn-card-meta">';
+      h += '<span>Eff ' + esc(fmtDate(n['Effective Date'])) + '</span>';
+      h += '<span>Exp ' + esc(fmtDate(n['Expiration Date'])) + '</span>';
+      if (n['Issue Date']) h += '<span>Issue ' + esc(fmtDate(n['Issue Date'])) + '</span>';
+      h += '</div>';
+      h += '<div class="firn-card-text">' + esc(n['NOTAM Text']) + '</div>';
+      h += '</div>';
+      h += '<div class="firn-card-foot">';
+      h += '<span class="firn-when">Row ' + esc(n.rowId) + '</span>';
+      h += '<div class="firn-actions">';
+      h += '<button type="button" class="firn-btn edit" data-edit="' + n.rowId + '">✏ Edit</button>';
+      h += '<button type="button" class="firn-btn map" data-map="' + n.rowId + '">🗺 Show on Map</button>';
+      h += '</div>';
+      h += '</div>';
+      h += '</div>';
+    });
+    box.innerHTML = h;
+    box.querySelectorAll('[data-edit]').forEach(function (el) {
+      el.addEventListener('click', function () { editFromResults(Number(el.getAttribute('data-edit'))); });
+    });
+    box.querySelectorAll('[data-map]').forEach(function (el) {
+      el.addEventListener('click', function () { showOnMap(Number(el.getAttribute('data-map'))); });
+    });
+    try { updateFirnMap(); } catch(e){}
+  }
+
+  async function loadResults(force) {
+    var age = Date.now() - (state.lastResultsLoad || 0);
+    // use cache if still fresh and not forced
+    if (!force && state.results.length && age < 30000) { renderResults(); renderFirLocations(); return; }
+    var box = $('firn-results-list');
+    // save scroll position before loading
+    var prevScroll = box ? box.scrollTop : 0;
+    box.innerHTML = '<div class="firn-empty">Loading results…</div>';
+    var data = await run('firGetNotamResults');
+    if (data && data.ok) {
+      state.results = data.results || [];
+      state.lastResultsLoad = Date.now();
+      renderFirLocations();
+      renderResults();
+      if (box) box.scrollTop = prevScroll;
+    } else {
+      box.innerHTML = '<div class="firn-empty">Failed to load: ' + esc((data && data.error) || 'unknown') + '</div>';
+    }
+  }
+
+  function editFromResults(rowId) {
+    var n = state.results.find(function (x) { return x.rowId === rowId; });
+    if (!n) return;
+    // Ensure the editor has this NOTAM loaded, then switch to the Editor tab.
+    var existing = state.notams.find(function (x) { return x.rowId === rowId; });
+    if (!existing) {
+      state.notams.push({
+        rowId: n.rowId,
+        Location: n.Location,
+        'NOTAM #': n['NOTAM #'],
+        Class: n.Class,
+        'Issue Date': n['Issue Date'],
+        'Effective Date': n['Effective Date'],
+        'Expiration Date': n['Expiration Date'],
+        'NOTAM Text': n['NOTAM Text']
+      });
+    }
+    loadIntoForm(rowId);
+    openDrawer('editor');
+  }
+
+  function showOnMap(rowId) {
+    var n = state.results.find(function (x) { return x.rowId === rowId; });
+    if (!n) return;
+    state.firnMapShowAll = false;
+    state.firnMapFocused = rowId;
+    setTimeout(function(){ try { ensureFirnMap(); if(state.firnMap) state.firnMap.invalidateSize(); updateFirnMap(); } catch(e){} }, 80);
+    setTimeout(function(){ try { firnFocusOnMap(rowId); } catch(e){} }, 160);
+  }
+  // exposed for popup Edit button
+  window.firnEditFromMap = function(rowId){ editFromResults(rowId); };
+
+  function setFieldErr(fieldId, show) {
+    var input = $(fieldId);
+    var err = $('err-' + fieldId);
+    if (input) input.classList.toggle('is-invalid', !!show);
+    if (err) err.classList.toggle('show', !!show);
+  }
+
+  function validateForm(showErrors) {
+    var loc = String($('firn-location').value || '').trim().toUpperCase();
+    var rawNum = String($('firn-number').value || '').trim().toUpperCase();
+    // ponytail: tolerate pasted noise — extract first N1234/25-like token, normalize slashes
+    var normNum = rawNum.replace(/\u2215|\u2044|\uFF0F/g, '/').replace(/\s+/g, '');
+    var m = normNum.match(/([A-Z]\d{4}\/\d{2})/);
+    var num = m ? m[1] : normNum;
+    // auto-correct visible field if we extracted (don't trigger loop)
+    if (m && $('firn-number').value !== num) { try{ $('firn-number').value = num; }catch(e){} }
+    var cls = String($('firn-class').value || '').trim().toUpperCase();
+    var txt = String($('firn-text').value || '').trim();
+    var ok = true;
+    var locOk = /^[A-Z]{4}$/.test(loc);
+    var numOk = /^[A-Z]\d{4}\/\d{2}$/i.test(num);
+    var clsOk = !!cls;
+    var txtOk = txt.length > 0;
+    if (showErrors) {
+      setFieldErr('firn-location', !locOk);
+      setFieldErr('firn-number', !numOk);
+      setFieldErr('firn-class', !clsOk);
+      setFieldErr('firn-text', !txtOk);
+    }
+    ok = locOk && numOk && clsOk && txtOk;
+    var saveBtn = $('firn-save');
+    if (saveBtn) {
+      saveBtn.disabled = !ok;
+      saveBtn.style.opacity = ok ? '' : '0.6';
+      saveBtn.title = ok ? '' : 'Fix highlighted fields first';
+    }
+    return ok;
+  }
+
+  function updateTextCount() {
+    var c = $('firn-text-count');
+    var t = $('firn-text');
+    if (c && t) c.textContent = String(t.value || '').length + ' chars';
+  }
+
+  function clearForm() {
+    state.editingRowId = null;
+    $('firn-location').value = '';
+    $('firn-number').value = '';
+    $('firn-class').value = '';
+    $('firn-issue').value = '';
+    $('firn-effective').value = '';
+    $('firn-expiration').value = '';
+    var permCb3 = $('firn-expiration-perm'); if (permCb3) { permCb3.checked=false; $('firn-expiration').disabled=false; }
+    $('firn-text').value = '';
+    $('firn-form-title').textContent = 'New FIR NOTAM';
+    $('firn-delete').style.display = 'none';
+    $('firn-cancel').style.display = 'none';
+    $('firn-save').textContent = '💾 SAVE';
+    state.notams = state.notams.filter(function (n) { return n.rowId !== 0; });
+    ['firn-location','firn-number','firn-class','firn-text'].forEach(function(id){ setFieldErr(id, false); });
+    updateTextCount();
+    validateForm(false);
+  }
+
+  function loadIntoForm(rowId) {
+    if (rowId === 0) return;
+    var n = state.notams.find(function (x) { return x.rowId === rowId; });
+    if (!n) return;
+    state.editingRowId = rowId;
+    $('firn-location').value = String(n.Location || '').toUpperCase();
+    $('firn-number').value = String(n['NOTAM #'] || '').toUpperCase();
+    $('firn-class').value = String(n.Class || '').toUpperCase();
+    $('firn-issue').value = toLocalInput(n['Issue Date']);
+    $('firn-effective').value = toLocalInput(n['Effective Date']);
+    var expVal = String(n['Expiration Date'] || '');
+    var isPerm = expVal.trim().toUpperCase() === 'PERM';
+    $('firn-expiration').value = isPerm ? '' : toLocalInput(expVal);
+    var permCb2 = $('firn-expiration-perm');
+    if (permCb2) { permCb2.checked = isPerm; $('firn-expiration').disabled = isPerm; }
+    $('firn-text').value = n['NOTAM Text'];
+    $('firn-form-title').textContent = 'Edit ' + n.Location + ' ' + n['NOTAM #'];
+    $('firn-delete').style.display = '';
+    $('firn-cancel').style.display = '';
+    $('firn-save').textContent = '💾 UPDATE';
+    ['firn-location','firn-number','firn-class','firn-text'].forEach(function(id){ setFieldErr(id, false); });
+    updateTextCount();
+    validateForm(false);
+    // scroll to form on mobile
+    try { $('firn-form-title').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(e){}
+  }
+
+  function collectPayload() {
+    return {
+      rowId: state.editingRowId,
+      Location: $('firn-location').value,
+      'NOTAM #': $('firn-number').value,
+      Class: $('firn-class').value,
+      'Issue Date': fromLocalInput($('firn-issue').value),
+      'Effective Date': fromLocalInput($('firn-effective').value),
+      'Expiration Date': ($('firn-expiration-perm') && $('firn-expiration-perm').checked) ? 'PERM' : fromLocalInput($('firn-expiration').value),
+      'NOTAM Text': $('firn-text').value
+    };
+  }
+
+  async function save() {
+    if (!validateForm(true)) {
+      addToast('Fix highlighted fields first.');
+      return;
+    }
+    var payload = collectPayload();
+    var btn = $('firn-save');
+    var orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ SAVING…'; }
+    var fn = state.editingRowId ? 'firUpdateNotam' : 'firSaveNotam';
+    var res = await run(fn, payload);
+    if (btn) { btn.textContent = orig; btn.disabled = false; validateForm(false); }
+    if (res && res.ok) {
+      addToast(res.message || 'Saved.');
+      // ponytail: don't auto-select FIR — let user stay on current filter
+      await load(true);
+      renderFirLocations();
+      clearForm();
+    } else {
+      var msg = (res && res.error) || 'unknown';
+      addToast('Error: ' + msg);
+      // surface server validation as field error
+      if (/Location/i.test(msg)) setFieldErr('firn-location', true);
+      if (/NOTAM #/i.test(msg) || /already exists/i.test(msg)) setFieldErr('firn-number', true);
+      if (/Class/i.test(msg)) setFieldErr('firn-class', true);
+      if (/NOTAM Text/i.test(msg)) setFieldErr('firn-text', true);
+      if (/Issue Date/i.test(msg) || /Effective Date/i.test(msg) || /Expiration Date/i.test(msg)) {
+        if (/Issue Date/i.test(msg) && $('firn-issue')) $('firn-issue').classList.add('is-invalid');
+        if (/Effective Date/i.test(msg) && $('firn-effective')) $('firn-effective').classList.add('is-invalid');
+        if (/Expiration Date/i.test(msg) && $('firn-expiration')) $('firn-expiration').classList.add('is-invalid');
+      }
+    }
+  }
+
+  async function remove() {
+    if (!state.editingRowId) return;
+    if (!confirm('Delete NOTAM row ' + state.editingRowId + '? This cannot be undone.')) return;
+    var res = await run('firDeleteNotam', state.editingRowId);
+    if (res && res.ok) {
+      addToast(res.message || 'Deleted.');
+      await load(true);
+      clearForm();
+    } else {
+      addToast('Error: ' + ((res && res.error) || 'unknown'));
+    }
+  }
+
+  async function load(force) {
+    var age = Date.now() - (state.lastLoad || 0);
+    if (!force && state.notams.length && age < 30000) {
+      // cache still fresh — just ensure results also rendered without fetch
+      if (!state.results.length) loadResults();
+      return;
+    }
+    if (state.loading) return;
+    state.loading = true;
+    // ponytail: editor has no list scroll anymore
+    var data = await run('firGetNotamEditorData');
+    if (data && data.ok) {
+      state.notams = data.notams || [];
+      state.lastLoad = Date.now();
+      renderFirLocations();
+      setLastUpdate(data);
+
+    } else {
+      addToast('Failed to load: ' + esc((data && data.error) || 'unknown'));
+    }
+    state.loading = false;
+    // bento: results always visible — refresh (fetch only if forced)
+    loadResults(force);
+  }
+
+  // ---- Paste / auto-fill parser ----
+  function yyMMddHHmm(s) {
+    var y = 2000 + Number(s.slice(0,2)), mo = Number(s.slice(2,4)), d = Number(s.slice(4,6));
+    var hh = Number(s.slice(6,8)), mm = Number(s.slice(8,10));
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return y + '-' + p(mo) + '-' + p(d) + ' ' + p(hh) + ':' + p(mm);
+  }
+  function parseNotam(raw) {
+    var out = { Location: '', 'NOTAM #': '', Class: '', 'Issue Date': '', 'Effective Date': '', 'Expiration Date': '', 'NOTAM Text': '' };
+    if (!raw) return out;
+    var text = String(raw).replace(/\r/g, '');
+    // ponytail: reject DINS table TSV dumps — redirect to UPDATE NOTAM
+    if (/NOTAMs for Location search|Query ran at UTC|NOTAM Condition\/LTA subject|Filter\(s\) used:/i.test(text) || (/Location\s+NOTAM #\/LTA #/i.test(text) && /\b[A-Z]\d{4}\/\d{2}\b/.test(text) && (text.match(/^Q\)/gm)||[]).length > 2)) {
+      // signal to caller that this is a table dump
+      out._isTableDump = true;
+      out._rawForError = text;
+      return out;
+    }
+
+    var numMatch = text.match(/\b([A-Z]\d{4}\/\d{2})\b/i);
+    if (numMatch) out['NOTAM #'] = numMatch[1].toUpperCase();
+
+    // ponytail: if text still looks like a table dump after header check, fail early
+    if (/NOTAM Condition\/LTA subject/i.test(text) && (text.match(/^Q\)/gm)||[]).length > 1) {
+      out._isTableDump = true;
+      return out;
+    }
+    // Bulk exports often contain many rows plus a quoted NOTAM body. Keep the
+    // selected record instead of copying the entire export into NOTAM Text.
+    if (out['NOTAM #']) {
+      var escapedNumber = out['NOTAM #'].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      var headerRe = new RegExp(escapedNumber + '\\s+NOTAM[NRCS]?\\b', 'i');
+      var headerMatch = headerRe.exec(text);
+      if (headerMatch) {
+        var selected = text.slice(headerMatch.index);
+        var nextMatch = /\b[A-Z]\d{4}\/\d{2}\s+NOTAM[NRCS]?\b/i.exec(selected.slice(headerMatch[0].length));
+        if (nextMatch) selected = selected.slice(0, headerMatch[0].length + nextMatch.index);
+        text = selected.trim();
+      }
+    }
+    var lines = text.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+
+    var qLine = lines.find(function (l) { return /^Q\)/i.test(l); });
+    if (qLine) {
+      var q = qLine.replace(/^Q\)/i, '').trim();
+      var parts = q.split('/');
+      if (parts[0] && /^[A-Z]{4}$/i.test(parts[0].trim())) out.Location = parts[0].trim().toUpperCase();
+      if (parts[1]) {
+        var qcode = parts[1].trim().toUpperCase();
+        if (qcode.length >= 2 && /^Q[A-Z]/.test(qcode)) {
+          var cls = qcode.charAt(1);
+          if (/^[ABCDEFO]$/.test(cls)) out.Class = cls;
+        }
+      }
+    }
+
+    var aMatch = text.match(/(?:^|\s)A\)\s*([A-Z]{4})/i);
+    if (aMatch && !out.Location) out.Location = aMatch[1].toUpperCase();
+
+    // ICAO fields may share one physical line: A) ... B) ... C) ...
+    var bMatch = text.match(/(?:^|\s)B\)\s*(\d{10})/i);
+    if (bMatch) out['Effective Date'] = yyMMddHHmm(bMatch[1]);
+
+    var cMatch = text.match(/(?:^|\s)C\)\s*(\d{10}|PERM)/i);
+    if (cMatch) {
+      out['Expiration Date'] = /^PERM$/i.test(cMatch[1]) ? 'PERM' : yyMMddHHmm(cMatch[1]);
+    }
+
+    var firstLine = lines[0] || '';
+    var im = firstLine.match(/(\d{10})/);
+    if (im) out['Issue Date'] = yyMMddHHmm(im[1]);
+
+    out['NOTAM Text'] = text.trim();
+    out.locations = Array.from(new Set((text.match(/(?:Q\)|A\))\s*([A-Z]{4})/gi) || []).map(function (line) {
+      var m = line.match(/([A-Z]{4})\s*$/i);
+      return m ? m[1].toUpperCase() : '';
+    }).filter(Boolean)));
+    if (!out.locations.length && out.Location) out.locations = [out.Location];
+    return out;
+  }
+  function doParse() {
+    var raw = $('firn-paste').value;
+    if (!raw.trim()) { addToast('Paste a NOTAM first.'); return; }
+    var p = parseNotam(raw);
+    if (p && p._isTableDump) {
+      addToast('DINS/TSV table detected — use the UPDATE NOTAM page for TSV, or paste 1 ICAO NOTAM only (Q) ... E) ...).');
+      // keep raw in paste for user to copy elsewhere, don't auto-fill
+      return;
+    }
+    $('firn-location').value = p.Location;
+    $('firn-number').value = p['NOTAM #'];
+    $('firn-class').value = p.Class;
+    $('firn-issue').value = toLocalInput(p['Issue Date']);
+    $('firn-effective').value = toLocalInput(p['Effective Date']);
+    var isPermParsed = String(p['Expiration Date'] || '').toUpperCase() === 'PERM';
+    $('firn-expiration').value = isPermParsed ? '' : toLocalInput(p['Expiration Date']);
+    var permCbP = $('firn-expiration-perm'); if (permCbP) { permCbP.checked = isPermParsed; $('firn-expiration').disabled = isPermParsed; }
+    $('firn-text').value = p['NOTAM Text'];
+    ['firn-location', 'firn-number', 'firn-class', 'firn-text', 'firn-issue', 'firn-effective', 'firn-expiration'].forEach(function (id) {
+      setFieldErr(id, false);
+      var field = $(id);
+      if (field) field.classList.remove('is-invalid');
+    });
+    $('firn-form-title').textContent = 'New FIR NOTAM (parsed)';
+    $('firn-delete').style.display = 'none';
+    $('firn-cancel').style.display = 'none';
+    $('firn-save').textContent = '💾 SAVE';
+    state.editingRowId = null;
+    state.notams = state.notams.filter(function (n) { return n.rowId !== 0; });
+    state.notams.unshift({
+      rowId: 0,
+      Location: p.Location,
+      'NOTAM #': p['NOTAM #'],
+      Class: p.Class,
+      'Issue Date': p['Issue Date'],
+      'Effective Date': p['Effective Date'],
+      'Expiration Date': p['Expiration Date'],
+      'NOTAM Text': p['NOTAM Text']
+    });
+    renderFirLocations(p.Location);
+    setLastUpdate(null, null, p.locations);
+    updateTextCount();
+    validateForm(false);
+    addToast('Parsed — review fields, then SAVE.');
+  }
+
+  function bindEditorEnhancements() {
+    var loc = $('firn-location');
+    var num = $('firn-number');
+    var cls = $('firn-class');
+    var txt = $('firn-text');
+    if (loc) {
+      loc.addEventListener('input', function () {
+        var v = loc.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0,4);
+        if (loc.value !== v) loc.value = v;
+        validateForm(false);
+        if (/^[A-Z]{4}$/.test(v)) setFieldErr('firn-location', false);
+      });
+      loc.addEventListener('blur', function(){ validateForm(true); });
+    }
+    if (num) {
+      num.addEventListener('input', function () {
+        var v = num.value.toUpperCase().replace(/\u2215|\u2044|\uFF0F/g, '/');
+        if (num.value !== v) num.value = v;
+        validateForm(false);
+        if (/^[A-Z]\d{4}\/\d{2}$/i.test(v.trim())) setFieldErr('firn-number', false);
+      });
+      num.addEventListener('blur', function(){
+        // normalize on blur — extract token if pasted with extra text
+        var raw = String(num.value||'').trim().toUpperCase().replace(/\u2215|\u2044|\uFF0F/g, '/');
+        var mm = raw.match(/([A-Z]\d{4}\/\d{2})/);
+        if (mm && mm[1] !== raw) num.value = mm[1];
+        validateForm(true);
+      });
+    }
+    if (cls) cls.addEventListener('change', function(){ validateForm(false); setFieldErr('firn-class', false); });
+    ['firn-issue', 'firn-effective', 'firn-expiration'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.addEventListener('input', function () { el.classList.remove('is-invalid'); });
+    });
+    // ponytail: PERM checkbox
+    var permCb = $('firn-expiration-perm');
+    var expInput = $('firn-expiration');
+    if (permCb && expInput) {
+      permCb.addEventListener('change', function(){
+        if (permCb.checked) { expInput.value=''; expInput.disabled=true; expInput.classList.remove('is-invalid'); }
+        else { expInput.disabled=false; }
+      });
+    }
+    if (txt) {
+      txt.addEventListener('input', function(){ updateTextCount(); validateForm(false); if (txt.value.trim().length) setFieldErr('firn-text', false); });
+      txt.addEventListener('blur', function(){ validateForm(true); });
+    }
+    // Ctrl+Enter to save
+    [loc, num, cls, txt, $('firn-issue'), $('firn-effective'), $('firn-expiration'), $('firn-paste')].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape' && state.editingRowId) { e.preventDefault(); clearForm(); }
+      });
+    });
+  }
+
+  function init(force) {
+    if (state.initialized) {
+      // don't auto-reload when switching pages — use cache
+      renderResults();
+      if (force) load(true);
+      return;
+    }
+    state.initialized = true;
+    bindEditorEnhancements();
+    $('firn-refresh').addEventListener('click', function(){ load(true); loadResults(true); });
+    $('firn-new').addEventListener('click', clearForm);
+    $('firn-save').addEventListener('click', save);
+    $('firn-delete').addEventListener('click', remove);
+    $('firn-cancel').addEventListener('click', clearForm);
+    var topSearch = $('firn-search');
+    if (topSearch) topSearch.addEventListener('input', function () {
+      state.filter = topSearch.value;
+      renderResults();
+    });
+    var clearBtn = $('firn-fir-clear');
+    if (clearBtn) clearBtn.addEventListener('click', clearFirFilter);
+    $('firn-parse').addEventListener('click', doParse);
+    var de = $('firn-drawer-editor-bar');
+    if (de) de.addEventListener('click', function () { toggleDrawer('editor'); });
+     var rr = $('firn-results-refresh');
+     if (rr) rr.addEventListener('click', function(){ loadResults(true); });
+     [['firn-filter-status','statusFilter'],['firn-filter-risk','riskFilter'],['firn-filter-type','typeFilter'],['firn-filter-class','classFilter']].forEach(function(pair){
+       var select = $(pair[0]);
+       if (select) select.addEventListener('change', function(){ setFilterValue(pair[1], select.value); });
+     });
+     var filterClear = $('firn-filter-clear');
+     if (filterClear) filterClear.addEventListener('click', clearNotamFilters);
+    // ---- Own map bindings ----
+    var mt = $('firn-map-toggle');
+    if (mt) { mt.addEventListener('click', toggleFirnMapLayer); mt.classList.add('active'); }
+    var mall = $('firn-map-showall');
+    if (mall) mall.addEventListener('click', toggleFirnShowAll);
+    var me = $('firn-map-expand');
+    if (me) me.addEventListener('click', toggleFirnMapExpand);
+    document.addEventListener('keydown', function(e){
+      var firNotamActive = document.getElementById('view-fir-notam') && document.getElementById('view-fir-notam').classList.contains('active');
+      if (!firNotamActive) return;
+      if (e.key === 'Escape' && isFirnMapExpanded()) { e.preventDefault(); closeFirnMapExpand(); }
+      if ((e.key==='f'||e.key==='F') && !e.ctrlKey && !e.metaKey && e.target && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) { e.preventDefault(); toggleFirnMapExpand(); }
+    });
+    document.addEventListener('fullscreenchange', function(){ syncFirnExpandBtn(); setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); },80); });
+    document.addEventListener('webkitfullscreenchange', function(){ syncFirnExpandBtn(); setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); },80); });
+    window.addEventListener('resize', function(){ if(state.firnMap) state.firnMap.invalidateSize(); });
+    // When FIR NOTAM view becomes active, ensure map correct size
+    try {
+      var firNotamView = document.getElementById('view-fir-notam');
+      if (firNotamView) {
+        var obs = new MutationObserver(function(){
+          if (firNotamView.classList.contains('active')) {
+            setTimeout(function(){ ensureFirnMap(); if(state.firnMap) state.firnMap.invalidateSize(); updateFirnMap(); }, 100);
+            setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); }, 350);
+          }
+        });
+        obs.observe(firNotamView, {attributes:true, attributeFilter:['class']});
+      }
+    } catch(e){}
+    // initial map init (deferred so container is laid out)
+    setTimeout(function(){ ensureFirnMap(); updateFirnMap(); }, 400);
+    // allow clicking FIR tabs via keyboard Enter/Space when focused
+    updateTextCount();
+    validateForm(false);
+    load(true);
+    // expose helpers globally for empty-state buttons
+    window.clearFirFilter = clearFirFilter;
+    window.firSetSelectedFir = setFirFilter;
+    window.firnFocusOnMap = firnFocusOnMap;
+    window.firnUpdateMap = updateFirnMap;
+  }
+  // expose force reload for manual refresh
+  window.firNotamRefresh = function(){ load(true); loadResults(true); };
+
+  window.initFirNotamDashboard = init;
+})();
+</script>
+

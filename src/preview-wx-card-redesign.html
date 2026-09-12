@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!-- Hallmark · pre-emit critique: P5 H4 E5 S4 R5 V5 -->
+<!-- PREVIEW ONLY — static mockup of redesigned WX flight card (fixture: flight 548).
+     Real data, no live wiring. Production file untouched: Weather_Warning_Ui.html.
+     Open this file in a browser to review. Delete after approval. -->
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview — WX Card Redesign (Flight 548)</title>
+<style>
+  :root {
+    --paper: #F8FAFC;
+    --card: #FFFFFF;
+    --ink: #1E3A8A;
+    --primary: #1E40AF;
+    --danger: #DC2626;
+    --ok: #15803D;
+    --warn: #D97706;
+    --muted: #E9EEF6;
+    --mline: #475569;
+    --border: #DBEAFE;
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  html, body { overflow-x: clip; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--font-sans); font-size: 14px; line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  .preview-note {
+    font-size: 12px; color: var(--mline); background: var(--muted);
+    border: 1px dashed var(--primary); border-radius: 8px; padding: 8px 12px; margin-bottom: 16px;
+  }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .card-head {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+  }
+  .flight-no { font-size: 26px; font-weight: 800; font-style: normal; letter-spacing: -0.01em; }
+  .route { font-family: var(--font-mono); font-size: 13px; color: var(--mline); }
+  .head-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .pill {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap;
+  }
+  .pill-danger { color: var(--danger); border-color: var(--danger); background: #FEF2F2; }
+  .pill-ok { color: var(--ok); border-color: var(--ok); background: #F0FDF4; }
+  .pill-warn { color: var(--warn); border-color: var(--warn); background: #FFFBEB; }
+  .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .lane { padding: 14px 18px; border-left: 4px solid var(--border); min-width: 0; }
+  .lane + .lane { border-left: 1px solid var(--border); border-left-width: 1px; }
+  .lane.st-danger { border-left: 4px solid var(--danger); }
+  .lane.st-ok { border-left: 4px solid var(--ok); }
+  .lane-label { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; color: var(--mline); }
+  .lane-time { font-family: var(--font-mono); font-size: 22px; font-weight: 700; margin: 2px 0 6px; }
+  .lane-trigger { font-family: var(--font-mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .chip {
+    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--mline); white-space: nowrap;
+  }
+  .taf { border-top: 1px solid var(--border); padding: 12px 18px; }
+  .taf-head { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; color: var(--mline); margin-bottom: 6px; }
+  .taf pre {
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.7; margin: 0 0 10px;
+    white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink);
+  }
+  .taf .chg { display: block; padding-left: 16px; text-indent: -8px; }
+  mark { background: #FDE68A; color: inherit; padding: 0 2px; border-radius: 3px; }
+  .ai { border-top: 2px solid var(--border); padding: 12px 18px 16px; }
+  .ai-row {
+    display: grid; grid-template-columns: 118px minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
+    padding: 7px 0; border-top: 1px dashed var(--border);
+  }
+  .ai-row:first-of-type { border-top: 0; }
+  .ai-leg { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; }
+  .ai-reason { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
+  .ai-chapter { font-size: 10px; color: var(--mline); text-align: right; }
+  @media (max-width: 720px) {
+    .lanes { grid-template-columns: minmax(0, 1fr); }
+    .lane + .lane { border-top: 1px solid var(--border); }
+    .ai-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .ai-chapter { text-align: left; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="preview-note">PREVIEW statis — mockup redesign kartu WX (data fixture asli flight 548). File produksi tidak diubah. Buka di browser untuk review; hapus setelah keputusan.</div>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="flight-no">548</span>
+      <span class="route">WADD → YPPH</span>
+      <span class="head-right"><span class="pill pill-danger">1 RESTRICTED</span></span>
+    </div>
+
+    <div class="lanes">
+      <div class="lane st-ok">
+        <div class="lane-label">DEPARTURE · WADD</div>
+        <div class="lane-time">17:00</div>
+        <span class="pill pill-ok">OPERATIONAL</span>
+        <div class="lane-trigger">14011KT 9999 SCT016</div>
+      </div>
+      <div class="lane st-ok">
+        <div class="lane-label">ARRIVAL · YPPH</div>
+        <div class="lane-time">20:45</div>
+        <span class="pill pill-ok">OPERATIONAL</span>
+        <div class="lane-trigger">16010KT CAVOK</div>
+      </div>
+      <div class="lane st-danger">
+        <div class="lane-label">ALT WINDOW · YPKG · 21:00–23:00</div>
+        <div class="lane-time">21:00</div>
+        <span class="pill pill-danger">RESTRICTED</span>
+        <div class="lane-trigger">TEMPO 0618/0623 200 <mark>FG</mark> BKN001</div>
+        <div class="chips"><span class="chip">OM-A 8.4 — WX monitoring</span><span class="chip">OM-A 8.3 — Low vis/severe WX</span></div>
+      </div>
+    </div>
+
+    <div class="taf">
+      <div class="taf-head">TAF RAW · 22:26–22:27 Z</div>
+      <pre>TAF WADD 061100Z 0612/0718 14011KT 9999 SCT016</pre>
+      <pre>TAF AMD YPPH 061108Z 0612/0718 16010KT CAVOK
+<span class="chg">FM061800 16008KT 9999 FEW018</span><span class="chg">FM070100 13008KT CAVOK</span><span class="chg">FM070500 20012KT CAVOK</span><span class="chg">FM070900 16008KT CAVOK</span></pre>
+      <pre style="margin-bottom:0;">TAF AMD YPKG 061115Z 0612/0712 14008KT CAVOK
+<span class="chg">FM062000 14008KT 9999 -RA SCT040</span><span class="chg">FM070400 12014KT 9999 -RA SCT012 BKN030</span><span class="chg">TEMPO 0618/0623 <mark>200</mark> <mark>FG</mark> BKN001</span></pre>
+    </div>
+
+    <div class="ai">
+      <div class="taf-head">AI REVIEW · GEMINI · gemini-3.5-flash-lite</div>
+      <div class="ai-row">
+        <span class="ai-leg">DEP — CLEAR</span>
+        <span class="ai-reason">14011KT 9999 SCT016</span>
+
+      </div>
+      <div class="ai-row">
+        <span class="ai-leg">ARR — CLEAR</span>
+        <span class="ai-reason">16010KT CAVOK</span>
+
+      </div>
+      <div class="ai-row">
+        <span class="ai-leg">ALT — DANGER</span>
+        <span class="ai-reason">TEMPO 0618/0623 200 FG BKN001</span>
+        <span class="ai-chapter">OM-A 8.3</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

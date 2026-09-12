@@ -1,0 +1,305 @@
+<div id="view-route" class="view-section">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+    <div>
+      <h2 class="header-title">ROUTE REGISTRY MANAGER</h2>
+      <div class="header-sub">Central database for all approved flight routing profiles</div>
+    </div>
+    <button class="control-btn btn-solid-primary" onclick="window.openRouteManagerModal()"><svg class="ic ic-sm"><use href="#i-plus"/></svg> NEW ROUTE PROFILE</button>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card accent"><span class="kpi-label">Registered Profiles</span><span class="kpi-val" id="route-kpi-total">0</span><span class="kpi-sub">approved routing profiles</span></div>
+    <div class="kpi-card"><span class="kpi-label">Route Pairs</span><span class="kpi-val" id="route-kpi-pairs">0</span><span class="kpi-sub">unique city pairs</span></div>
+    <div class="kpi-card warn"><span class="kpi-label">Status</span><span class="kpi-val text">REGISTRY</span><span class="kpi-sub">live from route DB</span></div>
+  </div>
+
+  <div class="route-manager-container">
+    <div class="search-bar" style="padding: 24px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-panel-alt); display: flex; gap: 20px; align-items: flex-start;">
+      <div style="display: flex; flex-direction: column; gap: 12px; flex: 1;">
+        <input type="text" id="route-search-input" class="search-input" placeholder="Search by Route ID, DEP, or ARR..." aria-label="Search routes by ID, departure or arrival" onkeyup="window.filterRouteTable()" style="background: var(--bg-void); border: 1px solid var(--border-light); color: var(--text-primary); padding: 10px 16px; border-radius: var(--radius-sm); font-family: var(--font-ui); font-size: 14px; width: 100%; box-sizing: border-box;">
+<style> .search-input:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; } </style>
+        <div class="quick-filter-bar" id="route-filter-chips">
+          <span class="filter-chip active" onclick="window.setRouteFilter(this, '')">ALL</span>
+          <span class="filter-chip" onclick="window.setRouteFilter(this, 'WIII')">WIII (CGK)</span>
+          <span class="filter-chip" onclick="window.setRouteFilter(this, 'WADD')">WADD (DPS)</span>
+          <span class="filter-chip" onclick="window.setRouteFilter(this, 'WMKK')">WMKK (KUL)</span>
+          <span class="filter-chip" onclick="window.setRouteFilter(this, 'WSSS')">WSSS (SIN)</span>
+          <span class="filter-chip" onclick="window.setRouteFilter(this, 'YPPH')">YPPH (PER)</span>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); text-align: right; padding-top: 12px; flex-shrink: 0;">
+        <span id="route-total-count" style="font-weight: 700; color: var(--accent-primary); font-size: 16px;">0</span><br>PROFILES
+      </div>
+    </div>
+
+    <div id="route-manager-tbody" class="route-grid">
+      <!-- Route profile cards injected here -->
+    </div>
+  </div>
+
+  <style>
+    /* fonts loaded via Index.html preconnect */
+    .route-manager-container { 
+      background: var(--bg-panel); 
+      border: 1px solid var(--border-light); 
+      border-radius: var(--radius-md); 
+      overflow: hidden; 
+      box-shadow: var(--shadow-soft); 
+    }
+    .route-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
+      min-width: 0;
+      gap: 14px;
+      padding: 18px;
+      max-height: 720px;
+      overflow-y: auto;
+      align-items: start;
+    }
+
+    .route-card {
+      background: var(--bg-panel-alt);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: all 0.2s ease;
+    }
+    .route-card:hover {
+      background: var(--bg-panel-raised);
+      border-color: var(--accent-primary);
+      box-shadow: 0 6px 20px rgba(200, 16, 46, 0.14);
+      transform: translateY(-2px);
+    }
+    .route-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .route-id-cell { font-family: var(--font-mono); font-weight: 800; color: var(--accent-primary); letter-spacing: 0.02em; font-size: 14px; }
+    .route-pair-cell { font-weight: 700; letter-spacing: 0.04em; font-size: 11px; color: var(--text-secondary); margin-top: 2px; display: flex; align-items: center; gap: 5px; }
+    .route-card-actions { display: flex; gap: 8px; }
+
+    .route-diagram {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 12px;
+      background: var(--bg-panel-sunken);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+    .rd-node {
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .rd-dep { background: var(--status-warning-bg); color: var(--data-dep); }
+    .rd-arr { background: var(--status-safe-bg); color: var(--data-arr); }
+    .rd-seg { opacity: 0.35; flex-shrink: 0; font-size: 9px; }
+    .rd-wp { overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
+
+    .route-card-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .route-foot-rwy { font-weight: 800; color: var(--text-primary); }
+
+    .action-btn {
+      background: none; border: 1px solid var(--border-light); color: var(--text-muted);
+      width: 28px; height: 28px; border-radius: var(--radius-sm);
+      cursor: pointer; transition: 0.2s; font-size: 12px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .action-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); background: var(--status-info-bg); }
+    .action-btn:focus-visible, .filter-chip:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+    @media (max-width: 480px) {
+      .route-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+      .route-card { min-width: 0; }
+        .route-card-actions .action-btn { width: 44px; height: 44px; }
+      .search-bar { flex-direction: column; gap: 12px; }
+      .search-bar > div:last-child { width: 100%; text-align: left; padding-top: 0; }
+    }
+    .btn-delete:hover { border-color: var(--status-critical); color: var(--status-critical); background: var(--status-critical-bg); }
+
+    .route-empty { grid-column: 1 / -1; min-width: 0; padding: clamp(24px, 6vw, 40px) 16px; text-align: center; color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
+
+    .quick-filter-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+    .filter-chip {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      font-size: 9px; font-weight: 800; color: var(--text-muted); 
+      background: var(--nav-item-bg); border: 1px solid var(--border-light);
+      padding: 4px 10px; border-radius: var(--radius-pill); cursor: pointer;
+      transition: all 0.2s; letter-spacing: 0.05em; text-transform: uppercase;
+    }
+    .filter-chip:hover { border-color: var(--accent-primary); color: var(--text-primary); }
+    .filter-chip.active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,163,255,0.3); }
+  </style>
+
+  <script>
+    window.allRoutesCache = [];
+
+    window.initRouteManager = function() {
+      google.script.run
+        .withSuccessHandler(routes => {
+          window.allRoutesCache = routes;
+          window.renderRouteManagerTable(routes);
+        })
+        .withFailureHandler(err => {
+          console.error('Route Manager load failed:', err);
+          const tbody = document.getElementById('route-manager-tbody');
+          if (tbody) {
+            tbody.innerHTML = '<div class="route-empty" style="color: var(--status-critical);">FAILED TO LOAD ROUTES. REFRESH THE PAGE OR CONTACT ADMIN.</div>';
+          }
+        })
+        .getAllRoutes();
+    }
+
+    window.renderRouteManagerTable = function(routes) {
+      const tbody = document.getElementById('route-manager-tbody');
+      const esc = window.escapeHtml;
+      document.getElementById('route-total-count').innerText = routes.length;
+      const kpiTotal = document.getElementById('route-kpi-total');
+      if (kpiTotal) kpiTotal.innerText = routes.length;
+      const kpiPairs = document.getElementById('route-kpi-pairs');
+      if (kpiPairs) kpiPairs.innerText = new Set(routes.map(r => `${r.DEP_AIRPORT}-${r.ARR_AIRPORT}`)).size;
+
+      if (routes.length === 0) {
+        tbody.innerHTML = '<div class="route-empty">NO ROUTES FOUND IN REGISTRY</div>';
+        return;
+      }
+
+      tbody.innerHTML = routes.map(r => `
+        <div class="route-card">
+          <div class="route-card-head">
+            <div>
+              <div class="route-id-cell">${esc(r.ID)}</div>
+              <div class="route-pair-cell">${esc(r.DEP_AIRPORT)} <svg class="ic ic-sm" style="opacity:0.6;"><use href="#i-arrow-r"/></svg> ${esc(r.ARR_AIRPORT)}</div>
+            </div>
+            <div class="route-card-actions">
+              <button class="action-btn route-edit-btn" data-route-id="${esc(r.ID)}" title="Edit Profile" aria-label="Edit route profile"><svg class="ic"><use href="#i-pen"/></svg></button>
+              <button class="action-btn btn-delete route-delete-btn" data-route-id="${esc(r.ID)}" title="Delete Profile" aria-label="Delete route profile"><svg class="ic"><use href="#i-trash"/></svg></button>
+            </div>
+          </div>
+          <div class="route-diagram" title="${esc(r.ROUTE_STRING)}">
+            <span class="rd-node rd-dep">${esc(r.DEP_RWY || r.DEP_AIRPORT)}</span>
+            ${r.SID ? `<svg class="ic ic-sm rd-seg"><use href="#i-arrow-r"/></svg><span class="rd-node" style="color:var(--text-muted);">${esc(r.SID)}</span>` : ''}
+            <svg class="ic ic-sm rd-seg"><use href="#i-arrow-r"/></svg>
+            <span class="rd-wp">${esc(r.WAYPOINT_SEQ) || '&mdash;'}</span>
+            ${r.STAR ? `<svg class="ic ic-sm rd-seg"><use href="#i-arrow-r"/></svg><span class="rd-node" style="color:var(--text-muted);">${esc(r.STAR)}</span>` : ''}
+            <svg class="ic ic-sm rd-seg"><use href="#i-arrow-r"/></svg>
+            <span class="rd-node rd-arr">${esc(r.ARR_RWY || r.ARR_AIRPORT)}</span>
+          </div>
+          <div class="route-card-foot">
+            <span>RWY <span class="route-foot-rwy">${esc(r.DEP_RWY) || '-'}</span> / <span class="route-foot-rwy">${esc(r.ARR_RWY) || '-'}</span></span>
+            <span>${esc(r.SID) || '-'} / ${esc(r.STAR) || '-'}</span>
+          </div>
+        </div>
+      `).join('');
+
+      // Event delegation: route card action buttons (C1 fix — no inline handlers)
+      tbody.addEventListener('click', function(e) {
+        const editBtn = e.target.closest('.route-edit-btn');
+        if (editBtn) { window.editRouteFromManager(editBtn.dataset.routeId); return; }
+        const deleteBtn = e.target.closest('.route-delete-btn');
+        if (deleteBtn) { window.confirmDeleteRoute(deleteBtn.dataset.routeId); return; }
+      });
+    }
+
+    window.setRouteFilter = function(chipEl, val) {
+      const input = document.getElementById('route-search-input');
+      if (input) {
+        input.value = val;
+        window.filterRouteTable();
+      }
+      
+      // Update UI active state
+      const chips = document.querySelectorAll('.filter-chip');
+      chips.forEach(c => c.classList.remove('active'));
+      if (chipEl) chipEl.classList.add('active');
+    }
+
+    window.filterRouteTable = function() {
+      const query = document.getElementById('route-search-input').value.toUpperCase();
+      const filtered = window.allRoutesCache.filter(r => 
+        r.ID.toUpperCase().includes(query) || 
+        r.DEP_AIRPORT.toUpperCase().includes(query) || 
+        r.ARR_AIRPORT.toUpperCase().includes(query)
+      );
+      window.renderRouteManagerTable(filtered);
+    }
+
+    window.openRouteManagerModal = function() {
+      if (typeof openRouteModal === 'function') {
+        document.getElementById('route-flt-title').innerText = "NEW PROFILE";
+        document.getElementById('route-id-input').value = "";
+        var d = document.getElementById('route-dep'); if (d) { d.value = ""; d.readOnly = false; d.disabled = false; }
+        var a = document.getElementById('route-arr'); if (a) { a.value = ""; a.readOnly = false; a.disabled = false; }
+        document.getElementById('route-dep-rwy').value = "";
+        document.getElementById('route-sid').value = "";
+        document.getElementById('route-waypoint').value = "";
+        document.getElementById('route-star').value = "";
+        document.getElementById('route-arr-rwy').value = "";
+        document.getElementById('modal-route').style.display = 'flex';
+        const selector = document.getElementById('route-selector');
+        selector.innerHTML = '<option value="__NEW">+ CREATE NEW PROFILE</option>';
+        selector.value = '__NEW';
+        if (d) d.focus();
+      }
+    }
+
+    window.editRouteFromManager = function(routeId) {
+      const route = window.allRoutesCache.find(r => r.ID === routeId);
+      if (!route) return;
+      if (typeof openRouteModal === 'function') {
+        document.getElementById('route-flt-title').innerText = route.ID;
+        document.getElementById('route-id-input').value = route.ID;
+        var d = document.getElementById('route-dep'); if (d) { d.value = route.DEP_AIRPORT || ""; d.readOnly = false; d.disabled = false; }
+        var a = document.getElementById('route-arr'); if (a) { a.value = route.ARR_AIRPORT || ""; a.readOnly = false; a.disabled = false; }
+        document.getElementById('route-dep-rwy').value = route.DEP_RWY || "";
+        document.getElementById('route-sid').value = route.SID || "";
+        document.getElementById('route-waypoint').value = route.WAYPOINT_SEQ || "";
+        document.getElementById('route-star').value = route.STAR || "";
+        document.getElementById('route-arr-rwy').value = route.ARR_RWY || "";
+        document.getElementById('modal-route').style.display = 'flex';
+        const selector = document.getElementById('route-selector');
+        const safeRouteId = window.escapeHtml ? window.escapeHtml(route.ID) : String(route.ID == null ? '' : route.ID);
+        selector.innerHTML = `<option value="${safeRouteId}">${safeRouteId}</option>`;
+        selector.value = route.ID;
+      }
+    }
+
+    window.confirmDeleteRoute = function(routeId) {
+      if (!confirm(`Are you sure you want to PERMANENTLY delete route profile ${routeId}? This cannot be undone.`)) return;
+      
+      google.script.run
+        .withSuccessHandler(routes => {
+          window.allRoutesCache = routes;
+          window.renderRouteManagerTable(routes);
+        })
+        .withFailureHandler(err => {
+          console.error('Route delete failed:', err);
+          alert('Unable to delete route profile. Please try again.');
+        })
+        .deleteRoute(routeId);
+    }
+
+    // Intercept saveFlightRoute success to update manager table too
+    // We need to modify Flight_Ui's submitRoute to use the updated response
+  </script>
+</div>

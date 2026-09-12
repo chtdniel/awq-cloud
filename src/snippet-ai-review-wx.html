@@ -1,0 +1,118 @@
+<!-- SNIPPET PORT — AI REVIEW v2.1 untuk Weather_Warning_Ui.html (halaman WX)
+     CARA PAKAI (tanpa ubah engine):
+     1. Tempel <style> ini di dalam <style> #view-weather (atau tepat setelahnya).
+     2. Tempel <script> ini SETELAH script utama WX (override wxAiLegHtml/wxAiHeader saja).
+     3. JANGAN tambah <select> baru — selector tetap #wx-ai-model di #wx-ai-bar atas.
+     4. Produksi memakai var(--*) Titanium, jadi otomatis ikut light (:root) + dark ([data-theme="dark"]).
+-->
+<style>
+  /* AI REVIEW v2.1 — badge semantik, ganti semua-merah */
+  #view-weather .wx-ai-result { display:grid; gap:0; }
+  #view-weather .wx-ai-head {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    font-size:10px; font-weight:900; letter-spacing:.08em; margin-bottom:6px;
+  }
+  #view-weather .wx-ai-model-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:10px; font-weight:800; letter-spacing:.06em;
+    border:1px solid var(--border-light); border-radius:999px; padding:2px 10px;
+    background:var(--bg-panel-sunken); color:var(--text-primary); white-space:nowrap;
+  }
+  #view-weather .wx-ai-model-badge .vendor { color:var(--accent-primary); }
+  #view-weather .wx-ai-row {
+    display:grid; grid-template-columns:150px minmax(0,1fr) 230px; gap:0;
+    border-top:1px solid var(--border-subtle); border-left:4px solid var(--border-light);
+    padding:0; align-items:stretch;
+  }
+  #view-weather .wx-ai-row.st-danger { border-left-color:var(--status-critical); }
+  #view-weather .wx-ai-row.st-warning { border-left-color:var(--status-warning); }
+  #view-weather .wx-ai-row.st-ok { border-left-color:var(--status-safe); }
+  #view-weather .wx-ai-leg { padding:10px 12px; display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+  #view-weather .wx-ai-badge {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:10px; font-weight:900; letter-spacing:.06em; white-space:nowrap;
+    padding:3px 10px; border-radius:999px; border:1px solid transparent;
+  }
+  #view-weather .wx-ai-badge svg { width:11px; height:11px; flex:none; }
+  #view-weather .b-danger { color:var(--status-critical); border-color:var(--status-critical); background:var(--status-critical-bg); }
+  #view-weather .b-warning { color:var(--status-warning); border-color:var(--status-warning); background:var(--status-warning-bg); }
+  #view-weather .b-ok { color:var(--status-safe); border-color:var(--status-safe); background:var(--status-safe-bg); }
+  #view-weather .b-nodata { color:var(--text-muted); border-color:var(--border-medium); background:var(--bg-panel-sunken); border-style:dashed; }
+  #view-weather .wx-ai-phase { font-size:9px; font-weight:800; letter-spacing:.08em; color:var(--text-muted); }
+  #view-weather .wx-ai-reason {
+    padding:10px 14px; min-width:0;
+    border-left:1px solid var(--border-subtle); border-right:1px solid var(--border-subtle);
+    font-family:var(--font-mono); font-size:12px; color:var(--text-primary); overflow-wrap:anywhere;
+  }
+  #view-weather .wx-ai-action { display:block; margin-top:3px; font-family:var(--font-ui); font-size:12px; font-weight:700; }
+  #view-weather .wx-ai-action::before { content:"→ "; font-weight:800; }
+  #view-weather .st-danger .wx-ai-action { color:var(--status-critical); }
+  #view-weather .st-warning .wx-ai-action { color:var(--status-warning); }
+  #view-weather .st-ok .wx-ai-action { color:var(--status-safe); }
+  #view-weather .wx-ai-chapter { padding:10px 12px; display:flex; align-items:flex-start; justify-content:flex-end; }
+  #view-weather .wx-ai-src {
+    display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:700; color:var(--text-muted);
+    border:1px solid var(--border-light); border-radius:999px; padding:4px 10px; max-width:100%;
+    background:transparent; font-family:inherit; cursor:pointer; min-height:32px;
+  }
+  #view-weather .wx-ai-src:hover { border-color:var(--accent-primary); color:var(--accent-primary); }
+  #view-weather .wx-ai-src svg { width:11px; height:11px; flex:none; }
+  #view-weather .wx-ai-src span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  @media (max-width:720px) {
+    #view-weather .wx-ai-row { grid-template-columns:minmax(0,1fr); }
+    #view-weather .wx-ai-reason { border-left:none; border-right:none; border-top:1px solid var(--border-subtle); border-bottom:1px solid var(--border-subtle); }
+    #view-weather .wx-ai-chapter { justify-content:flex-start; }
+    #view-weather .wx-ai-src span { white-space:normal; }
+  }
+</style>
+<script>
+  // Override render saja — engine evaluateWeather + analyzeWxWithManual TIDAK diubah.
+  (() => {
+    const ICONS = {
+      DANGER: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1 15 14H1L8 1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="12" r=".9" fill="currentColor"/></svg>',
+      WARNING: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.8V8l2.2 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+      CLEAR: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="m5.5 8.2 1.8 1.8 3.2-3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    };
+    const cls = (st) => {
+      if (st === 'DANGER') return 'st-danger';
+      if (st === 'WARNING') return 'st-warning';
+      if (st === 'CLEAR') return 'st-ok';
+      return 'st-nodata';
+    };
+    const badge = (st) => {
+      if (st === 'DANGER') return 'b-danger';
+      if (st === 'WARNING') return 'b-warning';
+      if (st === 'CLEAR') return 'b-ok';
+      return 'b-nodata';
+    };
+    const icon = (st) => ICONS[st] || '';
+    const phase = (label) => label === 'DEP' ? 'AI DEP · ORIGIN' : label === 'ARR' ? 'AI ARR · DEST' : 'AI ALT · ALTN';
+
+    // Header: badge read-only sync dari #wx-ai-model atas (tidak buat select ganda).
+    window.wxAiHeader = (r) => {
+      const eH = window.escapeHtml;
+      const esc = (s) => eH ? eH(s) : s;
+      const sel = document.getElementById('wx-ai-model');
+      const opt = sel && sel.selectedOptions && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.trim() : '';
+      const src = (((r && r.source) || 'unknown').toUpperCase() === 'CUSTOM' ? 'CIZ-AI' : String((r && r.source) || 'unknown').toUpperCase());
+      const mdl = (r && r.model) || opt || '';
+      return `<div class="wx-ai-head">AI REVIEW <span class="wx-ai-model-badge"><span class="vendor">${esc(src)} ·</span> ${esc(mdl)}</span></div>`;
+    };
+
+    // Row: 3 kolom Status | Detail | Source. Urutan DEP/ARR/ALT dipertahankan (kronologis flight).
+    window.wxAiLegHtml = (label, leg) => {
+      const e4 = window.escapeHtml;
+      const esc = (s) => e4 ? e4(s) : s;
+      const st = (leg && leg.status) || 'NO_DATA';
+      const rs = (leg && leg.reason) || '';
+      const ch = (leg && leg.chapter) || '';
+      const ac = (leg && leg.action) || '';
+      return `<div class="wx-ai-row ${cls(st)}">`
+        + `<div class="wx-ai-leg"><span class="wx-ai-badge ${badge(st)}">${icon(st)}${esc(st)}</span>`
+        + `<span class="wx-ai-phase">${esc(phase(label))}</span></div>`
+        + `<div class="wx-ai-reason">${esc(rs)}${ac ? `<span class="wx-ai-action">${esc(ac)}</span>` : ''}</div>`
+        + `<div class="wx-ai-chapter">${ch ? `<button class="wx-ai-src" type="button" title="${esc(ch)}"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>${esc(ch)}</span></button>` : '<span></span>'}</div>`
+        + `</div>`;
+    };
+  })();
+</script>

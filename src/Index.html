@@ -1,0 +1,1878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Fonts H2: 3 families only. Clash Display dead (not on Google Fonts), Instrument Serif unused, Barlow/Plex redundant. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Saira+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* =========================================================
+       Global reset and layout invariants
+       ========================================================= */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    p, h1, h2, h3, h4, h5, h6, ul, ol {
+      margin-block: 0.5em 0.5em;
+    }
+
+    html { overflow-x: hidden; }
+
+    body {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    ul, ol { padding-inline-start: 1.5em; }
+
+    /* Shared icon alignment. `.ic` aliases this utility for existing markup. */
+    .icon-inline,
+    .ic {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+      line-height: 1;
+    }
+
+    /* Skip-to-main content link - WCAG 2.4.1 accessibility requirement */
+    .skip-link {
+      position: absolute;
+      top: -40px;
+      left: 0;
+      padding: 8px 12px;
+      background: var(--bg-panel);
+      border: 1px solid var(--accent-primary);
+      color: var(--text-primary);
+      z-index: 9999;
+      font-weight: 700;
+      text-decoration: none;
+      transition: top 0.2s ease;
+    }
+    .skip-link:focus {
+      top: 0;
+    }
+
+    /* Layer scale: content < header < dropdown < drawer < modal < tooltip. */
+    :root {
+      --z-base: 1;
+      --z-header: 100;
+      --z-dropdown: 200;
+      --z-drawer: 500;
+      --z-modal: 1000;
+      --z-tooltip: 2000;
+    }
+
+    button:focus-visible,
+    a:focus-visible,
+    [role="button"]:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 3px solid var(--accent-primary);
+      outline-offset: 2px;
+    }
+
+    /* =========================================================
+       Titanium v2 — High-End Visual Design (Soft Structuralism + Ethereal Glass)
+       Approved redesign — Double-Bezel + Floating Island + Asymmetrical Bento
+       Display: Clash Display + Saira Condensed · UI: Plus Jakarta Sans + Barlow
+       Data: JetBrains Mono + IBM Plex Mono · Accent: signal crimson
+       ========================================================= */
+    :root {
+      /* --- Surfaces & Backgrounds — Titanium Light --- */
+      --bg-void:           #F1F3F6;
+      --bg-dark:           #F8FAFC;
+      --bg-panel:          #FFFFFF;
+      --bg-panel-raised:   #FFFFFF;
+      --bg-panel-sunken:   #EEF1F5;
+      --bg-panel-alt:      #F7F8FA;
+
+      /* --- Navigation & Chrome — Floating Island --- */
+      --nav-bg:            rgba(255,255,255,0.78);
+      --nav-bg-active:     rgba(200, 16, 46, 0.10);
+      --nav-border:        rgba(15,23,42,0.08);
+      --nav-item-bg:       rgba(15,23,42,0.05);
+      --nav-item-hover:    rgba(15,23,42,0.08);
+      --nav-accent:        #C8102E;
+      --accent-glow:       0 8px 24px rgba(200, 16, 46, 0.18);
+
+      /* --- Border System — slate --- */
+      --border-subtle:     #E2E8F0;
+      --border-light:      #CBD5E1;
+      --border-medium:     #94A3B8;
+      --border-strong:     #64748B;
+      --border-accent:     #C8102E;
+
+      /* --- Typography --- */
+      --text-primary:      #0F172A;
+      --text-secondary:    #334155;
+      --text-muted:        #5B6B7F; /* a11y: was #64748B (4.20 on sunken) — now ≥4.8 AA */
+      --text-disabled:     #94A3B8;
+
+      /* --- Semantic Status Colors — Titanium refined --- */
+      --status-critical:   #C8102E;
+      --status-critical-bg:#FEF0F2;
+      --status-critical-glow: rgba(200, 16, 46, 0.18);
+
+      --status-warning:    #8A5F0E; /* a11y: was #9A6B11 (4.39 on warn-bg) — now ≥4.9 AA */
+      --status-warning-bg: #FFF7E6;
+      --status-warning-glow: rgba(154,107,17,0.18);
+
+      /* --status-advisory / --status-advisory-bg: deprecated - not currently used in UI */
+      /* May be needed for future status tier expansions */
+      --status-advisory:   #7A6414;
+      --status-advisory-bg:rgba(122, 100, 20, 0.10);
+
+      --status-safe:       #0E7A4B;
+      --status-safe-bg:    #E6F4ED;
+      --status-safe-glow:  rgba(14,122,75,0.18);
+
+      --status-info:       #1D5A8A;
+      --status-info-bg:    #EFF6FF;
+      --status-neutral:    #66757F;
+
+      /* --- Accent & Interactive --- */
+      --accent-primary:    #C8102E;
+      --accent-secondary:  #9C0C23;
+      --accent-hover:      #A50D26;
+
+      /* --- Data Colors --- */
+      --data-dep:          #8A5F0E; /* a11y: match status-warning fix */
+      --data-arr:          #0E7A4B;
+      --data-flt:          #0F172A;
+      --data-reg:          #334155;
+      --data-time:         #0F172A;
+
+      /* --- Terminal --- */
+      --term-bg:           #EEF1F5;
+      --term-border:       #CBD5E1;
+
+      /* --- Overlay tokens --- */
+      --overlay:           rgba(15,23,42,0.05);
+      --overlay-hover:     rgba(29,90,138,0.08);
+      --overlay-inset:     rgba(15,23,42,0.04);
+      --scanline:          rgba(15,23,42,0.02);
+
+      /* --- Typography System — Titanium --- */
+      --font-ui:           'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;
+      --font-display:      'Saira Condensed','Arial Narrow',sans-serif;
+      --font-mono:         'JetBrains Mono','Consolas',monospace;
+
+      /* --- Spacing — squircle --- */
+      --radius-sm:         4px;
+      --radius-md:         6px;
+      --radius-lg:         10px;
+      --radius-pill:       9999px;
+      --radius-outer:      32px;
+      --radius-inner:      24px;
+
+      /* --- Motion & Elevation --- */
+      --ease-spring:       cubic-bezier(0.32, 0.72, 0, 1);
+      --shadow-soft:       0 1px 3px rgba(15,23,42,0.06),0 12px 32px rgba(15,23,42,0.07);
+      --shadow-lift:       0 8px 30px rgba(15,23,42,0.10),0 20px 60px rgba(15,23,42,0.12);
+      --inset-highlight:   inset 0 1px 0 rgba(255, 255, 255, 0.70);
+    }
+
+    /* =========================================================
+       NIGHT OPS (DARK) — Ethereal Glass (OLED + mesh)
+       ========================================================= */
+    [data-theme="dark"] {
+      --bg-void:           #030508;
+      --bg-dark:           #070A12;
+      --bg-panel:          #0F141E;
+      --bg-panel-raised:   #141B2D;
+      --bg-panel-sunken:   #0B0F1A;
+      --bg-panel-alt:      #111827;
+
+      --nav-bg:            rgba(15,20,30,0.72);
+      --nav-bg-active:     rgba(255,59,82,0.14);
+      --nav-border:        rgba(255,255,255,0.08);
+      --nav-item-bg:       rgba(255,255,255,0.06);
+      --nav-item-hover:    rgba(255,255,255,0.09);
+      --nav-accent:        #FF3B52;
+      --accent-glow:       0 8px 24px rgba(255,59,82,0.30);
+
+      --border-subtle:     #1E293B;
+      --border-light:      #243449;
+      --border-medium:     #334155;
+      --border-strong:     #5A6779;
+      --border-accent:     #FF3B52;
+
+      --text-primary:      #F1F5F9;
+      --text-secondary:    #CBD5E1;
+      --text-muted:        #94A3B8;
+      --text-disabled:     #64748B;
+
+      --status-critical:   #FF5340;
+      --status-critical-bg: rgba(255,83,64,0.14);
+      --status-critical-glow: rgba(255,83,64,0.25);
+
+      --status-warning:    #F59E0B;
+      --status-warning-bg: rgba(245,158,11,0.12);
+      --status-warning-glow: rgba(245,158,11,0.20);
+
+      /* --status-advisory / --status-advisory-bg: deprecated - not currently used in UI */
+      /* May be needed for future status tier expansions */
+      --status-advisory:   #E8C558;
+      --status-advisory-bg:rgba(232,197,88,0.10);
+
+      --status-safe:       #22C55E;
+      --status-safe-bg:    rgba(34,197,94,0.12);
+      --status-safe-glow:  rgba(34,197,94,0.22);
+
+      --status-info:       #38BDF8;
+      --status-info-bg:    rgba(56,189,248,0.12);
+      --status-neutral:    #94A3B8;
+
+      --accent-primary:    #FF3B52;
+      --accent-secondary:  #D92643;
+      --accent-hover:      #FF5A6E;
+
+      --data-dep:          #F5A623;
+      --data-arr:          #22C55E;
+      --data-flt:          #F1F5F9;
+      --data-reg:          #CBD5E1;
+      --data-time:         #F1F5F9;
+
+      --term-bg:           #0B0F1A;
+      --term-border:       #243449;
+
+      --overlay:           rgba(255,255,255,0.05);
+      --overlay-hover:     rgba(56,189,248,0.10);
+      --overlay-inset:     rgba(0,0,0,0.2);
+      --scanline:          rgba(255,255,255,0.02);
+
+      --ease-spring:       cubic-bezier(0.32, 0.72, 0, 1);
+      --shadow-soft:       0 8px 32px rgba(0,0,0,0.40);
+      --shadow-lift:       0 20px 60px rgba(0,0,0,0.50);
+      --inset-highlight:   inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+
+    /* =========================================================
+       ICON SYSTEM (Phosphor · inline SVG via <use>)
+       ========================================================= */
+    .ic {
+      width: 1em;
+      height: 1em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+      flex-shrink: 0;
+      fill: currentColor;
+      color: inherit;
+      line-height: 1;
+    }
+    .ic-sm { font-size: 0.8em; }
+    .ic-lg { font-size: 1.35em; }
+    .ic-xl { font-size: 1.6em; }
+    .ic-dn { transform: rotate(90deg); }
+    .ic-up { transform: rotate(-90deg); }
+
+    /* AirAsia brand mark in the application shell */
+    .airasia-logo {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      color: #E21B2D;
+      font-size: 30px;
+    }
+    [data-theme="dark"] .airasia-logo { color: #FF5362; }
+
+    /* Icon-only button (square, ghost) */
+    .btn-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      min-width: 44px;
+      min-height: 44px;
+      padding: 0;
+      border: 1px solid var(--border-light);
+      background: var(--bg-panel-raised);
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      font-size: 14px;
+    }
+    .btn-icon:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+    .btn-icon:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+    .btn-icon.danger:hover { border-color: var(--status-critical); color: var(--status-critical); background: var(--status-critical-bg); }
+
+    /* =========================================================
+       SUBSTRATE TEXTURE (aerodrome-chart dot grid)
+       ========================================================= */
+    .occ-substrate {
+      position: fixed;
+      inset: 0;
+      z-index: var(--z-base); /* Layer: Base */
+      pointer-events: none;
+      opacity: 0.9;
+      overflow: hidden;
+    }
+    .occ-substrate::before {
+      content: "";
+      position: absolute;
+      inset: -20%;
+      opacity: 0.9;
+      /* H6: drop 40px blur — always-painted layer, scroll composite cost. Gradients stay. */
+      background: radial-gradient(circle at 30% 30%, rgba(200,16,46,0.08), transparent 60%), radial-gradient(circle at 70% 70%, rgba(99,102,241,0.06), transparent 60%);
+    }
+    [data-theme="dark"] .occ-substrate::before {
+      background: radial-gradient(circle at 30% 30%, rgba(139,92,246,0.18), transparent 55%), radial-gradient(circle at 75% 65%, rgba(16,185,129,0.14), transparent 60%);
+    }
+    .occ-substrate::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      opacity: 0.55;
+      background-image: radial-gradient(rgba(15,23,42,0.045) 1px, transparent 1px);
+      background-size: 22px 22px;
+    }
+    [data-theme="dark"] .occ-substrate::after { background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px); opacity: 0.6; }
+
+    /* =========================================================
+       THEME TOGGLE (moon/sun swap)
+       ========================================================= */
+    .theme-toggle-btn .ic-moon { display: none; }
+    .theme-toggle-btn .ic-sun  { display: inline-block; }
+    [data-theme="dark"] .theme-toggle-btn .ic-moon { display: inline-block; }
+    [data-theme="dark"] .theme-toggle-btn .ic-sun  { display: none; }
+
+    body { 
+      background-color: var(--bg-dark); 
+      color: var(--text-primary); 
+      font-family: var(--font-ui); 
+      margin: 0; 
+      transition: background-color 0.2s ease, color 0.2s ease; 
+      -webkit-font-smoothing: antialiased;
+      font-variant-numeric: tabular-nums;
+      overflow-x: hidden;
+    }
+    
+    /* NAVIGATION BAR — Floating Island (Titanium v2) */
+    .occ-nav-bar { 
+      background-color: var(--nav-bg); 
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      min-height: 52px;
+      height: auto;
+      padding: 6px 8px 6px 14px; 
+      display: flex; 
+      align-items: center; 
+      gap: 10px;
+      position: sticky;
+      top: 12px;
+      z-index: var(--z-header); /* Layer: Header */
+      width: calc(100% - 24px);
+      box-sizing: border-box;
+      max-width: none;
+      margin: 12px auto 0;
+      border: 1px solid var(--nav-border);
+      border-radius: 999px;
+      box-shadow: var(--shadow-lift);
+      transition: all 0.4s var(--ease-spring);
+    }
+    /* Dropdown must clear status strip and module-level menus. */
+    .occ-nav-bar.dropdown-open { z-index: var(--z-drawer); }
+
+    .occ-nav-bar .brand {
+      min-width: 0;
+      font-family: var(--font-display);
+      font-weight: 800; 
+      font-size: 22px; 
+      letter-spacing: 0.01em; 
+      margin-right: 28px; 
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+      user-select: none;
+      line-height: 1;
+    }
+    .occ-nav-bar .nav-btn-group { flex: 1; justify-content: center; }
+    
+    .nav-btn-group { 
+      display: flex; 
+      gap: 4px; 
+      background: var(--nav-item-bg);
+      padding: 3px;
+      border-radius: 999px;
+      border: 1px solid var(--nav-border);
+      overflow-x: auto;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      position: relative;
+    }
+    .nav-btn-group::-webkit-scrollbar { display: none; }
+    /* DATA submenu must escape the horizontal scroll container while open.
+       Without this, .data-submenu (absolute, below the pill) is clipped
+       by overflow-x:auto and the dropdown looks dead. Restored on close. */
+    .nav-btn-group.menu-open { overflow: visible; }
+
+    .nav-tab {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--font-ui);
+      font-weight: 700;
+      cursor: pointer;
+      padding: 7px 12px;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      transition: color 0.22s var(--ease-spring), background 0.22s var(--ease-spring), box-shadow 0.22s var(--ease-spring), transform 0.12s var(--ease-spring);
+      display: flex;
+      align-items: center;
+      border-radius: 999px;
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+    .nav-tab:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; box-shadow: 0 0 0 3px rgba(200, 16, 46, 0.22); border-radius: 999px; }
+    .nav-tab:hover:not(.active) { color: var(--text-primary); background: var(--nav-item-hover); }
+    .nav-tab:active { transform: scale(0.97); }
+    .nav-tab.active {
+      color: #fff;
+      background: var(--accent-primary);
+      box-shadow: var(--accent-glow);
+    }
+    /* Tubelight lamp — port tubelight-navbar.tsx */
+    .nav-tab { position: relative; z-index: 0; overflow: visible; }
+    .nav-tab .tl-lamp { position: absolute; inset: 0; width: 100%; background: rgba(255,255,255,0.12); border-radius: 999px; z-index: -1; pointer-events: none; }
+    .nav-tab .tl-tube { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); width: 32px; height: 4px; background: #fff; border-radius: 4px 4px 0 0; }
+    .nav-tab .tl-tube::before { content: ""; position: absolute; width: 48px; height: 24px; background: #fff; opacity: 0.35; border-radius: 999px; filter: blur(8px); top: -8px; left: -8px; }
+    .nav-tab .tl-tube::after { content: ""; position: absolute; width: 16px; height: 16px; background: #fff; opacity: 0.35; border-radius: 999px; filter: blur(4px); top: 0; left: 8px; }
+
+    .nav-btn-group,
+    .occ-status-strip,
+    .occ-content-area { min-width: 0; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+    
+    .nav-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-shrink: 0;
+    }
+
+    /* =========================================================
+       KPI CARD SYSTEM (module top summary)
+       ========================================================= */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .kpi-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      min-height: 0;
+      padding: 8px 12px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-rows: auto auto;
+      align-items: center;
+      column-gap: 8px;
+      row-gap: 1px;
+      box-shadow: var(--inset-highlight);
+      border-left: 3px solid var(--border-medium);
+      transition: border-color 0.22s var(--ease-spring), box-shadow 0.22s var(--ease-spring), transform 0.12s var(--ease-spring);
+    }
+    .kpi-card:hover { border-left-color: var(--accent-primary); transform: translateY(-1px); }
+    .kpi-card.accent { border-left-color: var(--accent-primary); }
+    .kpi-card.safe { border-left-color: var(--status-safe); }
+    .kpi-card.warn { border-left-color: var(--status-warning); }
+    .kpi-card.crit { border-left-color: var(--status-critical); }
+    .kpi-label { grid-column: 1; grid-row: 1; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+    .kpi-val { grid-column: 2; grid-row: 1 / span 2; font-family: var(--font-mono); font-weight: 700; font-size: 22px; color: var(--text-primary); line-height: 1; }
+    .kpi-val.text { font-size: 16px; letter-spacing: 0.04em; font-weight: 700; }
+    .kpi-sub { grid-column: 1; grid-row: 2; font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* HEARTBEAT UTC CLOCK — static indicator; pulse removed (fake-liveness slop) */
+    .utc-heartbeat {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      font-family: var(--font-mono);
+      min-width: 100px;
+      padding-right: 12px;
+      border-right: 1px solid var(--border-subtle);
+    }
+    .utc-time-main {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1;
+    }
+    .utc-time-sub {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-primary);
+      letter-spacing: 0.06em;
+      opacity: 0.85;
+      margin-top: 3px;
+    }
+    .heartbeat-icon {
+      width: 7px;
+      height: 7px;
+      background: var(--status-safe);
+      border-radius: 50%;
+    }
+
+    #nav-fir:not(.configured) { opacity: 0.55; }
+    #nav-fir:not(.configured):hover { color: var(--text-muted); background: transparent; cursor: not-allowed; }
+    .fir-settings-btn { width: 24px; height: 24px; padding: 0; margin-left: -5px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); background: var(--bg-panel-raised); color: var(--text-muted); cursor: pointer; }
+    .fir-settings-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+
+    .theme-toggle-btn { 
+      background: var(--bg-panel-raised);
+      border: 1px solid var(--border-light);
+      color: var(--text-secondary);
+      border-radius: 50%; 
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: 0.2s;
+      font-size: 14px;
+    }
+    .theme-toggle-btn:hover { border-color: var(--accent-primary); color: var(--text-primary); transform: translateY(-1px); }
+    
+    /* EXTERNAL LINKS DROPDOWN */
+    .dropdown-container { position: relative; }
+    .nav-btn-ext {
+      background: var(--bg-panel-raised);
+      border: 1px solid var(--border-light);
+      color: var(--text-primary);
+      padding: 0 14px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: 0.2s;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .nav-btn-ext:hover { border-color: var(--accent-primary); background: var(--nav-bg-active); }
+    .nav-btn-ext .chevron { font-size: 8px; opacity: 0.5; transition: 0.3s; }
+    .nav-btn-ext.open .chevron { transform: rotate(180deg); }
+
+    .dropdown-menu {
+      position: absolute;
+      top: calc(100% + 12px);
+      right: 0;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border-medium);
+      border-radius: var(--radius-md);
+      width: 220px;
+      display: none;
+      flex-direction: column;
+      box-shadow: var(--shadow-lift);
+      z-index: var(--z-dropdown); /* Layer: Dropdown */
+      padding: 6px 0;
+      animation: dropdownFade 0.24s var(--ease-spring);
+    }
+    
+    [data-theme="dark"] .dropdown-menu { background: rgba(22, 27, 38, 0.95); }
+
+    @keyframes dropdownFade {
+      from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .dropdown-menu.show { display: flex; }
+    
+    .dropdown-item {
+      padding: 10px 18px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 11px;
+      font-weight: 600;
+      transition: 0.2s;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      letter-spacing: 0.02em;
+    }
+    .dropdown-item:hover {
+      background: var(--nav-bg-active);
+      color: var(--accent-primary);
+      padding-left: 22px;
+    }
+    .dropdown-item::after {
+      content: '';
+      width: 10px;
+      height: 10px;
+      background: currentColor;
+      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M200 64v104a8 8 0 0 1-13.66 5.66L140 127.31l-70.34 70.35a8 8 0 0 1-11.32-11.32L128.69 116L82.34 69.66A8 8 0 0 1 88 56h104a8 8 0 0 1 8 8' fill='%23000'/%3E%3C/svg%3E") no-repeat center / contain;
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M200 64v104a8 8 0 0 1-13.66 5.66L140 127.31l-70.34 70.35a8 8 0 0 1-11.32-11.32L128.69 116L82.34 69.66A8 8 0 0 1 88 56h104a8 8 0 0 1 8 8' fill='%23000'/%3E%3C/svg%3E") no-repeat center / contain;
+      opacity: 0.35;
+      transition: opacity 0.2s;
+    }
+    .dropdown-item:hover::after { opacity: 0.85; }
+    
+    .dropdown-divider {
+      height: 1px;
+      background: var(--border-subtle);
+      margin: 4px 0;
+    }
+
+    /* DATA parent tab dropdown (submenu) — lives inside .nav-btn-group */
+    .nav-data-container { position: relative; display: inline-flex; flex-shrink: 0; }
+    .nav-data-container .nav-tab .chevron { font-size: 8px; opacity: 0.5; transition: 0.3s; }
+    .nav-data-container .nav-tab[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+    .nav-data-container .data-submenu {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      right: auto;
+      width: 200px;
+      max-height: calc(100dvh - 120px);
+      overflow-y: auto;
+    }
+    .nav-data-container .data-submenu .dropdown-item { width: 100%; text-align: left; justify-content: flex-start; }
+    .nav-data-container .data-submenu .dropdown-item::after { display: none; }
+
+    /* DATA submenu — Titanium item treatment: 44px targets, icon + label,
+       hover tanpa layout-shift, active bertinta aksen (paired-signal rule). */
+    .nav-data-container .data-submenu { padding: 6px; }
+    .nav-data-container .data-submenu .dropdown-item {
+      gap: 10px;
+      padding: 12px 14px;
+      min-height: 44px;
+      box-sizing: border-box;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      font-family: var(--font-ui);
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      align-items: center;
+    }
+    .nav-data-container .data-submenu .dropdown-item .ic {
+      font-size: 1.1em;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      transition: color 0.2s;
+    }
+    .nav-data-container .data-submenu .dropdown-item:hover {
+      background: rgba(200, 16, 46, 0.08);
+      color: var(--text-primary);
+      padding-left: 14px;
+    }
+    .nav-data-container .data-submenu .dropdown-item:hover .ic { color: var(--accent-primary); }
+    .nav-data-container .data-submenu .dropdown-item.active {
+      background: rgba(200, 16, 46, 0.10);
+      color: var(--accent-primary);
+    }
+    .nav-data-container .data-submenu .dropdown-item.active .ic { color: var(--accent-primary); }
+    [data-theme="dark"] .nav-data-container .data-submenu .dropdown-item:hover { background: rgba(255, 59, 82, 0.14); }
+    [data-theme="dark"] .nav-data-container .data-submenu .dropdown-item.active { background: rgba(255, 59, 82, 0.16); }
+
+    /* STATUS STRIP — floating below island */
+    .occ-status-strip {
+      background-color: var(--bg-panel);
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      padding: 7px 20px;
+      gap: 20px;
+      position: sticky;
+      top: 76px;
+      z-index: var(--z-header); /* Layer: Header/status */
+      width: calc(100% - 24px);
+      box-sizing: border-box;
+      margin: 12px auto 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: 999px;
+      box-shadow: var(--shadow-soft);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+    .status-item { display: flex; align-items: center; gap: 8px; min-width: max-content; }
+    .status-item:not(:last-child)::after {
+      content: '';
+      height: 12px;
+      width: 1px;
+      background: var(--border-subtle);
+      margin-left: 20px;
+    }
+    .status-val { color: var(--text-primary); font-weight: 600; }
+
+    .pulse-dot-live {
+      width: 7px; height: 7px; background-color: var(--status-safe);
+      border-radius: 50%;
+    }
+
+    /* ========== Titanium v2 — Double-Bezel, Eyebrow, Reveal ========== */
+    .bezel{padding:6px;background:rgba(15,23,42,0.04);border:1px solid rgba(15,23,42,0.06);border-radius:var(--radius-outer);box-shadow:inset 0 1px 0 rgba(255,255,255,0.6)}
+    [data-theme="dark"] .bezel{background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.06)}
+    .bezel-inner{background:var(--bg-panel);border-radius:var(--radius-inner);border:1px solid var(--border-subtle);box-shadow:inset 0 1px 0 rgba(255,255,255,0.7), var(--shadow-soft);overflow:hidden}
+    [data-theme="dark"] .bezel-inner{box-shadow:inset 0 1px 0 rgba(255,255,255,0.06), var(--shadow-soft)}
+    .eyebrow{display:inline-flex;align-items:center;gap:8px;padding:5px 10px;border-radius:999px;background:var(--bg-panel);border:1px solid var(--border-light);font:700 9px var(--font-ui);letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted)}
+    .eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent-primary)}
+    .reveal{opacity:0;transform:translateY(16px);filter:blur(6px);animation:reveal .7s var(--ease-spring) forwards}
+    @keyframes reveal{to{opacity:1;transform:translateY(0);filter:blur(0)}}
+    /* Titanium v2 — global card premium lift (all modules) */
+    .taf-card,.notam-card,.route-card,.weather-card{border-radius:var(--radius-inner) !important;transition:all .25s var(--ease-spring) !important}
+    .taf-card:hover,.notam-card:hover,.route-card:hover,.weather-card:hover{transform:translateY(-3px) !important;box-shadow:var(--shadow-lift) !important;border-color:var(--accent-primary) !important}
+    .flight-strip{transition:background-color .16s ease, box-shadow .16s ease, transform .16s var(--ease-spring) !important}
+    .flight-strip:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(15,23,42,0.06)}
+    .kpi-card{border-radius:var(--radius-md) !important}
+    /* Double-Bezel simulation for main boards (no HTML change needed) */
+    #flight-table,.flight-strips,.taf-grid,.notam-grid,.weather-grid,.route-grid,.report-split-container .terminal-window,.fir-ui .fir-board-panel,.fir-ui .fir-map-panel{
+      border-radius:var(--radius-inner) !important; box-shadow:0 0 0 6px rgba(15,23,42,0.03), var(--shadow-soft) !important;
+    }
+    [data-theme="dark"] #flight-table,[data-theme="dark"] .flight-strips,[data-theme="dark"] .taf-grid,[data-theme="dark"] .notam-grid,[data-theme="dark"] .weather-grid,[data-theme="dark"] .route-grid{
+      box-shadow:0 0 0 6px rgba(255,255,255,0.03), var(--shadow-soft) !important;
+    }
+
+    /* CONTENT AREA — full-width */
+    .occ-content-area {
+      padding-block: 18px;
+      padding-inline: clamp(1rem, 3vw, 2rem);
+      max-width: 100%;
+      width: 100%;
+      margin: 0 auto;
+      box-sizing: border-box;
+      position: relative;
+      z-index: var(--z-base); /* Layer: Base/content */
+      min-width: 0;
+    }
+    
+    .view-section { display: none; }
+    .view-section.active { display: block; animation: slideUpFade 0.5s var(--ease-spring); }
+    @keyframes slideUpFade { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* UTILITIES */
+    .header-title { 
+      color: var(--text-primary);
+      font-family: var(--font-display);
+      font-weight: 700; 
+      margin: 0;
+      font-size: 22px; 
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      line-height: 1.1;
+    }
+    .header-title::before {
+      content: '';
+      width: 5px;
+      height: 20px;
+      background: var(--accent-primary);
+      border-radius: 1px;
+      flex-shrink: 0;
+    }
+    .header-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      opacity: 0.85;
+      padding-left: 17px;
+    }
+
+    .badge-critical { background: var(--status-critical); color: #fff; font-weight: 800; }
+    
+    /* SCROLLBAR */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-void); }
+    ::-webkit-scrollbar-thumb { background: var(--border-medium); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+    .nav-btn-group { min-width: 0; }
+
+    /* RESPONSIVE OPTIMIZATIONS */
+    @media (max-width: 1600px) {
+      .occ-nav-bar { padding: 0 24px; }
+      .occ-content-area { padding-block: 20px; }
+    }
+
+    @media (max-width: 1440px) {
+      .occ-nav-bar .brand { margin-right: 24px; font-size: 16px; }
+      .nav-tab { padding: 6px 14px; }
+      .nav-actions { gap: 16px; }
+      .utc-heartbeat { padding-right: 8px; min-width: 90px; }
+      .utc-time-main { font-size: 16px; }
+    }
+
+    @media (max-width: 1280px) {
+      .brand-name span { display: none; } /* Hide "OCC" text suffix */
+      .utc-heartbeat { border: none; }
+      .utc-time-sub { display: none; }
+    }
+
+    @media (max-width: 1024px) {
+      .nav-actions .dropdown-container { display: block; }
+    }
+
+    @media (max-width: 768px) {
+      .occ-nav-bar { padding: 0 16px; height: auto; min-height: 60px; flex-wrap: wrap; gap: 8px; }
+      .brand { margin-right: 0; }
+      .nav-btn-group { width: 100%; order: 3; overflow-x: auto; scroll-padding-inline: 8px; }
+      .nav-tab { min-height: 44px; min-width: 44px; }
+      .nav-tab.active { box-shadow: inset 0 -3px 0 #fff, var(--accent-glow); }
+      .nav-actions { margin-left: 0; gap: 12px; }
+      .occ-status-strip { padding: 0 16px; overflow-x: auto; gap: 12px; }
+      .status-item::after { display: none; }
+      .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+      .kpi-card { padding: 7px 10px; }
+
+      /* Touch target floor. Existing padding remains unchanged. */
+      .occ-content-area button,
+      .occ-content-area [role="button"],
+      .occ-nav-bar button,
+      .overflow-item,
+      .dropdown-item {
+        min-width: 44px;
+        min-height: 44px;
+      }
+    }
+
+    /* Native table scrolling helper for data-heavy pages. */
+    .table-wrapper {
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .table-wrapper table {
+      display: block;
+      width: max-content;
+      max-width: 100%;
+    }
+
+    .fir-result-head { display:flex; flex-wrap:wrap; gap:10px 18px; padding:12px; border:1px solid var(--border-light); background:var(--bg-panel-sunken); color:var(--text-secondary); }
+    .fir-result-head strong { color:var(--text-primary); }
+    .fir-result-count { color:var(--accent-primary); font-weight:700; }
+    .fir-notam-list { display:grid; gap:8px; }
+    .fir-notam-item { padding:12px; border:1px solid var(--border-light); background:var(--bg-panel); }
+    .fir-notam-item strong { color:var(--status-critical); margin-right:10px; }
+      .fir-notam-item span { color:var(--text-muted); font-family:var(--font-mono); font-size:11px; }
+      .fir-notam-item small { color:var(--text-muted); font-family:var(--font-mono); font-size:11px; }
+      .fir-risk { margin-left:10px; font-size:11px; letter-spacing:.06em; }
+      .fir-risk-high { color:var(--status-critical); }
+      .fir-risk-medium { color:var(--status-warning); }
+      .fir-risk-low { color:var(--status-safe); }
+    .fir-notam-item p { margin:8px 0 0; white-space:pre-wrap; color:var(--text-secondary); font-size:12px; }
+    #dispatcher-reminder {
+      margin: auto;
+      box-sizing: border-box;
+      width: min(560px, calc(100% - 32px));
+      max-height: calc(100dvh - 32px);
+      overflow-y: auto;
+      padding: 16px;
+      border: 1px solid var(--border-light);
+      border-top: 4px solid var(--status-warning);
+      border-radius: var(--radius-inner);
+      background: #0a0f1e;
+      color: #e0e0e0;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      font: 500 14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    }
+    #dispatcher-reminder::backdrop { background: rgba(15,23,42,0.65); }
+    #dispatcher-reminder .cm-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    #dispatcher-reminder h3 { font: 700 16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin: 0; color: #fff; }
+    #dispatcher-reminder .count { color: #f59e0b; font-weight: 600; }
+    #dispatcher-reminder .utc { color: #9ca3af; font-weight: 500; font-size: 14px; }
+    #dispatcher-reminder .cm-sub { color: #9ca3af; font: 500 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin-bottom: 10px; }
+    #dispatcher-reminder .cm-rows { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+    #dispatcher-reminder .cm-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; background: #131c33; min-width: 0; }
+    #dispatcher-reminder .cm-icon { color: #f59e0b; font-weight: 700; font-size: 20px; min-width: 20px; }
+    #dispatcher-reminder .cm-text { color: #e0e0e0; font: 500 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+    #dispatcher-reminder .dim { color: #9ca3af; font-size: 12px; }
+    #dispatcher-reminder .cm-link { color: #60a5fa; font: 600 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; text-decoration: none; white-space: nowrap; }
+    #dispatcher-reminder .cm-link:hover { text-decoration: underline; }
+    #dispatcher-reminder .cm-check-area { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 4px 0; font-size: 13px; color: #d1d5db; }
+    #dispatcher-reminder .cm-check-area input[type="checkbox"] { width: 18px; height: 18px; accent-color: #f59e0b; }
+    #dispatcher-reminder .cm-buttons { display: flex; gap: 8px; margin-top: 10px; }
+    #dispatcher-reminder .cm-btn-primary, #dispatcher-reminder .cm-btn-ghost { min-height: 44px; padding: 8px 16px; border-radius: 6px; font: 700 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; cursor: pointer; border: 1px solid transparent; }
+    #dispatcher-reminder .cm-btn-primary { flex: 1; background: #f59e0b; color: #000; }
+    #dispatcher-reminder .cm-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; background: #4b5563; color: #9ca3af; }
+    #dispatcher-reminder .cm-btn-ghost { flex: 1; background: transparent; color: #e0e0e0; border-color: #4b5563; }
+    #dispatcher-reminder .cm-btn-ghost:hover { background: #1f2937; }
+    #dispatcher-reminder .cm-footnote { color: #6b7280; font: 500 12px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin-top: 8px; }
+    #dispatcher-reminder .readiness-status { min-height: 18px; margin: 2px 0 6px; font: 600 12px monospace; color: #9ca3af; }
+    #dispatcher-reminder .readiness-status.hidden { display: none !important; }
+    @media (max-width: 900px) {
+      #dispatcher-reminder .cm-rows { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+  <body> <!-- Skip-to-main content link - WCAG 2.4.1 accessibility requirement --> <a href="#occ-content-area" class="skip-link">Skip to main content</a>
+  <div class="occ-substrate" aria-hidden="true"></div>
+
+  <dialog id="dispatcher-reminder" lang="en" aria-labelledby="dispatcher-reminder-title" aria-describedby="dispatcher-reminder-description">
+    <div class="cm-header">
+      <h3 id="dispatcher-reminder-title">Operational Readiness — <span class="count">0 issue(s)</span> <span class="utc">[UTC]</span></h3>
+    </div>
+    <div id="dispatcher-reminder-description" class="cm-sub">Data not fresh. Review before dispatch.</div>
+    <div id="readiness-status" class="readiness-status" role="status" aria-live="polite" style="display:none;"></div>
+    <div class="cm-rows">
+      <div class="cm-row" data-readiness="dof">
+        <div class="cm-icon">!</div>
+        <div class="cm-text"><strong>DOF</strong> <span class="dim" data-field="dof-value">—</span></div>
+        <a class="cm-link" href="#" data-open="flight">Check &rsaquo;</a>
+      </div>
+      <div class="cm-row" data-readiness="notam">
+        <div class="cm-icon">!</div>
+        <div class="cm-text"><strong>NOTAM</strong> <span class="dim" data-field="notam-value">—</span></div>
+        <a class="cm-link" href="#" data-open="notam">Open &rsaquo;</a>
+      </div>
+      <div class="cm-row" data-readiness="taf">
+        <div class="cm-icon">!</div>
+        <div class="cm-text"><strong>TAF</strong> <span class="dim" data-field="taf-value">—</span></div>
+        <a class="cm-link" href="#" data-open="taf">Open &rsaquo;</a>
+      </div>
+    </div>
+    <div class="cm-check-area">
+      <input type="checkbox" id="cmAck" data-check="ack">
+      <label for="cmAck">I understand the risks and wish to proceed</label>
+    </div>
+    <div class="cm-buttons">
+      <button type="button" class="cm-btn-primary" id="readiness-continue" disabled>Continue to Dashboard</button>
+      <button type="button" class="cm-btn-ghost" data-action="retry">Retry</button>
+    </div>
+    <div class="cm-footnote">Operations/Safety note — NOTAM and TAF require 6h freshness for dispatch clearance.</div>
+  </dialog>
+  <script>
+    (function() {
+      var STORAGE_KEY_PREFIX = 'occ_readiness_ack_v1::';
+      var dialog = document.getElementById('dispatcher-reminder');
+      var statusEl = document.getElementById('readiness-status');
+      var continueBtn = document.getElementById('readiness-continue');
+      var checks = dialog.querySelectorAll('[data-check]');
+      var retryBtn = dialog.querySelector('[data-action="retry"]');
+      var lastPayload = null;
+      var lastFocus = null;
+      var READINESS_TIMEOUT_MS = 15000;
+      var readinessTimer = null;
+      var readinessSettled = false;
+
+      function markReadinessSettled() {
+        readinessSettled = true;
+        if (readinessTimer) { try { clearTimeout(readinessTimer); } catch (e) {} readinessTimer = null; }
+      }
+
+      function armReadinessTimeout() {
+        readinessSettled = false;
+        if (readinessTimer) { try { clearTimeout(readinessTimer); } catch (e) {} }
+        readinessTimer = setTimeout(function() {
+          if (readinessSettled) return;
+          markReadinessSettled();
+          lastPayload = { generatedAtUtc: new Date().toISOString(), dof: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Request timed out after 15s — no backend response. Press Retry.' }, notam: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Request timed out after 15s — no backend response. Press Retry.' }, taf: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Request timed out after 15s — no backend response. Press Retry.' } };
+          renderRow('dof', lastPayload.dof);
+          renderRow('notam', lastPayload.notam);
+          renderRow('taf', lastPayload.taf);
+          statusEl.textContent = 'Unable to verify operational data automatically (request timed out). Press Retry or perform manual verification before continuing.';
+          statusEl.style.display = 'block';
+          updateStatusVisibility();
+          if (!dialog.open) dialog.showModal();
+        }, READINESS_TIMEOUT_MS);
+      }
+
+      function formatUtcLabel(iso) {
+        if (!iso) return '—';
+        try {
+          var d = new Date(iso);
+          if (isNaN(d.getTime())) return String(iso);
+          return d.toISOString().replace('.000Z', 'Z').replace('T', ' ');
+        } catch (e) { return String(iso); }
+      }
+
+      function badgeClass(status) {
+        var s = String(status || 'UNAVAILABLE').toUpperCase();
+        if (s === 'READY') return 'r-badge ready';
+        if (s === 'WARNING') return 'r-badge warning';
+        if (s === 'BLOCKED') return 'r-badge blocked';
+        return 'r-badge unavailable';
+      }
+
+      function renderRow(key, data) {
+        var badge = dialog.querySelector('[data-field="' + key + '-badge"]');
+        var value = dialog.querySelector('[data-field="' + key + '-value"]');
+        var detail = dialog.querySelector('[data-field="' + key + '-detail"]');
+        var check = dialog.querySelector('[data-check="' + key + '"]');
+        var checkLabel = check ? check.nextElementSibling : null;
+        var status = data && data.status ? String(data.status).toUpperCase() : 'UNAVAILABLE';
+        if (badge) { badge.textContent = status; badge.className = badgeClass(status); }
+        
+        // Helper: get today's UTC date string (YYYY Mon DD format)
+        function getTodayUTC() {
+          var now = new Date();
+          var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          return now.getUTCDate() + ' ' + months[now.getUTCMonth()] + ' ' + now.getFullYear();
+        }
+        
+        if (key === 'dof') {
+          var dofVal = data && data.value ? String(data.value) : '—';
+          var dofTs = data && data.timestampUtc ? new Date(data.timestampUtc).toISOString() : '';
+          if (dofVal !== '—' && dofTs) {
+            try {
+              var dofDate = new Date(dofTs);
+              var todayStr = getTodayUTC();
+              var dofDay = dofDate.getUTCDate();
+              var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              var dofMonth = months[dofDate.getUTCMonth()];
+              var dofDisplay = dofDay + ' ' + dofMonth;
+              var tooltip = 'DOF value: ' + dofVal + ' | Full timestamp: ' + dofDate.toISOString().replace('.000Z', 'Z').replace('T', ' ') + ' | Today UTC: ' + todayStr;
+              value.textContent = dofDay + ' ' + dofMonth + ' ≠ ' + todayStr;
+              value.title = tooltip;
+            } catch (e) {
+              value.textContent = dofVal;
+              value.title = 'DOF value: ' + dofVal + ' | Full timestamp: ' + dofTs;
+            }
+          } else if (dofVal !== '—') {
+            value.textContent = dofVal;
+            value.title = 'DOF value: ' + dofVal + (dofTs ? ' | Full timestamp: ' + dofTs : '');
+          } else {
+            value.textContent = '—';
+            value.title = '';
+          }
+        } else if (key === 'notam') {
+          var ageMinutes = data && data.ageMinutes != null ? data.ageMinutes : null;
+          var ts = data && data.timestampUtc ? data.timestampUtc : '';
+          if (ts) {
+            try {
+              var isoFull = new Date(ts).toISOString().replace('.000Z', 'Z').replace('T', ' ');
+              var ageText = '';
+              if (ageMinutes != null) {
+                var days = Math.floor(ageMinutes / 1440);
+                var hours = Math.floor(ageMinutes % 1440 / 60);
+                if (days > 0) ageText = days + 'd ago';
+                else if (hours > 0) ageText = hours + 'h ago';
+                else ageText = '<1h ago';
+              }
+              var limitText = ' (limit 6h)';
+              value.textContent = ageText + limitText;
+              value.title = 'NOTAM full timestamp: ' + isoFull + ' | Age: ' + ageMinutes + ' min';
+            } catch (e) {
+              value.textContent = formatUtcLabel(ts) + (ageMinutes != null ? ' • ' + ageMinutes + ' min ago' : '');
+              value.title = 'NOTAM full timestamp: ' + ts;
+            }
+          } else {
+            value.textContent = '—';
+            value.title = '';
+          }
+        } else if (key === 'taf') {
+          var tafCount = data && data.value ? String(data.value) : '';
+          var tafTs = data && data.timestampUtc ? data.timestampUtc : '';
+          var tafAge = data && data.ageMinutes != null ? data.ageMinutes : null;
+          if (tafCount && tafTs) {
+            try {
+              var countNum = parseInt(tafCount, 10);
+              var tafDays = Math.floor((tafAge || 0) / 1440);
+              var tafHours = Math.floor((tafAge || 0) % 1440 / 60);
+              var tafAgeText = tafDays > 0 ? tafDays + 'd ago' : tafHours > 0 ? tafHours + 'h ago' : '<1h ago';
+              var tafLimit = ' (limit 6h)';
+              value.textContent = countNum + ' stations, ' + tafAgeText + tafLimit;
+              var tafIso = new Date(tafTs).toISOString().replace('.000Z', 'Z').replace('T', ' ');
+              value.title = 'TAF full timestamp: ' + tafIso + ' | Count: ' + tafCount + ' stations | Age: ' + tafAge + ' min';
+            } catch (e) {
+              var tafTsFmt = formatUtcLabel(tafTs);
+              value.textContent = tafCount + ' station(s)' + (tafTsFmt ? ' • ' + tafTsFmt : '');
+              value.title = 'TAF full timestamp: ' + tafTs + ' | Count: ' + tafCount;
+            }
+          } else if (tafCount) {
+            value.textContent = tafCount + ' station(s)';
+            value.title = 'TAF count: ' + tafCount;
+          } else {
+            value.textContent = '—';
+            value.title = '';
+          }
+        }
+        if (detail) detail.textContent = data && data.detail ? String(data.detail) : '';
+        if (checkLabel) {
+          if (status === 'BLOCKED' || status === 'UNAVAILABLE') checkLabel.textContent = 'I confirm manual verification';
+          else checkLabel.textContent = 'I have checked this item';
+        }
+      }
+
+      function updateContinueState() {
+        var ackCheck = document.getElementById('cmAck');
+        continueBtn.disabled = !ackCheck || !ackCheck.checked;
+      }
+
+      function buildAckKey(payload) {
+        if (!payload) return '';
+        var utcDate = '';
+        try { utcDate = new Date(payload.generatedAtUtc).toISOString().slice(0, 10); } catch (e) { utcDate = String(payload.generatedAtUtc || '').slice(0, 10); }
+        var dof = payload.dof ? String(payload.dof.value || '') : '';
+        var notamTs = payload.notam ? String(payload.notam.timestampUtc || '') : '';
+        var tafTs = payload.taf ? String(payload.taf.timestampUtc || '') : '';
+        return STORAGE_KEY_PREFIX + utcDate + '::' + dof + '::' + notamTs + '::' + tafTs;
+      }
+
+      function shouldSuppress(payload) {
+        try {
+          var key = buildAckKey(payload);
+          if (!key) return false;
+          var stored = window.safeStorage ? window.safeStorage.get(key, null) : null;
+          if (stored && stored.acked === true) return true;
+          // Backward compat: legacy global key must not suppress new binding
+          var legacy = window.safeStorage ? window.safeStorage.get('occ_readiness_ack_v1', null) : null;
+          if (legacy) window.safeStorage.remove('occ_readiness_ack_v1');
+          return false;
+        } catch (e) { return false; }
+      }
+
+      function persistAck(payload) {
+        try {
+          var key = buildAckKey(payload);
+          if (!key) return;
+          if (window.safeStorage) window.safeStorage.set(key, { acked: true, at: new Date().toISOString() });
+        } catch (e) {}
+      }
+
+      function bindEvents() {
+        var ackCheck = document.getElementById('cmAck');
+        if (ackCheck) ackCheck.addEventListener('change', updateContinueState);
+        dialog.addEventListener('cancel', function(e) { e.preventDefault(); });
+        continueBtn.addEventListener('click', function() {
+          var ackCheck = document.getElementById('cmAck');
+          if (!ackCheck || !ackCheck.checked) return;
+          persistAck(lastPayload);
+          dialog.close();
+          var target = document.getElementById('nav-flight');
+          if (target) target.focus();
+        });
+        retryBtn.addEventListener('click', loadReadiness);
+        dialog.querySelectorAll('[data-open]').forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            if (e && e.preventDefault) e.preventDefault();
+            var tab = btn.getAttribute('data-open');
+            if (typeof window.switchTab === 'function') window.switchTab(tab);
+          });
+        });
+        // Focus trap
+        dialog.addEventListener('keydown', function(e) {
+          if (e.key !== 'Tab') return;
+          var focusable = dialog.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+          if (!focusable.length) return;
+          var first = focusable[0];
+          var last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+          else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        });
+      }
+
+      function resetChecks() {
+        var ackCheck = document.getElementById('cmAck');
+        if (ackCheck) ackCheck.checked = false;
+        updateContinueState();
+      }
+
+      // Helper: hide status element unless it has meaningful content (not empty, not same as static sub-header)
+      function updateStatusVisibility() {
+        var staticMsg = 'Data not fresh. Review before dispatch.';
+        var currentText = statusEl.textContent.trim();
+        if (!currentText || currentText === staticMsg) {
+          statusEl.classList.add('hidden');
+          statusEl.style.display = 'none';
+        } else {
+          statusEl.classList.remove('hidden');
+          statusEl.style.display = 'block';
+        }
+      }
+
+      function loadReadiness() {
+        resetChecks();
+        statusEl.textContent = 'Loading operational data…';
+        statusEl.style.display = 'block';
+        continueBtn.disabled = true;
+        renderRow('dof', { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Loading…' });
+        renderRow('notam', { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Loading…' });
+        renderRow('taf', { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Loading…' });
+        updateStatusVisibility();         if (typeof google === 'undefined' || !google.script || !google.script.run || typeof google.script.run.getOperationalReadiness !== 'function') {
+          markReadinessSettled();
+          lastPayload = { generatedAtUtc: new Date().toISOString(), dof: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Backend unavailable in this context' }, notam: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Backend unavailable in this context' }, taf: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Backend unavailable in this context' } };
+          renderRow('dof', lastPayload.dof);
+          renderRow('notam', lastPayload.notam);
+          renderRow('taf', lastPayload.taf);
+          statusEl.textContent = 'Unable to verify operational data automatically (backend unavailable). Perform manual verification before continuing.';
+          statusEl.style.display = 'block';
+          updateStatusVisibility();
+          return;
+        }
+        try {
+          armReadinessTimeout();
+          google.script.run.withSuccessHandler(function(payload) {
+            markReadinessSettled();
+            lastPayload = payload;
+            if (!payload || !payload.ok) {
+              renderRow('dof', { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Unable to verify DOF' });
+              renderRow('notam', { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Unable to verify NOTAM' });
+              renderRow('taf', { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: 'Unable to verify TAF' });
+              statusEl.textContent = 'Unable to verify operational data automatically (backend error). Perform manual verification before continuing.';
+              statusEl.style.display = 'block';
+              updateStatusVisibility();
+              return;
+            }
+            if (shouldSuppress(payload)) {
+              dialog.close();
+              return;
+            }
+            renderRow('dof', payload.dof);
+            renderRow('notam', payload.notam);
+            renderRow('taf', payload.taf);
+            
+            // Update header count with actual issue total (WARNING, BLOCKED, UNAVAILABLE)
+            var issueCount = 0;
+            if (payload.dof && ['WARNING', 'BLOCKED', 'UNAVAILABLE'].indexOf(payload.dof.status) !== -1) issueCount++;
+            if (payload.notam && ['WARNING', 'BLOCKED', 'UNAVAILABLE'].indexOf(payload.notam.status) !== -1) issueCount++;
+            if (payload.taf && ['WARNING', 'BLOCKED', 'UNAVAILABLE'].indexOf(payload.taf.status) !== -1) issueCount++;
+            var countText = issueCount + ' issue' + (issueCount !== 1 ? 's' : '');
+            dialog.querySelector('.count').textContent = countText;
+            
+            statusEl.textContent = 'Review each item and acknowledge before continuing.';
+            statusEl.style.display = 'block';
+            updateStatusVisibility();
+            if (!dialog.open) { lastFocus = document.activeElement; dialog.showModal(); }
+            updateContinueState();
+          }).withFailureHandler(function(err) {
+            markReadinessSettled();
+            lastPayload = { generatedAtUtc: new Date().toISOString(), dof: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: err && err.message ? err.message : 'Backend error' }, notam: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: err && err.message ? err.message : 'Backend error' }, taf: { status: 'UNAVAILABLE', value: '', timestampUtc: '', detail: err && err.message ? err.message : 'Backend error' } };
+            renderRow('dof', lastPayload.dof);
+            renderRow('notam', lastPayload.notam);
+            renderRow('taf', lastPayload.taf);
+            statusEl.textContent = 'Unable to verify operational data automatically (backend error). Perform manual verification before continuing.';
+            statusEl.style.display = 'block';
+            updateStatusVisibility();
+            if (!dialog.open) dialog.showModal();
+          }).getOperationalReadiness();
+        } catch (e) {
+          markReadinessSettled();
+          statusEl.textContent = 'Unable to verify operational data automatically. Perform manual verification before continuing.';
+          statusEl.style.display = 'block';
+          updateStatusVisibility();
+          if (!dialog.open) dialog.showModal();
+        }
+      }
+
+      bindEvents();
+      // Shared with Checklist tab (view-checklist): same payload, same ack key.
+      window.occGetReadinessPayload = function() { return lastPayload; };
+      window.occRefreshReadiness = loadReadiness;
+      window.occBuildAckKey = buildAckKey;
+      // Dialog opens only after payload arrives (success/failure handlers).
+      // No pre-payload showModal: avoids empty flash on startup.
+      loadReadiness();
+      dialog.addEventListener('close', function() {
+        var fallback = document.getElementById('nav-flight') || lastFocus;
+        if (fallback && typeof fallback.focus === 'function') try { fallback.focus(); } catch (e) {}
+      });
+      window.occRunReadinessCheck = loadReadiness;
+    })();
+  </script>
+
+  <script>
+    // Shared HTML-escaping helper for all UI modules (XSS hardening).
+    // Defined BEFORE the module includes below so every partial — even one
+    // that binds `window.escapeHtml` eagerly at parse time — captures the
+    // real escaper instead of a permissive fallback.
+    window.escapeFirHtml = function(value) {
+      var s = String(value == null ? '' : value).replace(/&apos;/g, "'").replace(/&#39;/g, "'");
+      return s.replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[char]));
+    };
+    window.escapeHtml = window.escapeFirHtml;
+
+    // Shared localStorage wrapper with error boundary (S6 fix).
+    // Handles quota exceeded, private browsing, and corrupt data gracefully.
+    window.safeStorage = {
+      get: function(key, fallback) {
+        if (fallback === undefined) fallback = null;
+        try {
+          var raw = localStorage.getItem(key);
+          if (raw === null) return fallback;
+          return JSON.parse(raw);
+        } catch (e) {
+          console.warn('[safeStorage] Read failed for "' + key + '":', e);
+          return fallback;
+        }
+      },
+      set: function(key, val) {
+        try {
+          localStorage.setItem(key, JSON.stringify(val));
+          return true;
+        } catch (e) {
+          console.warn('[safeStorage] Write failed for "' + key + '":', e);
+          return false;
+        }
+      },
+      remove: function(key) {
+        try { localStorage.removeItem(key); } catch (e) { /* noop */ }
+      }
+    };
+
+    // H3: Leaflet loads on first FIR tab open only (one CDN, promise-cached).
+    window.occLeafletPromise = null;
+    window.occEnsureLeaflet = function() {
+      if (typeof L !== 'undefined') return Promise.resolve();
+      if (window.occLeafletPromise) return window.occLeafletPromise;
+      window.occLeafletPromise = new Promise(function(resolve, reject) {
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(link);
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
+        s.onload = function() { resolve(); };
+        s.onerror = function() { window.occLeafletPromise = null; reject(new Error('Leaflet load failed')); };
+        document.head.appendChild(s);
+      });
+      return window.occLeafletPromise;
+    };
+  </script>
+
+  <!-- SHARED ICON SPRITE (Phosphor) -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+     <symbol id="i-plane" viewBox="0 0 256 256"><path fill="currentColor" d="M234.68 130.63L158 92.29V48a30 30 0 0 0-60 0v44.29l-76.68 38.34A6 6 0 0 0 18 136v32a6 6 0 0 0 7.18 5.88L98 159.32v22.19l-14.24 14.25A6 6 0 0 0 82 200v32a6 6 0 0 0 8.23 5.57L128 222.46l37.77 15.11A6 6 0 0 0 174 232v-32a6 6 0 0 0-1.76-4.24L158 181.51v-22.19l72.82 14.56A6 6 0 0 0 238 168v-32a6 6 0 0 0-3.32-5.37M226 160.68l-72.82-14.56A6 6 0 0 0 146 152v32a6 6 0 0 0 1.76 4.24L162 202.49v20.65l-31.77-12.71a6 6 0 0 0-4.46 0L94 223.14v-20.65l14.24-14.25A6 6 0 0 0 110 184v-32a6 6 0 0 0-7.18-5.88L30 160.68v-21l76.68-38.34A6 6 0 0 0 110 96V48a18 18 0 0 1 36 0v48a6 6 0 0 0 3.32 5.37L226 139.71Z"/></symbol>
+     <symbol id="i-airasia" viewBox="0 0 24 24"><path fill="currentColor" d="M11.54 14.49c-1.278 0-2.264-.998-2.264-2.276c0-1.252.98-2.27 2.264-2.27c1.232 0 2.238 1.018 2.238 2.27c0 1.278-1.005 2.277-2.239 2.277zm3.074-7.854l-.214.998c-.59-1.18-2.348-1.297-3.295-1.297c-2.952 0-5.527 2.841-5.527 6.746c0 3.14 1.875 5.111 4.23 5.111c1.316 0 2.432-.304 3.353-1.4l-.24 1.102h3.711l1.692-11.26c-1.238-.001-2.482.01-3.71 0M12 0c6.63 0 12 5.37 12 12s-5.37 12-12 12S0 18.63 0 12S5.37 0 12 0"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 256 256"><path fill="currentColor" d="M222 48v48a6 6 0 0 1-6 6h-48a6 6 0 0 1 0-12h33.52l-18.05-18a81.5 81.5 0 0 0-57.53-24h-.46a81.5 81.5 0 0 0-57.29 23.28a6 6 0 1 1-8.38-8.58a93.38 93.38 0 0 1 65.67-26.76h.52a93.45 93.45 0 0 1 66 27.53l18 18V48a6 6 0 0 1 12 0m-34.19 136.72a81.5 81.5 0 0 1-57.29 23.34h-.46a81.5 81.5 0 0 1-57.53-24L54.48 166H88a6 6 0 0 0 0-12H40a6 6 0 0 0-6 6v48a6 6 0 0 0 12 0v-33.52l18 18.05a93.45 93.45 0 0 0 66 27.53h.52a93.38 93.38 0 0 0 65.67-26.76a6 6 0 1 0-8.38-8.58"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 256 256"><path fill="currentColor" d="M216 50h-42V40a22 22 0 0 0-22-22h-48a22 22 0 0 0-22 22v10H40a6 6 0 0 0 0 12h10v146a14 14 0 0 0 14 14h128a14 14 0 0 0 14-14V62h10a6 6 0 0 0 0-12M94 40a10 10 0 0 1 10-10h48a10 10 0 0 1 10 10v10H94Zm100 168a2 2 0 0 1-2 2H64a2 2 0 0 1-2-2V62h132Zm-84-104v64a6 6 0 0 1-12 0v-64a6 6 0 0 1 12 0m48 0v64a6 6 0 0 1-12 0v-64a6 6 0 0 1 12 0"/></symbol>
+   <symbol id="i-database" viewBox="0 0 256 256"><path fill="currentColor" d="M128 26c-52.71 0-94 23.72-94 54v96c0 30.28 41.29 54 94 54s94-23.72 94-54V80c0-30.28-41.29-54-94-54m0 12c44.45 0 82 19.23 82 42s-37.55 42-82 42s-82-19.23-82-42s37.55-42 82-42m82 138c0 22.77-37.55 42-82 42s-82-19.23-82-42v-21.21C62 171.16 92.37 182 128 182s66-10.84 82-27.21Zm0-48c0 22.77-37.55 42-82 42s-82-19.23-82-42v-21.21C62 123.16 92.37 134 128 134s66-10.84 82-27.21Z"/></symbol>
+   <symbol id="i-layout" viewBox="0 0 256 256"><path fill="currentColor" d="M104 42H56a14 14 0 0 0-14 14v48a14 14 0 0 0 14 14h48a14 14 0 0 0 14-14V56a14 14 0 0 0-14-14m2 62a2 2 0 0 1-2 2H56a2 2 0 0 1-2-2V56a2 2 0 0 1 2-2h48a2 2 0 0 1 2 2Zm94-62h-48a14 14 0 0 0-14 14v48a14 14 0 0 0 14 14h48a14 14 0 0 0 14-14V56a14 14 0 0 0-14-14m2 62a2 2 0 0 1-2 2h-48a2 2 0 0 1-2-2V56a2 2 0 0 1 2-2h48a2 2 0 0 1 2 2Zm-98 34H56a14 14 0 0 0-14 14v48a14 14 0 0 0 14 14h48a14 14 0 0 0 14-14v-48a14 14 0 0 0-14-14m2 62a2 2 0 0 1-2 2H56a2 2 0 0 1-2-2v-48a2 2 0 0 1 2-2h48a2 2 0 0 1 2 2Zm94-62h-48a14 14 0 0 0-14 14v48a14 14 0 0 0 14 14h48a14 14 0 0 0 14-14v-48a14 14 0 0 0-14-14m2 62a2 2 0 0 1-2 2h-48a2 2 0 0 1-2-2v-48a2 2 0 0 1 2-2h48a2 2 0 0 1 2 2Z"/></symbol>
+   <symbol id="i-eraser" viewBox="0 0 256 256"><path fill="currentColor" d="m223.57 81.81l-41.38-41.38a22 22 0 0 0-31.12 0L32.43 159.07a22 22 0 0 0 0 31.11l30.07 30.06a6 6 0 0 0 4.24 1.76H216a6 6 0 0 0 0-12h-89.51l97.08-97.08a22 22 0 0 0 0-31.11M109.51 210H69.22l-28.3-28.3a10 10 0 0 1 0-14.15L96 112.48L151.52 168Zm105.57-105.56L160 159.51L104.48 104l55.08-55.07a10 10 0 0 1 14.14 0l41.38 41.37a10 10 0 0 1 0 14.14"/></symbol>
+   <symbol id="i-trash-x" viewBox="0 0 256 256"><path fill="currentColor" d="M216 50H40a6 6 0 0 0 0 12h10v146a14 14 0 0 0 14 14h128a14 14 0 0 0 14-14V62h10a6 6 0 0 0 0-12m-22 158a2 2 0 0 1-2 2H64a2 2 0 0 1-2-2V62h132ZM82 24a6 6 0 0 1 6-6h80a6 6 0 0 1 0 12H88a6 6 0 0 1-6-6"/></symbol>
+   <symbol id="i-dots" viewBox="0 0 256 256"><path fill="currentColor" d="M118 60a10 10 0 1 1 10 10a10 10 0 0 1-10-10m10 58a10 10 0 1 0 10 10a10 10 0 0 0-10-10m0 68a10 10 0 1 0 10 10a10 10 0 0 0-10-10"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 256 256"><path fill="currentColor" d="M208 34h-26V24a6 6 0 0 0-12 0v10H86V24a6 6 0 0 0-12 0v10H48a14 14 0 0 0-14 14v160a14 14 0 0 0 14 14h160a14 14 0 0 0 14-14V48a14 14 0 0 0-14-14M48 46h26v10a6 6 0 0 0 12 0V46h84v10a6 6 0 0 0 12 0V46h26a2 2 0 0 1 2 2v34H46V48a2 2 0 0 1 2-2m160 164H48a2 2 0 0 1-2-2V94h164v114a2 2 0 0 1-2 2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 256 256"><path fill="currentColor" d="M204.24 195.76a6 6 0 1 1-8.48 8.48L128 136.49l-67.76 67.75a6 6 0 0 1-8.48-8.48L119.51 128L51.76 60.24a6 6 0 0 1 8.48-8.48L128 119.51l67.76-67.75a6 6 0 0 1 8.48 8.48L136.49 128Z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 256 256"><path fill="currentColor" d="M235.07 189.09L147.61 37.22a22.75 22.75 0 0 0-39.22 0L20.93 189.09a21.53 21.53 0 0 0 0 21.72A22.35 22.35 0 0 0 40.55 222h174.9a22.35 22.35 0 0 0 19.6-11.19a21.53 21.53 0 0 0 .02-21.72m-10.41 15.71a10.46 10.46 0 0 1-9.21 5.2H40.55a10.46 10.46 0 0 1-9.21-5.2a9.51 9.51 0 0 1 0-9.72l87.45-151.87a10.75 10.75 0 0 1 18.42 0l87.46 151.87a9.51 9.51 0 0 1-.01 9.72M122 144v-40a6 6 0 0 1 12 0v40a6 6 0 0 1-12 0m16 36a10 10 0 1 1-10-10a10 10 0 0 1 10 10"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 256 256"><path fill="currentColor" d="M128 26a102 102 0 1 0 102 102A102.12 102.12 0 0 0 128 26m0 192a90 90 0 1 1 90-90a90.1 90.1 0 0 1-90 90m-6-82V80a6 6 0 0 1 12 0v56a6 6 0 0 1-12 0m16 36a10 10 0 1 1-10-10a10 10 0 0 1 10 10"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 256 256"><path fill="currentColor" d="M232.13 143.64a6 6 0 0 0-6-1.49a90.07 90.07 0 0 1-112.27-112.3a6 6 0 0 0-7.49-7.48a102.88 102.88 0 0 0-51.89 36.31a102 102 0 0 0 142.84 142.84a102.88 102.88 0 0 0 36.31-51.89a6 6 0 0 0-1.5-5.99m-42 48.29a90 90 0 0 1-126-126a90.9 90.9 0 0 1 35.52-28.27a102.06 102.06 0 0 0 118.69 118.69a90.9 90.9 0 0 1-28.24 35.58Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 256 256"><path fill="currentColor" d="M122 40V16a6 6 0 0 1 12 0v24a6 6 0 0 1-12 0m68 88a62 62 0 1 1-62-62a62.07 62.07 0 0 1 62 62m-12 0a50 50 0 1 0-50 50a50.06 50.06 0 0 0 50-50M59.76 68.24a6 6 0 1 0 8.48-8.48l-16-16a6 6 0 0 0-8.48 8.48Zm0 119.52l-16 16a6 6 0 1 0 8.48 8.48l16-16a6 6 0 1 0-8.48-8.48M192 70a6 6 0 0 0 4.24-1.76l16-16a6 6 0 0 0-8.48-8.48l-16 16A6 6 0 0 0 192 70m4.24 117.76a6 6 0 0 0-8.48 8.48l16 16a6 6 0 0 0 8.48-8.48ZM46 128a6 6 0 0 0-6-6H16a6 6 0 0 0 0 12h24a6 6 0 0 0 6-6m82 82a6 6 0 0 0-6 6v24a6 6 0 0 0 12 0v-24a6 6 0 0 0-6-6m112-88h-24a6 6 0 0 0 0 12h24a6 6 0 0 0 0-12"/></symbol>
+    <symbol id="i-caret-dn" viewBox="0 0 256 256"><path fill="currentColor" d="m212.24 100.24l-80 80a6 6 0 0 1-8.48 0l-80-80a6 6 0 0 1 8.48-8.48L128 167.51l75.76-75.75a6 6 0 0 1 8.48 8.48"/></symbol>
+    <symbol id="i-caret-up" viewBox="0 0 256 256"><path fill="currentColor" d="M212.24 164.24a6 6 0 0 1-8.48 0L128 88.49l-75.76 75.75a6 6 0 0 1-8.48-8.48l80-80a6 6 0 0 1 8.48 0l80 80a6 6 0 0 1 0 8.48"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 256 256"><path fill="currentColor" d="M222 104a6 6 0 0 1-12 0V54.49l-69.75 69.75a6 6 0 0 1-8.48-8.48L201.51 46H152a6 6 0 0 1 0-12h64a6 6 0 0 1 6 6Zm-38 26a6 6 0 0 0-6 6v72a2 2 0 0 1-2 2H48a2 2 0 0 1-2-2V80a2 2 0 0 1 2-2h72a6 6 0 0 0 0-12H48a14 14 0 0 0-14 14v128a14 14 0 0 0 14 14h128a14 14 0 0 0 14-14v-72a6 6 0 0 0-6-6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 256 256"><path fill="currentColor" d="m228.24 219.76l-51.38-51.38a86.15 86.15 0 1 0-8.48 8.48l51.38 51.38a6 6 0 0 0 8.48-8.48M38 112a74 74 0 1 1 74 74a74.09 74.09 0 0 1-74-74"/></symbol>
+    <symbol id="i-save" viewBox="0 0 256 256"><path fill="currentColor" d="M217.9 73.42L182.58 38.1a13.9 13.9 0 0 0-9.89-4.1H48a14 14 0 0 0-14 14v160a14 14 0 0 0 14 14h160a14 14 0 0 0 14-14V83.31a13.9 13.9 0 0 0-4.1-9.89M170 210H86v-58a2 2 0 0 1 2-2h80a2 2 0 0 1 2 2Zm40-2a2 2 0 0 1-2 2h-26v-58a14 14 0 0 0-14-14H88a14 14 0 0 0-14 14v58H48a2 2 0 0 1-2-2V48a2 2 0 0 1 2-2h124.69a2 2 0 0 1 1.41.58l35.32 35.32a2 2 0 0 1 .58 1.41ZM158 72a6 6 0 0 1-6 6H96a6 6 0 0 1 0-12h56a6 6 0 0 1 6 6"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 256 256"><path fill="currentColor" d="M225.91 74.79L181.22 30.1a14 14 0 0 0-19.8 0L38.1 153.41a13.94 13.94 0 0 0-4.1 9.9V208a14 14 0 0 0 14 14h44.69a13.94 13.94 0 0 0 9.9-4.1l86.16-86.16l4.61 18.42l-37.6 37.6a6 6 0 1 0 8.49 8.48l40-40a6 6 0 0 0 1.58-5.7l-7.18-28.7l27.26-27.25a14 14 0 0 0 0-19.8M46 208v-33.51L81.52 210H48a2 2 0 0 1-2-2m50-.49L48.48 160L136 72.49L183.52 120ZM217.42 86.1L192 111.52L144.49 64l25.41-25.41a2 2 0 0 1 2.83 0l44.69 44.68a2 2 0 0 1 0 2.83"/></symbol>
+    <symbol id="i-check" viewBox="0 0 256 256"><path fill="currentColor" d="m228.24 76.24l-128 128a6 6 0 0 1-8.48 0l-56-56a6 6 0 0 1 8.48-8.48L96 191.51L219.76 67.76a6 6 0 0 1 8.48 8.48"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 256 256"><path fill="currentColor" d="M172.24 99.76a6 6 0 0 1 0 8.48l-56 56a6 6 0 0 1-8.48 0l-24-24a6 6 0 0 1 8.48-8.48L112 151.51l51.76-51.75a6 6 0 0 1 8.48 0M230 128A102 102 0 1 1 128 26a102.12 102.12 0 0 1 102 102m-12 0a90 90 0 1 0-90 90a90.1 90.1 0 0 0 90-90"/></symbol>
+    <symbol id="i-prohibit" viewBox="0 0 256 256"><path fill="currentColor" d="M128 26a102 102 0 1 0 102 102A102.12 102.12 0 0 0 128 26m90 102a89.6 89.6 0 0 1-22.29 59.22L68.78 60.29A89.95 89.95 0 0 1 218 128m-180 0a89.6 89.6 0 0 1 22.29-59.22l126.93 126.93A89.95 89.95 0 0 1 38 128"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 256 256"><path fill="currentColor" d="M222 128a6 6 0 0 1-6 6h-82v82a6 6 0 0 1-12 0v-82H40a6 6 0 0 1 0-12h82V40a6 6 0 0 1 12 0v82h82a6 6 0 0 1 6 6"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 256 256"><path fill="currentColor" d="M213.84 118.63a6 6 0 0 0-3.73-4.25l-59.23-22.21l15-75a6 6 0 0 0-10.27-5.27l-112 120a6 6 0 0 0 2.28 9.71l59.23 22.21l-15 75a6 6 0 0 0 3.14 6.52A6.1 6.1 0 0 0 96 246a6 6 0 0 0 4.39-1.91l112-120a6 6 0 0 0 1.45-5.46M106 220.46l11.85-59.28a6 6 0 0 0-3.77-6.8l-55.6-20.85l91.46-98l-11.82 59.29a6 6 0 0 0 3.77 6.8l55.6 20.85Z"/></symbol>
+    <symbol id="i-pkg" viewBox="0 0 256 256"><path fill="currentColor" d="m222.72 67.91l-88-48.18a13.9 13.9 0 0 0-13.44 0l-88 48.18A14 14 0 0 0 26 80.18v95.64a14 14 0 0 0 7.28 12.27l88 48.18a13.92 13.92 0 0 0 13.44 0l88-48.18a14 14 0 0 0 7.28-12.27V80.18a14 14 0 0 0-7.28-12.27M127 30.25a2 2 0 0 1 1.92 0L212.51 76l-33.94 18.57l-84.52-46.26ZM122 223l-83-45.43a2 2 0 0 1-1-1.75V86.66l84 46ZM43.49 76l38.07-20.85l84.51 46.26L128 122.24ZM218 175.82a2 2 0 0 1-1 1.75L134 223v-90.36l36-19.71V152a6 6 0 0 0 12 0v-45.63l36-19.71Z"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 256 256"><path fill="currentColor" d="M245.48 125.57c-.34-.78-8.66-19.23-27.24-37.81C201 70.54 171.38 50 128 50S55 70.54 37.76 87.76c-18.58 18.58-26.9 37-27.24 37.81a6 6 0 0 0 0 4.88c.34.77 8.66 19.22 27.24 37.8C55 185.47 84.62 206 128 206s73-20.53 90.24-37.75c18.58-18.58 26.9-37 27.24-37.8a6 6 0 0 0 0-4.88M128 194c-31.38 0-58.78-11.42-81.45-33.93A134.8 134.8 0 0 1 22.69 128a134.6 134.6 0 0 1 23.86-32.06C69.22 73.42 96.62 62 128 62s58.78 11.42 81.45 33.94A134.6 134.6 0 0 1 233.31 128C226.94 140.21 195 194 128 194m0-112a46 46 0 1 0 46 46a46.06 46.06 0 0 0-46-46m0 80a34 34 0 1 1 34-34a34 34 0 0 1-34 34"/></symbol>
+    <symbol id="i-files" viewBox="0 0 256 256"><path fill="currentColor" d="m212.24 67.76l-40-40A6 6 0 0 0 168 26H88a14 14 0 0 0-14 14v18H56a14 14 0 0 0-14 14v144a14 14 0 0 0 14 14h112a14 14 0 0 0 14-14v-18h18a14 14 0 0 0 14-14V72a6 6 0 0 0-1.76-4.24M170 216a2 2 0 0 1-2 2H56a2 2 0 0 1-2-2V72a2 2 0 0 1 2-2h77.51L170 106.49Zm32-32a2 2 0 0 1-2 2h-18v-82a6 6 0 0 0-1.76-4.24l-40-40A6 6 0 0 0 136 58H86V40a2 2 0 0 1 2-2h77.51L202 74.49Zm-60-32a6 6 0 0 1-6 6H88a6 6 0 0 1 0-12h48a6 6 0 0 1 6 6m0 32a6 6 0 0 1-6 6H88a6 6 0 0 1 0-12h48a6 6 0 0 1 6 6"/></symbol>
+    <symbol id="i-stack" viewBox="0 0 256 256"><path fill="currentColor" d="M229.18 173a6 6 0 0 1-2.16 8.2l-96 56a6 6 0 0 1-6 0l-96-56a6 6 0 0 1 6-10.36l93 54.23l93-54.23a6 6 0 0 1 8.16 2.16M221 122.82l-93 54.23l-93-54.23a6 6 0 0 0-6 10.36l96 56a6 6 0 0 0 6 0l96-56a6 6 0 0 0-6-10.36M26 80a6 6 0 0 1 3-5.18l96-56a6 6 0 0 1 6 0l96 56a6 6 0 0 1 0 10.36l-96 56a6 6 0 0 1-6 0l-96-56A6 6 0 0 1 26 80m17.91 0L128 129.05L212.09 80L128 31Z"/></symbol>
+    <symbol id="i-note" viewBox="0 0 256 256"><path fill="currentColor" d="m228.24 59.76l-32-32a6 6 0 0 0-8.48 0l-96 96A6 6 0 0 0 90 128v32a6 6 0 0 0 6 6h32a6 6 0 0 0 4.24-1.76l96-96a6 6 0 0 0 0-8.48M125.51 154H102v-23.51l66-66L191.51 88ZM200 79.51L176.49 56L192 40.49L215.51 64ZM222 128v80a14 14 0 0 1-14 14H48a14 14 0 0 1-14-14V48a14 14 0 0 1 14-14h80a6 6 0 0 1 0 12H48a2 2 0 0 0-2 2v160a2 2 0 0 0 2 2h160a2 2 0 0 0 2-2v-80a6 6 0 0 1 12 0"/></symbol>
+    <symbol id="i-circle" viewBox="0 0 256 256"><path fill="currentColor" d="M128 26a102 102 0 1 0 102 102A102.12 102.12 0 0 0 128 26m0 192a90 90 0 1 1 90-90a90.1 90.1 0 0 1-90 90"/></symbol>
+     <symbol id="i-arrow-r" viewBox="0 0 256 256"><path fill="currentColor" d="m220.24 132.24l-72 72a6 6 0 0 1-8.48-8.48L201.51 134H40a6 6 0 0 1 0-12h161.51l-61.75-61.76a6 6 0 0 1 8.48-8.48l72 72a6 6 0 0 1 0 8.48"/></symbol>
+     <symbol id="i-gear" viewBox="0 0 256 256"><path fill="currentColor" d="M128 82a46 46 0 1 0 46 46a46.06 46.06 0 0 0-46-46m0 80a34 34 0 1 1 34-34a34 34 0 0 1-34 34m108-54.4a6 6 0 0 0-2.92-4l-30.44-17.38l-.42-.71l-.12-34.31a6 6 0 0 0-2.1-4.56a110.1 110.1 0 0 0-36.07-20.31a6 6 0 0 0-4.84.45l-30.63 17.08h-1l-30.55-17.1a6 6 0 0 0-4.86-.44A109.9 109.9 0 0 0 56 46.68a6 6 0 0 0-2.12 4.55l-.16 34.34c-.14.23-.28.47-.41.71l-30.4 17.29a6 6 0 0 0-2.91 4.05a104.8 104.8 0 0 0 0 40.78a6 6 0 0 0 2.92 4l30.42 17.33l.42.71l.12 34.31a6 6 0 0 0 2.12 4.61a110.1 110.1 0 0 0 36.07 20.31a6 6 0 0 0 4.84-.45l30.61-17.08h1l30.56 17.1a6.1 6.1 0 0 0 2.92.76a5.8 5.8 0 0 0 1.93-.32a109.9 109.9 0 0 0 36-20.36a6 6 0 0 0 2.12-4.55l.16-34.34c.14-.23.28-.47.41-.71l30.42-17.29a6 6 0 0 0 2.92-4.05a104.8 104.8 0 0 0 .04-40.78m-11.25 35.79l-29.43 16.71a6.07 6.07 0 0 0-2.28 2.3c-.59 1-1.21 2.11-1.86 3.14a6 6 0 0 0-.91 3.16l-.16 33.21a98.2 98.2 0 0 1-27.52 15.53L133 200.88a6 6 0 0 0-2.93-.77h-3.88a6 6 0 0 0-3.07.76l-29.67 16.56a98 98 0 0 1-27.56-15.49l-.12-33.17a6 6 0 0 0-.91-3.16c-.64-1-1.27-2.08-1.86-3.14a6 6 0 0 0-2.27-2.3L31.3 143.4a93 93 0 0 1 0-30.79L60.68 95.9A6.07 6.07 0 0 0 63 93.6c.59-1 1.21-2.11 1.86-3.14a6 6 0 0 0 .91-3.16l.16-33.21a98.2 98.2 0 0 1 27.48-15.53L123 55.12a5.8 5.8 0 0 0 3.07.76h3.74a6 6 0 0 0 3.07-.76l29.65-16.56a98 98 0 0 1 27.56 15.49l.12 33.17a6 6 0 0 0 .91 3.16c.64 1 1.27 2.08 1.86 3.14a6 6 0 0 0 2.27 2.3l29.45 16.78a93 93 0 0 1 .03 30.79Z"/></symbol>
+   </svg>
+
+  <nav class="occ-nav-bar">
+    <div class="brand">
+      <span class="airasia-logo" aria-label="AirAsia" role="img"><svg class="ic"><use href="#i-airasia"/></svg></span>
+      <span class="brand-name" style="color: var(--text-primary);">AWQ <span style="font-weight:600; opacity:0.55; letter-spacing:0.04em;">OCC</span></span>
+    </div>
+
+    <div class="nav-btn-group">
+       <button id="nav-flight" class="nav-tab active" aria-current="page" onclick="window.switchTab('flight')" title="Flight Board"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-plane"/></svg>FLIGHT</button>
+      <div class="nav-data-container">
+        <button id="nav-data" class="nav-tab" type="button" aria-expanded="false" aria-controls="data-submenu" aria-haspopup="true" onclick="window.toggleDataSubmenu()" title="Data Menu">DATA <svg class="ic chevron" style="margin-left:4px;"><use href="#i-caret-dn"/></svg></button>
+        <div id="data-submenu" class="dropdown-menu data-submenu" role="menu">
+          <button type="button" class="dropdown-item" role="menuitem" data-tab="update-notam" onclick="window.switchTab('update-notam')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-pen"/></svg>NOTAM UPDATE</button>
+          <button type="button" class="dropdown-item" role="menuitem" data-tab="fir-update" onclick="window.switchTab('fir-update')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-sync"/></svg>FIR UPDATE</button>
+          <button type="button" class="dropdown-item" role="menuitem" data-tab="waypoint" onclick="window.switchTab('waypoint')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-stack"/></svg>WAYPOINT</button>
+        </div>
+      </div>
+      <button id="nav-taf" class="nav-tab" onclick="window.switchTab('taf')" title="TAF Manager"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-note"/></svg>TAF</button>
+      <button id="nav-notam" class="nav-tab" onclick="window.switchTab('notam')" title="NOTAM Analysis"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-alert"/></svg>NOTAM<span id="nav-notam-badge" style="display:none; background:var(--status-critical); color:#fff; font-size:9px; font-weight:900; min-width:16px; height:16px; line-height:16px; border-radius:8px; padding:0 4px; text-align:center; margin-left:6px;">0</span></button>
+      <button id="nav-report" class="nav-tab" onclick="window.switchTab('report')" title="Release Compiler"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-files"/></svg>REPORT</button>
+      <button id="nav-weather" class="nav-tab" onclick="window.switchTab('weather')" title="Weather Warning"><svg class="ic ic-sm" style="margin-right:6px; color:var(--status-warning);"><use href="#i-warn"/></svg>WX</button>
+      <button id="nav-route" class="nav-tab" onclick="window.switchTab('route')" title="Route Manager"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-arrow-r"/></svg>ROUTE</button>
+       <button id="nav-fir" class="nav-tab" onclick="window.switchTab('fir')" title="FIR Dispatch Control"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-arrow-r"/></svg>FIR</button>
+        <button id="nav-fir-notam" class="nav-tab" onclick="window.switchTab('fir-notam')" title="FIR NOTAM Editor"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-pen"/></svg>FIR NOTAM</button>
+        <button id="nav-checklist" class="nav-tab" onclick="window.switchTab('checklist')" title="Operational Checklist"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-check-circle"/></svg>CHECKLIST</button>
+        <button id="nav-settings" class="nav-tab" onclick="window.switchTab('settings')" title="Settings"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-gear"/></svg>SETTINGS</button>
+     </div>
+
+    <div class="nav-actions">
+      <div class="utc-heartbeat">
+        <div class="utc-time-main">
+          <span id="sys-utc-nav">0000Z</span>
+          <span class="heartbeat-icon"></span>
+        </div>
+        <div id="sys-utc-sub" class="utc-time-sub">UTC ZULU TIME</div>
+      </div>
+      <div class="dropdown-container">
+        <button id="ext-links-btn" class="nav-btn-ext" type="button" aria-expanded="false" aria-controls="ext-links-menu" onclick="window.toggleExternalLinks()">
+          LINKS <svg class="ic chevron"><use href="#i-caret-dn"/></svg>
+        </button>
+        <div id="ext-links-menu" class="dropdown-menu">
+          <a class="dropdown-item" href="https://docs.google.com/spreadsheets/d/1PAV7ajnwv6CpYoGzsMKzAjlmdhLsrOd1Tsz0UDOfdj8/edit?gid=1555717677#gid=1555717677" target="_blank">A/C STATUS</a>
+          <a class="dropdown-item" href="https://docs.google.com/spreadsheets/d/1jHGaWQB5PtzkmVKwb7k_a1nPTZoUhcJjn7NnKWaw-Qg/edit?gid=0#gid=0" target="_blank">CGO PLAN</a>
+          <a class="dropdown-item" href="https://drive.google.com/drive/folders/1_TqB_9wV9Bqz6bEh-Ip0s_adFqf3bZcJ" target="_blank">DISPATCH BULETIN</a>
+          <div class="dropdown-divider"></div>
+          <a class="dropdown-item" href="https://aviationweather.gov/data/taf/" target="_blank">ADDS (TAF)</a>
+          <a class="dropdown-item" href="https://web-aviation.bmkg.go.id/web/taf.php" target="_blank">BMKG TAF</a>
+          <a class="dropdown-item" href="https://redwatch.airasia.com/eops" target="_blank">REDWATCH</a>
+          <a class="dropdown-item" href="https://www.flightradar24.com/" target="_blank">FR24</a>
+          <div class="dropdown-divider"></div>
+          <a class="dropdown-item" href="https://www.bom.gov.au/aviation/volcanic-ash/darwin-va-advisory.shtml" target="_blank">VAAC DARWIN</a>
+          <a class="dropdown-item" href="https://www.metoc.navy.mil/jtwc/jtwc.html?tropical" target="_blank">JTWC</a>
+          <a class="dropdown-item" href="https://notams.aim.faa.gov/notamSearch/nsapp.html#/" target="_blank">DINS NOTAM</a>
+        </div>
+      </div>
+      <button id="theme-toggle" class="theme-toggle-btn" onclick="window.toggleTheme()" aria-label="Toggle dark mode" title="Toggle Theme"><svg class="ic ic-moon"><use href="#i-moon"/></svg><svg class="ic ic-sun"><use href="#i-sun"/></svg></button>
+    </div>
+  </nav>
+
+  <div class="occ-status-strip" role="status" aria-live="polite">
+    <div class="status-item"><span class="pulse-dot-live"></span> <span class="status-val">SYSTEM LIVE</span></div>
+    <div class="status-item">DATABASE: <span id="sys-db-status" style="color: var(--text-muted);">CHECKING</span></div>
+    <div class="status-item">UTC: <span id="sys-utc" class="status-val">--:--Z</span></div>
+    <div class="status-item">BOARD: <span id="sys-board-count" class="status-val">0</span> ACTIVE</div>
+    <div class="status-item" style="margin-left:auto;">
+      ALERTS: <span id="sys-alert-count" style="color: var(--status-critical); font-weight: bold;">0</span>
+    </div>
+  </div>
+
+  <!-- UI MODULES LOADED BELOW -->
+  <div class="occ-content-area">
+    <?!= include('Flight_Ui'); ?>
+    <?!= include('Notam_Ui'); ?>
+    <?!= include('Report_Ui'); ?>
+    <?!= include('Update_Notam_Ui'); ?>
+    <?!= include('Route_Ui'); ?>
+    <?!= include('Taf_Ui'); ?>
+    <?!= include('Weather_Warning_Ui'); ?>
+    <section id="view-fir" class="view-section">
+      <div id="fir-dashboard">
+        <?!= include('FIR_Ui'); ?>
+      </div>
+    </section>
+     <section id="view-fir-notam" class="view-section">
+       <?!= include('FIR_Notam_Ui'); ?>
+     </section>
+     <section id="view-fir-update" class="view-section">
+       <?!= include('Fir_Update_Ui'); ?>
+     </section>
+     <?!= include('Checklist_Ui'); ?>
+      <section id="view-waypoint" class="view-section">
+        <?!= include('LatLong_Ui'); ?>
+      </section>
+      <section id="view-settings" class="view-section">
+        <?!= include('Settings_Ui'); ?>
+      </section>
+    </div>
+
+  <script>
+    // Initialize Theme
+    (function() {
+      var savedTheme = window.safeStorage ? window.safeStorage.get('occ_theme_pref', 'light') : 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme || 'light');
+    })();
+
+    window.toggleTheme = function() {
+      var html = document.documentElement;
+      var currentTheme = html.getAttribute('data-theme');
+      var newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', newTheme);
+      if (window.safeStorage) window.safeStorage.set('occ_theme_pref', newTheme);
+    };
+
+    // Protect global state
+    window.globalSelectedFlights = window.globalSelectedFlights || [];
+
+    // FIR uses integrated internal view. OCC_FIR_LINK is not used by navigation.
+    const firNav = document.getElementById('nav-fir');
+    if (firNav) {
+      firNav.classList.add('configured');
+      firNav.title = 'Open internal FIR view';
+    }
+
+    window.isSettingsAdmin = null;
+    window.switchTab = function(tabName) {
+      console.log('[SYSTEM] Attempting switch to:', tabName);
+      if (tabName === 'settings' && window.isSettingsAdmin === false) {
+        console.warn('[SECURITY] Blocked settings access - not admin');
+        var sv = document.getElementById('view-settings');
+        if (sv) sv.innerHTML = '<div style="padding:40px;text-align:center;font-family:var(--font-mono);color:var(--text-muted);"><div style="font-size:28px;">🔒</div><div style="font-weight:800;margin:8px 0;color:var(--text-primary);">SETTINGS - ADMIN ONLY</div><div>Your account is not listed in SETTINGS_ADMIN_EMAILS.<br>Contact admin for access.</div></div>';
+        if (typeof window.addToast === 'function') window.addToast('Settings is admin-only');
+        return;
+      }
+
+      const targetView = document.getElementById('view-' + tabName);
+      const targetNav = document.getElementById('nav-' + tabName);
+      // Submenu entries (NOTAM UPDATE / FIR UPDATE / WAYPOINT) live under the DATA parent.
+      // Their views have no dedicated top-level nav button, so active state + aria-current
+      // fall back to the DATA parent tab.
+      const dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint'];
+      const isDataSubmenu = dataSubmenuTabs.indexOf(tabName) !== -1;
+      
+      if (!targetView) {
+        console.error('[ERROR] Target view not found: view-' + tabName);
+        return;
+      }
+      
+      const viewSections = document.querySelectorAll('.view-section');
+      const navTabs = document.querySelectorAll('.nav-tab');
+      
+       viewSections.forEach(el => el.classList.remove('active'));
+       navTabs.forEach(el => {
+         el.classList.remove('active');
+         el.removeAttribute('aria-current');
+       });
+      
+       targetView.classList.add('active');
+        document.querySelectorAll('#data-submenu .dropdown-item').forEach(function(b){
+          var on = isDataSubmenu && b.getAttribute('data-tab') === tabName;
+          b.classList.toggle('active', on);
+          if (on) { b.setAttribute('aria-current', 'true'); } else { b.removeAttribute('aria-current'); }
+        });
+        if (isDataSubmenu) {
+         var dataParent = document.getElementById('nav-data');
+         if (dataParent) {
+           dataParent.classList.add('active');
+           dataParent.setAttribute('aria-current', 'page');
+         }
+       } else if (targetNav) {
+         targetNav.classList.add('active');
+         targetNav.setAttribute('aria-current', 'page');
+       }
+       document.querySelectorAll('.nav-tab .tl-lamp').forEach(function(el) { el.remove(); });
+       var __activeTab = document.querySelector('.nav-tab.active');
+       if (__activeTab) {
+         var __lamp = document.createElement('span');
+         __lamp.className = 'tl-lamp';
+         __lamp.setAttribute('aria-hidden', 'true');
+         __lamp.innerHTML = '<span class="tl-tube"></span>';
+         __activeTab.appendChild(__lamp);
+       }
+
+       try {
+         if (tabName === 'notam' && typeof window.loadNotamsForSelected === 'function') {
+           window.loadNotamsForSelected();
+         } else if (tabName === 'report' && typeof window.renderReportPreview === 'function') {
+           window.renderReportPreview();
+         } else if (tabName === 'route' && typeof window.initRouteManager === 'function') {
+           window.initRouteManager();
+         } else if (tabName === 'taf' && typeof window.initTafManager === 'function') {
+           window.initTafManager();
+          } else if (tabName === 'weather' && typeof window.initWeatherDashboard === 'function') {
+            window.initWeatherDashboard();
+          } else if (tabName === 'checklist' && typeof window.initChecklistManager === 'function') {
+            window.initChecklistManager();
+          } else if (tabName === 'fir' && typeof window.initFirDashboard === 'function') {
+            if (typeof window.occEnsureLeaflet === 'function') {
+              window.occEnsureLeaflet().then(function() { window.initFirDashboard(); })
+                .catch(function(err) { console.error('[ERROR] Leaflet load failed:', err); });
+            } else {
+              window.initFirDashboard();
+            }
+          } else if (tabName === 'fir-notam' && typeof window.initFirNotamDashboard === 'function') {
+            if (typeof window.occEnsureLeaflet === 'function') {
+              window.occEnsureLeaflet().then(function() { window.initFirNotamDashboard(); })
+                .catch(function(err) { console.error('[ERROR] Leaflet load failed:', err); });
+            } else {
+              window.initFirNotamDashboard();
+            }
+         } else if (tabName === 'waypoint' && typeof window.initLatlongManager === 'function') {
+           window.initLatlongManager();
+         } else if (tabName === 'fir-update' && typeof window.initFirUpdateDashboard === 'function') {
+           window.initFirUpdateDashboard();
+         }
+      } catch (err) {
+        console.error('[ERROR] Initialization failed for ' + tabName + ':', err);
+      }
+      
+      // Auto-scroll to top on tab change
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      // Close DATA submenu after selecting an entry
+      if (isDataSubmenu && typeof window.closeDataSubmenu === 'function') {
+        window.closeDataSubmenu();
+      }
+    };
+
+    // Tubelight lamp awal — pasang di tab aktif saat load
+    (function() {
+      var t = document.querySelector('.nav-tab.active');
+      if (t && !t.querySelector('.tl-lamp')) {
+        var l = document.createElement('span');
+        l.className = 'tl-lamp';
+        l.setAttribute('aria-hidden', 'true');
+        l.innerHTML = '<span class="tl-tube"></span>';
+        t.appendChild(l);
+      }
+    })();
+    // Diagnostic after templated includes are rendered — never FATAL on known HtmlService includes
+    (function() {
+      var __occRunDiagnostics = function() {
+        var sections = ['flight', 'update-notam', 'fir-update', 'taf', 'notam', 'report', 'weather', 'route', 'waypoint'];
+        var dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint'];
+        var missing = [];
+        sections.forEach(function(s) {
+          var el = document.getElementById('view-' + s);
+          if (!el) missing.push('view-' + s);
+          // Submenu tabs live under the DATA parent — no dedicated nav button by design
+          if (dataSubmenuTabs.indexOf(s) !== -1) {
+            if (!document.getElementById('nav-data')) console.warn('[DIAGNOSTIC] Missing nav button: nav-data');
+            return;
+          }
+          var nav = document.getElementById('nav-' + s);
+          if (!nav) console.warn('[DIAGNOSTIC] Missing nav button: nav-' + s);
+        });
+        if (!document.getElementById('nav-fir')) console.warn('[DIAGNOSTIC] Missing nav button: nav-fir');
+        if (missing.length > 0) {
+          console.warn('[DIAGNOSTIC] Missing UI Modules:', missing.join(', '));
+        } else {
+          console.log('[SYSTEM] All UI modules loaded successfully.');
+        }
+      };
+      if (document.readyState === 'complete') setTimeout(__occRunDiagnostics, 0);
+      else window.addEventListener('load', __occRunDiagnostics);
+      window.occRunDiagnostics = __occRunDiagnostics;
+    })();
+    (function() {
+      var __legacyLoad = function() {
+        // Keep for backward compat if anything hooks window load expecting diagnostics side-effects
+      };
+      if (document.readyState === 'complete') setTimeout(__legacyLoad, 0);
+      else window.addEventListener('load', __legacyLoad);
+      // Settings admin gate: hide nav-settings if not admin
+      try {
+        if (typeof google !== 'undefined' && google.script && google.script.run) {
+          google.script.run.withSuccessHandler(function(res) {
+            var canView = !!(res && res.ok && res.canView);
+            window.isSettingsAdmin = canView;
+            var nav = document.getElementById('nav-settings');
+            if (nav && !canView) nav.style.display = 'none';
+          }).withFailureHandler(function() {
+            window.isSettingsAdmin = false;
+            var nav2 = document.getElementById('nav-settings');
+            if (nav2) nav2.style.display = 'none';
+          }).getSettingsAccessInfo();
+        }
+      } catch (e) { console.warn('[SECURITY] settings gate failed', e); }
+    })();
+
+    // External Links Dropdown Logic
+    window.toggleExternalLinks = function() {
+      const menu = document.getElementById('ext-links-menu');
+      const btn = document.getElementById('ext-links-btn');
+      const isOpen = menu.classList.contains('show');
+      const nav = document.querySelector('.occ-nav-bar');
+      menu.classList.toggle('show', !isOpen);
+      btn.classList.toggle('open', !isOpen);
+      btn.setAttribute('aria-expanded', String(!isOpen));
+      nav.classList.toggle('dropdown-open', !isOpen);
+    };
+
+    // Close dropdown on click outside
+    document.addEventListener('click', function(event) {
+      const menu = document.getElementById('ext-links-menu');
+      const btn = document.getElementById('ext-links-btn');
+      if (!btn.contains(event.target) && !menu.contains(event.target)) {
+        menu.classList.remove('show');
+        btn.classList.remove('open');
+        btn.setAttribute('aria-expanded', 'false');
+        // Don't drop nav layer while DATA submenu is still open
+        var dataMenu = document.getElementById('data-submenu');
+        if (!dataMenu || !dataMenu.classList.contains('show')) {
+          document.querySelector('.occ-nav-bar').classList.remove('dropdown-open');
+        }
+      }
+    });
+
+    // DATA parent tab submenu logic (mimics ext-links dropdown mechanics)
+    // Anchor submenu to the viewport (position:fixed from button rect) so it
+    // escapes every overflow clipping ancestor —incl. the horizontal tab
+    // scroller at 390px— and stays inside the viewport horizontally.
+    window.positionDataSubmenu = function() {
+      const menu = document.getElementById('data-submenu');
+      const btn = document.getElementById('nav-data');
+      if (!menu || !btn) return;
+      var r = btn.getBoundingClientRect();
+      var w = Math.min(220, window.innerWidth - 16);
+      var left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
+      menu.style.position = 'fixed';
+      menu.style.top = (r.bottom + 8) + 'px';
+      menu.style.left = left + 'px';
+      menu.style.right = 'auto';
+      menu.style.width = w + 'px';
+    };
+    window.clearDataSubmenuPos = function() {
+      const menu = document.getElementById('data-submenu');
+      if (!menu) return;
+      menu.style.position = '';
+      menu.style.top = '';
+      menu.style.left = '';
+      menu.style.right = '';
+      menu.style.width = '';
+    };
+    window.toggleDataSubmenu = function() {
+      const menu = document.getElementById('data-submenu');
+      const btn = document.getElementById('nav-data');
+      if (!menu || !btn) return;
+      const isOpen = menu.classList.contains('show');
+      const nav = document.querySelector('.occ-nav-bar');
+      const group = document.querySelector('.nav-btn-group');
+      menu.classList.toggle('show', !isOpen);
+      btn.setAttribute('aria-expanded', String(!isOpen));
+      if (nav) nav.classList.toggle('dropdown-open', !isOpen);
+      // Unclip: scroll container hides the absolute submenu while open
+      if (group) group.classList.toggle('menu-open', !isOpen);
+      if (!isOpen) window.positionDataSubmenu();
+      else window.clearDataSubmenuPos();
+    };
+    window.closeDataSubmenu = function() {
+      const menu = document.getElementById('data-submenu');
+      const btn = document.getElementById('nav-data');
+      if (!menu || !btn) return;
+      menu.classList.remove('show');
+      btn.setAttribute('aria-expanded', 'false');
+      window.clearDataSubmenuPos();
+      var group = document.querySelector('.nav-btn-group');
+      if (group) group.classList.remove('menu-open');
+      var extStillOpen = false;
+      var extMenu = document.getElementById('ext-links-menu');
+      if (extMenu) extStillOpen = extMenu.classList.contains('show');
+      if (!extStillOpen) document.querySelector('.occ-nav-bar').classList.remove('dropdown-open');
+    };
+    // Close DATA submenu on click outside / entry select
+    document.addEventListener('click', function(event) {
+      const menu = document.getElementById('data-submenu');
+      const btn = document.getElementById('nav-data');
+      if (!menu || !btn) return;
+      if (!btn.contains(event.target) && !menu.contains(event.target)) {
+        window.closeDataSubmenu();
+      }
+    });
+    // Close DATA submenu on Escape
+    document.addEventListener('keydown', function(event) {
+      const menu = document.getElementById('data-submenu');
+      const btn = document.getElementById('nav-data');
+      if (!menu || !btn) return;
+      if (event.key === 'Escape' && menu.classList.contains('show')) {
+        event.preventDefault();
+        window.closeDataSubmenu();
+        btn.focus();
+      }
+    });
+    // Keep viewport-anchored submenu glued to DATA button on resize/scroll
+    (function() {
+      if (window.__dataSubmenuRepositionBound) return;
+      window.__dataSubmenuRepositionBound = true;
+      var reposition = function() {
+        var menu = document.getElementById('data-submenu');
+        if (menu && menu.classList.contains('show') && typeof window.positionDataSubmenu === 'function') {
+          window.positionDataSubmenu();
+        }
+      };
+      window.addEventListener('resize', reposition);
+      window.addEventListener('scroll', reposition, true);
+    })();
+    // Keyboard: arrows move through DATA submenu items (checklist: Tab-Enter-panah-Enter-Escape)
+    document.addEventListener('keydown', function(event) {
+      const menu = document.getElementById('data-submenu');
+      const btn = document.getElementById('nav-data');
+      if (!menu || !btn) return;
+      var items = Array.prototype.slice.call(menu.querySelectorAll('.dropdown-item'));
+      if (!items.length) return;
+      var inMenu = menu.contains(document.activeElement);
+      var onBtn = document.activeElement === btn;
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (onBtn || inMenu)) {
+        event.preventDefault();
+        if (!menu.classList.contains('show')) window.toggleDataSubmenu();
+        var idx = items.indexOf(document.activeElement);
+        var next = (event.key === 'ArrowDown')
+          ? items[(idx + 1) % items.length]
+          : items[(idx - 1 + items.length) % items.length];
+        (next || items[0]).focus();
+      } else if (event.key === 'Home' && inMenu) {
+        event.preventDefault(); items[0].focus();
+      } else if (event.key === 'End' && inMenu) {
+        event.preventDefault(); items[items.length - 1].focus();
+      }
+    });
+
+    // UTC Clock Logic
+    const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+    
+    // H5: single 5s ticker — Flight cmd-utc-clock folds in via occUtcTick hook.
+    window.occUtcTick = function() {
+      var el = document.getElementById('cmd-utc-clock');
+      if (!el) return;
+      var now = new Date();
+      el.textContent = String(now.getUTCHours()).padStart(2,'0') + ':' + String(now.getUTCMinutes()).padStart(2,'0') + 'Z';
+    };
+    setInterval(() => {
+      const d = new Date();
+      
+      // Main Display: SAT, 04 JUL 2026
+      const dayName = days[d.getUTCDay()];
+      const dayNum = String(d.getUTCDate()).padStart(2, '0');
+      const monthName = months[d.getUTCMonth()];
+      const year = d.getUTCFullYear();
+      const dateStr = `${dayName}, ${dayNum} ${monthName} ${year}`;
+      
+      // Sub Display: HH:MM:SS Z
+      const hours = String(d.getUTCHours()).padStart(2, '0');
+      const mins = String(d.getUTCMinutes()).padStart(2, '0');
+      const secs = String(d.getUTCSeconds()).padStart(2, '0');
+      const timeStr = `${hours}:${mins}:${secs} Z`;
+
+      if (document.getElementById('sys-utc-nav')) document.getElementById('sys-utc-nav').innerText = dateStr;
+      if (document.getElementById('sys-utc-sub')) document.getElementById('sys-utc-sub').innerText = timeStr;
+      
+      // Legacy support for status strip (keeps HHMMZ format)
+      if (document.getElementById('sys-utc')) {
+        document.getElementById('sys-utc').innerText = `${hours}${mins}Z`;
+      }
+      if (typeof window.occUtcTick === 'function') { try { window.occUtcTick(); } catch (e) {} }
+    }, 5000);
+
+    // Weather Warning Handler
+    window.openWeatherWarning = function() {
+      console.log('[SYSTEM] Launching Weather Warning Modal...');
+      google.script.run.openWeatherWarning();
+    };
+  </script>
+</body>
+</html>

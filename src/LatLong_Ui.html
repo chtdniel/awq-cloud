@@ -1,0 +1,315 @@
+<!-- LatLong_Ui.html — WAYPOINT editor (sheet LATLONG, Variant B: ID|Waypoint|Latitude|Longitude) -->
+<style>
+  .latlong-ui { display:none; }
+  .view-section.active .latlong-ui { display:block; }
+  .latlong-ui .ll-wrap { display:grid; grid-template-columns: 460px 1fr; gap:16px; align-items:start; }
+  @media (max-width: 768px){ .latlong-ui .ll-wrap{ grid-template-columns:1fr; } }
+  .latlong-ui .ll-panel{ background:var(--bg-panel); border:1px solid var(--border-light); border-radius:var(--radius-md); overflow:hidden; }
+  .latlong-ui .ll-head{ padding:12px 14px; border-bottom:1px solid var(--border-subtle); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .latlong-ui .ll-title{ font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); }
+  .latlong-ui .ll-form{ padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .latlong-ui .ll-field label{ display:block; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); margin-bottom:4px; }
+  .latlong-ui .ll-field input, .latlong-ui .ll-field select, .latlong-ui .ll-field textarea{
+    width:100%; box-sizing:border-box; background:var(--bg-panel-alt); color:var(--text-primary);
+    border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:8px 10px;
+    font-family:var(--font-mono); font-size:12px;
+  }
+  .latlong-ui .ll-field textarea{ min-height:220px; resize:vertical; line-height:1.5; font-size:11px; }
+  .latlong-ui .ll-row2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .latlong-ui .ll-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
+  .latlong-ui .ll-btn{ display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; padding:8px 14px; border:1px solid var(--border-light); background:var(--bg-panel-raised); color:var(--text-secondary); border-radius:var(--radius-sm); cursor:pointer; }
+  .latlong-ui .ll-btn:hover{ border-color:var(--accent-primary); color:var(--accent-primary); }
+  .latlong-ui .ll-btn.primary{ background:var(--accent-primary); color:#fff; border-color:var(--accent-primary); }
+  .latlong-ui .ll-btn.primary:hover{ opacity:.9; color:#fff; }
+  .latlong-ui .ll-btn:disabled{ opacity:.5; cursor:not-allowed; }
+  /* a11y: local focus ring (global lives in Index.html shell) */
+  .latlong-ui .ll-btn:focus-visible{ outline:3px solid var(--accent-primary); outline-offset:2px; }
+  .latlong-ui .ll-hint{ font-size:10px; color:var(--text-muted); font-family:var(--font-mono); line-height:1.5; }
+  .latlong-ui .ll-kpi{ display:grid; grid-template-columns: repeat(3,1fr); gap:8px; margin-bottom:14px; }
+  .latlong-ui .ll-kpi-card{ background:var(--bg-panel); border:1px solid var(--border-light); border-left:3px solid var(--border-medium); border-radius:var(--radius-md); padding:10px 12px; }
+  .latlong-ui .ll-kpi-card.accent{ border-left-color:var(--accent-primary); }
+  .latlong-ui .ll-kpi-card.safe{ border-left-color:var(--status-safe); }
+  .latlong-ui .ll-kpi-card.warn{ border-left-color:var(--status-warning); }
+  .latlong-ui .ll-kpi-label{ font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
+  .latlong-ui .ll-kpi-val{ font-family:var(--font-mono); font-weight:800; font-size:18px; color:var(--text-primary); margin-top:2px; }
+  .latlong-ui .ll-kpi-sub{ font-size:10px; color:var(--text-muted); font-family:var(--font-mono); }
+  .latlong-ui .ll-toolbar{ padding:10px 14px; border-bottom:1px solid var(--border-subtle); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .latlong-ui .ll-search{ flex:1; min-width:160px; background:var(--bg-panel-alt); color:var(--text-primary); border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:7px 10px; font-family:var(--font-mono); font-size:12px; }
+  .latlong-ui .ll-count{ font-size:10px; color:var(--text-muted); font-family:var(--font-mono); }
+  .latlong-ui .ll-preview{ max-height:320px; overflow:auto; border:1px solid var(--border-light); border-radius:var(--radius-sm); background:var(--bg-panel-alt); }
+  .latlong-ui .ll-preview table{ width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:11px; }
+  .latlong-ui .ll-preview th{ position:sticky; top:0; background:var(--bg-panel-sunken); color:var(--text-muted); font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; text-align:left; padding:6px 8px; border-bottom:1px solid var(--border-subtle); }
+  .latlong-ui .ll-preview td{ padding:5px 8px; border-bottom:1px solid var(--border-subtle); color:var(--text-secondary); }
+  .latlong-ui .ll-list{ max-height: calc(100vh - 280px); overflow:auto; }
+  .latlong-ui .ll-item{ padding:8px 12px; border-bottom:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .latlong-ui .ll-item:hover{ background:var(--overlay-hover); }
+  .latlong-ui .ll-wpt{ font-family:var(--font-mono); font-weight:800; color:var(--text-primary); font-size:12px; }
+  .latlong-ui .ll-coord{ font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); }
+  .latlong-ui .ll-empty{ padding:20px; text-align:center; color:var(--text-muted); font-size:12px; font-family:var(--font-mono); }
+  .latlong-ui .ll-toast{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); box-shadow:0 8px 24px rgba(0,0,0,.18); }
+</style>
+
+<div class="latlong-ui" id="latlong-ui-root">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:12px; flex-wrap:wrap;">
+    <div>
+       <h2 class="header-title">WAYPOINT MANAGER</h2>
+        <div class="header-sub">MANAGE WAYPOINT DATABASE</div>
+    </div>
+    <button type="button" class="ll-btn" onclick="window.latlongRefresh()"><svg class="ic ic-sm"><use href="#i-sync"/></svg> REFRESH</button>
+  </div>
+
+  <div class="ll-kpi">
+    <div class="ll-kpi-card accent"><div class="ll-kpi-label">Current Waypoints</div><div class="ll-kpi-val" id="ll-kpi-total">0</div><div class="ll-kpi-sub" id="ll-kpi-header">ID | Waypoint | Latitude | Longitude</div></div>
+    <div class="ll-kpi-card safe"><div class="ll-kpi-label">Last Parsed</div><div class="ll-kpi-val" id="ll-kpi-parsed">0</div><div class="ll-kpi-sub">from paste preview</div></div>
+    <div class="ll-kpi-card warn"><div class="ll-kpi-label">Mode</div><div class="ll-kpi-val" style="font-size:13px; padding-top:4px;" id="ll-kpi-mode">COLUMN</div><div class="ll-kpi-sub">left top→bottom, then right top→bottom</div></div>
+  </div>
+
+  <div class="ll-wrap">
+    <!-- Left: Paste & controls -->
+    <div class="ll-panel">
+      <div class="ll-head">
+        <span class="ll-title">Paste Coordinates</span>
+        <span class="ll-count" id="ll-order-badge">COLUMN order</span>
+      </div>
+      <div class="ll-form">
+        <div class="ll-field">
+          <label for="ll-paste">Paste FIXes per line</label>
+          <textarea id="ll-paste" placeholder="WADD S 08 44.8 E 115 10.2
+MAMAD S 08 45.0 E 115 27.9
+VTK N 01 24.9 E 104 01.3"></textarea>
+        </div>
+
+        <div class="ll-row2">
+          <div class="ll-field">
+            <label for="ll-order">Scan Order</label>
+            <select id="ll-order">
+              <option value="column" selected>COLUMN — left top→bottom, then right top→bottom (Recommended)</option>
+              <option value="row">ROW — interleaved row-by-row (as copied)</option>
+            </select>
+          </div>
+          <div class="ll-field">
+            <label for="ll-routeId">Route ID (Variant B — Required)</label>
+             <input id="ll-routeId" type="text" placeholder="WADDWSSS01 — Route identifier for ID column (e.g. WADDWSSS01)" autocomplete="off" style="text-transform:uppercase;">
+          </div>
+        </div>
+
+        <div class="ll-row2">
+          <div class="ll-field">
+            <label for="ll-mode">Update Mode</label>
+            <select id="ll-mode">
+              <option value="replace" selected>REPLACE — overwrite all existing FIXes (full refresh)</option>
+              <option value="append">APPEND — append to end of sheet</option>
+              <option value="merge">MERGE — update existing FIX, insert new FIX</option>
+            </select>
+          </div>
+          <div class="ll-field">
+            <label>&nbsp;</label>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="ll-btn" id="ll-preview-btn" style="flex:1;"><svg class="ic ic-sm"><use href="#i-search"/></svg> PREVIEW</button>
+              <button type="button" class="ll-btn primary" id="ll-save-btn" style="flex:1;"><svg class="ic ic-sm"><use href="#i-save"/></svg> SAVE TO SHEET</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ll-hint">
+          <b>REPLACE</b> for full database refresh. <b>MERGE</b> for daily patch (preserves other FIXes). <b>APPEND</b> for incremental add.
+        </div>
+
+        <div id="ll-preview-wrap" style="display:none;">
+          <div class="ll-title" style="margin:10px 0 6px;">Preview <span id="ll-preview-count" class="ll-count"></span></div>
+          <div class="ll-preview" id="ll-preview-box"><div class="ll-empty">No preview.</div></div>
+          <div class="ll-hint" id="ll-preview-meta" style="margin-top:6px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Current sheet data -->
+    <div class="ll-panel">
+      <div class="ll-toolbar">
+        <input class="ll-search" id="ll-search" type="text" aria-label="Search waypoints by fix, coordinates or route ID" placeholder="Search FIX / latitude / longitude / route ID...">
+        <span class="ll-count" id="ll-total-count">0 FIXes</span>
+        <button type="button" class="ll-btn" id="ll-clear-btn" title="Clear all FIX data (retain header)" style="color:var(--status-critical); border-color:var(--status-critical);"><svg class="ic ic-sm"><use href="#i-trash"/></svg> CLEAR</button>
+      </div>
+      <div id="ll-list-status" class="ll-hint" style="padding:8px 14px; border-bottom:1px solid var(--border-subtle);"></div>
+      <div class="ll-list" id="ll-list"><div class="ll-empty">Loading WAYPOINT database...</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  if (window.latlongUiInited) return;
+  window.latlongUiInited = true;
+  var state = { rows: [], header: [], colMap: null, preview: [], filter: '' };
+
+  function $(id){ return document.getElementById(id); }
+  function esc(v){ return String(v==null?'':v).replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function toast(msg){
+    var t=document.querySelector('.ll-toast'); if(!t){ t=document.createElement('div'); t.className='ll-toast'; document.body.appendChild(t); }
+    t.textContent=msg; t.style.display='block'; clearTimeout(window.__llToast); window.__llToast=setTimeout(function(){ t.style.display='none'; }, 2600);
+  }
+  function run(fn){
+    var args=Array.prototype.slice.call(arguments,1);
+    return new Promise(function(resolve){
+      if(typeof google==='undefined'||!google.script||!google.script.run){ resolve({error:'google.script.run unavailable (local preview)'}); return; }
+      var ok=function(d){ if(d===null||d===undefined) resolve({error:fn+' returned null - redeploy Apps Script'}); else resolve(d); };
+      var fail=function(e){ resolve({error:(e&&e.message)||String(e)}); };
+      var chain=google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
+      try{ chain[fn].apply(chain,args); }catch(e){ resolve({error:String(e&&e.message||e)}); }
+    });
+  }
+
+  function renderKpi(){
+    $('ll-kpi-total').textContent = state.rows.length;
+    $('ll-kpi-header').textContent = (state.header||[]).join(' | ') || '—';
+    var om = $('ll-order').value==='column' ? 'COLUMN' : 'ROW';
+    $('ll-kpi-mode').textContent = om;
+    $('ll-order-badge').textContent = om + ' order';
+    $('ll-kpi-parsed').textContent = state.preview.length || 0;
+    $('ll-total-count').textContent = state.rows.length + ' waypoints';
+  }
+
+  function renderList(){
+    var box=$('ll-list');
+    var q=state.filter.trim().toUpperCase();
+    var list = state.rows.filter(function(r){
+      if(!q) return true;
+      return (String(r.Waypoint).toUpperCase().indexOf(q)>-1) || (String(r.Latitude).toUpperCase().indexOf(q)>-1) || (String(r.Longitude).toUpperCase().indexOf(q)>-1) || (String(r.ID||'').toUpperCase().indexOf(q)>-1);
+    });
+    if(!list.length){
+      box.innerHTML='<div class="ll-empty">'+(state.rows.length?'No match.':'No waypoints found.')+'</div>';
+      return;
+    }
+    var hasId = state.header && state.header.map(function(h){return String(h).toUpperCase();}).indexOf('ID')>-1;
+    var h='';
+    list.slice(0,500).forEach(function(r){
+      h+='<div class="ll-item">'
+        +'<div><div class="ll-wpt">'+esc(r.Waypoint)+(hasId && r.ID? ' <span style="color:var(--text-muted); font-weight:600; font-size:10px;">('+esc(r.ID)+')</span>':'')+'</div>'
+        +'<div class="ll-coord">'+esc(r.Latitude)+' &nbsp; '+esc(r.Longitude)+'</div></div>'
+        +'<button class="ll-btn ll-delete-btn" style="padding:4px 8px; font-size:9px;" data-waypoint="'+esc(r.Waypoint)+'" title="Delete '+esc(r.Waypoint)+'" aria-label="Delete waypoint '+esc(r.Waypoint)+'"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>'
+        +'</div>';
+    });
+    if(list.length>500) h+='<div class="ll-empty">Showing 500 of '+list.length+' — refine search to see more.</div>';
+    box.innerHTML=h;
+  }
+
+  function renderPreview(entries, meta){
+    var wrap=$('ll-preview-wrap');
+    var box=$('ll-preview-box');
+    var cnt=$('ll-preview-count');
+    var metaEl=$('ll-preview-meta');
+    state.preview = entries||[];
+    renderKpi();
+    if(!entries||!entries.length){
+      wrap.style.display='none'; return;
+    }
+    wrap.style.display='block';
+    cnt.textContent='('+entries.length+')';
+    var routeIdVal = $('ll-routeId').value.trim().toUpperCase() || '—';
+    var hh = '<table><thead><tr><th>#</th><th>ID</th><th>Waypoint</th><th>Latitude</th><th>Longitude</th></tr></thead><tbody>';
+    entries.forEach(function(e,i){
+      hh+='<tr><td>'+(i+1)+'</td><td style="color:var(--text-muted);">'+esc(routeIdVal)+'</td><td style="font-weight:800; color:var(--accent-primary);">'+esc(e.waypoint)+'</td><td>'+esc(e.latStr)+'</td><td>'+esc(e.lonStr)+'</td></tr>';
+    });
+    hh+='</tbody></table>';
+    box.innerHTML=hh;
+    var m='';
+    if(meta){
+      m = meta.rawCount+' raw hits, '+meta.dedupedCount+' unique, '+meta.skipped+' skipped, '+meta.dupCount+' dups removed — left:'+meta.leftCount+' right:'+meta.rightCount+' ('+meta.orderMode+')';
+      if(meta.dupCount>0) m+=' — ⚠ duplicates deduped (keep first)';
+    }
+    metaEl.textContent=m;
+  }
+
+  window.latlongRefresh = async function(){
+    var box=$('ll-list'); var status=$('ll-list-status');
+    box.innerHTML='<div class="ll-empty">Loading WAYPOINT database...</div>';
+    status.textContent='Fetching WAYPOINT database...';
+    var data = await run('latlongGetEditorData');
+    if(data && data.ok){
+      state.rows = data.rows||[];
+      state.header = data.header||[];
+      state.colMap = data.colMap||null;
+      status.textContent = 'Sheet "'+esc(data.sheetName||'LATLONG')+'" — Variant B header: '+esc((data.header||[]).join(' | '))+' — '+data.count+' FIXes';
+      renderKpi(); renderList();
+    } else {
+      status.textContent='Error: '+esc((data&&data.error)||'unknown');
+      box.innerHTML='<div class="ll-empty" style="color:var(--status-critical);">'+esc((data&&data.error)||'unknown')+'</div>';
+    }
+  };
+
+  window.latlongDelete = async function(wpt){
+    if(!confirm('Delete FIX '+wpt+' ?')) return;
+    var res = await run('latlongDeleteWaypoint', wpt);
+    if(res && res.ok){ toast('Deleted '+wpt); window.latlongRefresh(); }
+    else toast('Error: '+((res&&res.error)||'unknown'));
+  };
+
+  async function doPreview(){
+    var raw=$('ll-paste').value;
+    var order=$('ll-order').value;
+    if(!raw.trim()){ toast('Paste WAYPOINT block first.'); return; }
+    var btn=$('ll-preview-btn'); btn.disabled=true; btn.textContent='...';
+    var res = await run('latlongGetPreview', raw, order);
+    btn.disabled=false; btn.innerHTML='<svg class="ic ic-sm"><use href="#i-search"/></svg> PREVIEW';
+    if(res && res.ok){
+      renderPreview(res.entries, res);
+      toast('Preview: '+res.count+' waypoints ('+res.orderMode+')');
+    } else {
+      renderPreview([], null);
+      toast('Error: '+((res&&res.error)||'unknown'));
+    }
+  }
+
+  async function doSave(){
+    var raw=$('ll-paste').value;
+    var order=$('ll-order').value;
+    var mode=$('ll-mode').value;
+    var routeId=$('ll-routeId').value.trim().toUpperCase();
+    if(!raw.trim()){ toast('Paste WAYPOINT block first.'); return; }
+    if(!routeId){ toast('ROUTE ID required — enter Route ID (e.g. WADDWSSS01) for Variant B.'); $('ll-routeId').focus(); return; }
+    // Auto-preview if not yet
+    if(!state.preview.length){
+      var pre = await run('latlongGetPreview', raw, order);
+      if(!pre||!pre.ok){ toast('Error: '+((pre&&pre.error)||'unknown')); return; }
+      renderPreview(pre.entries, pre);
+    }
+    var count = state.preview.length;
+    if(!count){ toast('No valid waypoints to save.'); return; }
+    var msg = 'Save '+count+' waypoints to sheet LATLONG with mode '+mode.toUpperCase()+' ('+order+')?';
+    if(mode==='replace') msg+='\n\nREPLACE will DELETE existing rows!';
+    if(!confirm(msg)) return;
+    var btn=$('ll-save-btn'); btn.disabled=true; btn.textContent='SAVING...';
+    var res = await run('latlongSaveBulk', { rawText: raw, mode: mode, routeId: routeId, orderMode: order });
+    btn.disabled=false; btn.innerHTML='<svg class="ic ic-sm"><use href="#i-save"/></svg> SAVE TO SHEET';
+    if(res && res.ok){
+      toast('Saved '+res.count+' ('+res.inserted+' inserted, '+res.updated+' updated) — '+res.mode);
+      renderPreview([], null);
+      window.latlongRefresh();
+    } else {
+      toast('Error: '+((res&&res.error)||'unknown'));
+    }
+  }
+
+  function init(){
+    $('ll-preview-btn').addEventListener('click', doPreview);
+    $('ll-save-btn').addEventListener('click', doSave);
+    $('ll-search').addEventListener('input', function(){ state.filter=$('ll-search').value; renderList(); });
+    $('ll-order').addEventListener('change', renderKpi);
+    $('ll-clear-btn').addEventListener('click', async function(){
+      if(!confirm('Clear ALL FIX data in LATLONG (retain header)?')) return;
+      var res = await run('latlongClearAll');
+      if(res&&res.ok){ toast('Cleared '+res.cleared+' rows'); window.latlongRefresh(); }
+      else toast('Error: '+((res&&res.error)||'unknown'));
+    });
+    // Event delegation: delete waypoint buttons (C1 fix — no inline handlers)
+    $('ll-list').addEventListener('click', function(e){
+      var btn = e.target.closest('.ll-delete-btn');
+      if(!btn) return;
+      window.latlongDelete(btn.dataset.waypoint);
+    });
+    window.latlongRefresh();
+  }
+
+  window.initLatlongManager = init;
+})();
+</script>

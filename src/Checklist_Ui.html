@@ -1,0 +1,239 @@
+<div id="view-checklist" class="view-section" lang="en">
+  <div class="header-container" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;flex-wrap:wrap;gap:16px;">
+    <div>
+      <h2 class="header-title">OPERATIONAL CHECKLIST</h2>
+      <p class="header-sub">Pre-dispatch sign-off · DOF / NOTAM / TAF · UTC</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button type="button" class="control-btn" id="checklist-refresh" onclick="window.initChecklistManager(true)"><svg class="ic ic-sm"><use href="#i-sync"/></svg> REFRESH</button>
+      <button type="button" class="control-btn btn-solid-primary" id="checklist-signoff" disabled>SIGN OFF</button>
+    </div>
+  </div>
+
+  <div class="kpi-grid" aria-live="polite">
+    <div class="kpi-card" data-cl-kpi="dof"><span class="kpi-label">1.0 DOF Date</span><span class="kpi-val text" data-cl-kpi-badge="dof">—</span><span class="kpi-sub" data-cl-kpi-sub="dof">awaiting data</span></div>
+    <div class="kpi-card" data-cl-kpi="notam"><span class="kpi-label">2.0 NOTAM Update</span><span class="kpi-val text" data-cl-kpi-badge="notam">—</span><span class="kpi-sub" data-cl-kpi-sub="notam">awaiting data</span></div>
+    <div class="kpi-card" data-cl-kpi="taf"><span class="kpi-label">3.0 TAF Freshness</span><span class="kpi-val text" data-cl-kpi-badge="taf">—</span><span class="kpi-sub" data-cl-kpi-sub="taf">awaiting data</span></div>
+  </div>
+
+  <div id="checklist-status" class="readiness-status" role="status" aria-live="polite" style="margin-bottom:12px;">Loading operational data…</div>
+
+  <ol class="cl-stages" style="list-style:none;margin:0;padding:0;display:grid;gap:12px;">
+    <li class="cl-stage" data-checklist="dof" style="background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-lg);box-shadow:var(--shadow-soft);overflow:hidden;">
+      <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;padding:16px 20px;align-items:start;">
+        <span class="cl-num" aria-hidden="true" style="font:700 22px var(--font-display);color:var(--accent-primary);line-height:1;">1.0</span>
+        <div style="min-width:0;">
+          <strong style="font:700 13px var(--font-ui);letter-spacing:.06em;">DOF DATE</strong>
+          <div class="r-meta" data-cl-value="dof" style="font:600 12px var(--font-mono);color:var(--text-secondary);margin-top:4px;">—</div>
+          <div class="r-detail" data-cl-detail="dof" style="font:500 12px var(--font-ui);color:var(--text-muted);margin-top:4px;">Confirm flight date matches current operational date in UTC.</div>
+          <label class="readiness-check" style="display:flex;gap:8px;align-items:center;margin-top:10px;font:600 12px var(--font-ui);"><input type="checkbox" data-cl-check="dof" style="width:18px;height:18px;accent-color:var(--accent-primary);" /> <span data-cl-check-label="dof">I have checked this item</span></label>
+        </div>
+        <span class="r-badge unavailable" data-cl-badge="dof">UNAVAILABLE</span>
+      </div>
+      <div style="border-top:1px solid var(--border-subtle);padding:10px 20px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="control-btn" onclick="window.switchTab('flight')">OPEN FLIGHT BOARD</button>
+      </div>
+    </li>
+    <li class="cl-stage" data-checklist="notam" style="background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-lg);box-shadow:var(--shadow-soft);overflow:hidden;">
+      <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;padding:16px 20px;align-items:start;">
+        <span class="cl-num" aria-hidden="true" style="font:700 22px var(--font-display);color:var(--accent-primary);line-height:1;">2.0</span>
+        <div style="min-width:0;">
+          <strong style="font:700 13px var(--font-ui);letter-spacing:.06em;">NOTAM LAST UPDATE</strong>
+          <div class="r-meta" data-cl-value="notam" style="font:600 12px var(--font-mono);color:var(--text-secondary);margin-top:4px;">—</div>
+          <div class="r-detail" data-cl-detail="notam" style="font:500 12px var(--font-ui);color:var(--text-muted);margin-top:4px;">Confirm NOTAM data is current and relevant to the planned operation.</div>
+          <label class="readiness-check" style="display:flex;gap:8px;align-items:center;margin-top:10px;font:600 12px var(--font-ui);"><input type="checkbox" data-cl-check="notam" style="width:18px;height:18px;accent-color:var(--accent-primary);" /> <span data-cl-check-label="notam">I have checked this item</span></label>
+        </div>
+        <span class="r-badge unavailable" data-cl-badge="notam">UNAVAILABLE</span>
+      </div>
+      <div style="border-top:1px solid var(--border-subtle);padding:10px 20px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="control-btn" onclick="window.switchTab('notam')">OPEN NOTAM</button>
+      </div>
+    </li>
+    <li class="cl-stage" data-checklist="taf" style="background:var(--bg-panel);border:1px solid var(--border-light);border-radius:var(--radius-lg);box-shadow:var(--shadow-soft);overflow:hidden;">
+      <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;padding:16px 20px;align-items:start;">
+        <span class="cl-num" aria-hidden="true" style="font:700 22px var(--font-display);color:var(--accent-primary);line-height:1;">3.0</span>
+        <div style="min-width:0;">
+          <strong style="font:700 13px var(--font-ui);letter-spacing:.06em;">TAF</strong>
+          <div class="r-meta" data-cl-value="taf" style="font:600 12px var(--font-mono);color:var(--text-secondary);margin-top:4px;">—</div>
+          <div class="r-detail" data-cl-detail="taf" style="font:500 12px var(--font-ui);color:var(--text-muted);margin-top:4px;">Confirm issue time, amendment status, and validity period.</div>
+          <label class="readiness-check" style="display:flex;gap:8px;align-items:center;margin-top:10px;font:600 12px var(--font-ui);"><input type="checkbox" data-cl-check="taf" style="width:18px;height:18px;accent-color:var(--accent-primary);" /> <span data-cl-check-label="taf">I have checked this item</span></label>
+        </div>
+        <span class="r-badge unavailable" data-cl-badge="taf">UNAVAILABLE</span>
+      </div>
+      <div style="border-top:1px solid var(--border-subtle);padding:10px 20px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="control-btn" onclick="window.switchTab('taf')">OPEN TAF</button>
+      </div>
+    </li>
+  </ol>
+
+  <style>
+    /* Scoped to checklist tab: numbered-stage rhythm, roadmap divider per Hallmark Narrative Workflow */
+    #view-checklist .cl-stages { counter-reset: cl-stage; }
+    #view-checklist .cl-stage { position: relative; }
+    #view-checklist .cl-stage + .cl-stage::before {
+      content: ""; position: absolute; top: -12px; left: 32px; right: 32px;
+      border-top: 2px solid var(--accent-primary); opacity: 0.35;
+    }
+    #view-checklist .control-btn {
+      background: var(--bg-panel); border: 1px solid var(--border-light);
+      color: var(--text-secondary); padding: 8px 16px; border-radius: var(--radius-sm);
+      font-size: 11px; font-weight: 700; cursor: pointer;
+      font-family: var(--font-ui); text-transform: uppercase; letter-spacing: 0.05em;
+      display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
+    }
+    #view-checklist .control-btn:hover { background: var(--bg-panel-raised); color: var(--text-primary); border-color: var(--border-medium); }
+    #view-checklist .control-btn:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+    #view-checklist .btn-solid-primary { background: var(--accent-primary); color: #fff; border: none; box-shadow: var(--accent-glow); }
+    #view-checklist .btn-solid-primary:hover { background: var(--accent-hover); color: #fff; }
+    #view-checklist .btn-solid-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    #view-checklist .kpi-card[data-tone="safe"] { border-left-color: var(--status-safe); }
+    #view-checklist .kpi-card[data-tone="warning"] { border-left-color: var(--status-warning); }
+    #view-checklist .kpi-card[data-tone="blocked"] { border-left-color: var(--status-critical); }
+    #view-checklist .kpi-card[data-tone="unavailable"] { border-left-color: var(--border-medium); }
+    @media (max-width: 640px) {
+      #view-checklist .cl-stage > div:first-child { grid-template-columns: auto minmax(0,1fr); }
+      #view-checklist [data-cl-badge] { grid-column: 2; justify-self: start; }
+    }
+  </style>
+
+  <script>
+    (function() {
+      var ACK_FALLBACK_PREFIX = 'occ_checklist_ack_v1::';
+      function $(sel, root) { return (root || document).querySelector(sel); }
+      function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+      function view() { return document.getElementById('view-checklist'); }
+      function statusEl() { return document.getElementById('checklist-status'); }
+      function signoffBtn() { return document.getElementById('checklist-signoff'); }
+      function esc(s) { return String(s == null ? '' : s); }
+      function badgeClass(status) {
+        var s = String(status || 'UNAVAILABLE').toUpperCase();
+        if (s === 'READY') return 'r-badge ready';
+        if (s === 'WARNING') return 'r-badge warning';
+        if (s === 'BLOCKED') return 'r-badge blocked';
+        return 'r-badge unavailable';
+      }
+      function toneFor(status) {
+        var s = String(status || 'UNAVAILABLE').toUpperCase();
+        if (s === 'READY') return 'safe';
+        if (s === 'WARNING') return 'warning';
+        if (s === 'BLOCKED') return 'blocked';
+        return 'unavailable';
+      }
+      function fmtTs(iso) {
+        if (!iso) return '—';
+        try {
+          var d = new Date(iso);
+          if (isNaN(d.getTime())) return esc(iso);
+          return d.toISOString().replace('.000Z', 'Z').replace('T', ' ');
+        } catch (e) { return esc(iso); }
+      }
+      function ackKey(payload) {
+        try {
+          if (typeof window.occBuildAckKey === 'function') return window.occBuildAckKey(payload);
+        } catch (e) {}
+        var stamp = payload && payload.generatedAtUtc ? String(payload.generatedAtUtc).slice(0, 10) : '';
+        var dof = payload && payload.dof ? esc(payload.dof.value) : '';
+        var nts = payload && payload.notam ? esc(payload.notam.timestampUtc) : '';
+        var tts = payload && payload.taf ? esc(payload.taf.timestampUtc) : '';
+        return ACK_FALLBACK_PREFIX + stamp + '::' + dof + '::' + nts + '::' + tts;
+      }
+      function renderRow(key, data) {
+        var v = view(); if (!v) return;
+        var badge = v.querySelector('[data-cl-badge="' + key + '"]');
+        var value = v.querySelector('[data-cl-value="' + key + '"]');
+        var detail = v.querySelector('[data-cl-detail="' + key + '"]');
+        var checkLabel = v.querySelector('[data-cl-check-label="' + key + '"]');
+        var status = data && data.status ? String(data.status).toUpperCase() : 'UNAVAILABLE';
+        if (badge) { badge.textContent = status; badge.className = badgeClass(status); }
+        if (key === 'dof') {
+          var dv = data && data.value ? esc(data.value) : '—';
+          var dts = data && data.timestampUtc ? fmtTs(data.timestampUtc) : '';
+          if (value) value.textContent = dv !== '—' ? dv + (dts && dts !== '—' ? ' • ' + dts : '') : '—';
+        } else if (key === 'notam') {
+          if (value) value.textContent = data && data.timestampUtc ? fmtTs(data.timestampUtc) + (data.ageMinutes != null ? ' • ' + data.ageMinutes + ' min ago' : '') : '—';
+        } else if (key === 'taf') {
+          var tc = data && data.value ? esc(data.value) : '—';
+          var tts2 = data && data.timestampUtc ? fmtTs(data.timestampUtc) : '';
+          if (value) value.textContent = (tc !== '—' ? tc + ' station(s)' : '—') + (tts2 && tts2 !== '—' ? ' • ' + tts2 : '');
+        }
+        if (detail) detail.textContent = data && data.detail ? esc(data.detail) : '';
+        if (checkLabel) checkLabel.textContent = (status === 'BLOCKED' || status === 'UNAVAILABLE') ? 'I confirm manual verification' : 'I have checked this item';
+        var kpi = v.querySelector('[data-cl-kpi="' + key + '"]');
+        if (kpi) {
+          kpi.setAttribute('data-tone', toneFor(status).toLowerCase());
+          var kb = kpi.querySelector('[data-cl-kpi-badge="' + key + '"]');
+          if (kb) kb.textContent = status;
+          var ks = kpi.querySelector('[data-cl-kpi-sub="' + key + '"]');
+          if (ks) ks.textContent = data && data.detail ? esc(data.detail) : status.toLowerCase();
+        }
+      }
+      function renderAll(payload) {
+        renderRow('dof', payload && payload.dof);
+        renderRow('notam', payload && payload.notam);
+        renderRow('taf', payload && payload.taf);
+      }
+      function paintLoading() {
+        var s = statusEl(); if (s) s.textContent = 'Loading operational data…';
+        renderRow('dof', { status: 'UNAVAILABLE', detail: 'Loading…' });
+        renderRow('notam', { status: 'UNAVAILABLE', detail: 'Loading…' });
+        renderRow('taf', { status: 'UNAVAILABLE', detail: 'Loading…' });
+      }
+      function paintManual(msg) {
+        var s = statusEl(); if (s) s.textContent = msg || 'Unable to verify operational data automatically. Perform manual verification before signing off.';
+        var d = { status: 'UNAVAILABLE', detail: 'Backend unavailable in this context' };
+        renderRow('dof', d); renderRow('notam', d); renderRow('taf', d);
+      }
+      function updateSignoff() {
+        var v = view(); var btn = signoffBtn(); if (!v || !btn) return;
+        var boxes = $all('[data-cl-check]', v);
+        var all = boxes.length === 3 && boxes.every(function(c) { return c.checked; });
+        btn.disabled = !all;
+      }
+      function bindOnce() {
+        var v = view(); if (!v || v.getAttribute('data-cl-bound') === '1') return;
+        v.setAttribute('data-cl-bound', '1');
+        $all('[data-cl-check]', v).forEach(function(c) { c.addEventListener('change', updateSignoff); });
+        var btn = signoffBtn();
+        if (btn) btn.addEventListener('click', function() {
+          var payload = null;
+          try { payload = typeof window.occGetReadinessPayload === 'function' ? window.occGetReadinessPayload() : null; } catch (e) {}
+          try {
+            var key = ackKey(payload);
+            if (key && window.safeStorage) window.safeStorage.set(key, { acked: true, at: new Date().toISOString() });
+          } catch (e) {}
+          if (typeof window.occRefreshReadiness === 'function') { try { window.occRefreshReadiness(); } catch (e) {} }
+          if (typeof window.switchTab === 'function') window.switchTab('flight');
+          else { var d = document.getElementById('dispatcher-reminder'); if (d && d.open) { try { d.close(); } catch (e) {} } }
+        });
+      }
+      window.initChecklistManager = function(force) {
+        bindOnce();
+        var v = view(); if (!v) return;
+        $all('[data-cl-check]', v).forEach(function(c) { c.checked = false; });
+        updateSignoff();
+        var cached = null;
+        try { cached = typeof window.occGetReadinessPayload === 'function' ? window.occGetReadinessPayload() : null; } catch (e) {}
+        if (cached && cached.ok && !force) {
+          renderAll(cached);
+          var s = statusEl(); if (s) s.textContent = 'Review each item and sign off before dispatch work.';
+          return;
+        }
+        paintLoading();
+        if (typeof google === 'undefined' || !google.script || !google.script.run || typeof google.script.run.getOperationalReadiness !== 'function') {
+          paintManual();
+          return;
+        }
+        try {
+          google.script.run.withSuccessHandler(function(payload) {
+            if (!payload || !payload.ok) { paintManual('Unable to verify operational data automatically. Perform manual verification before signing off.'); return; }
+            renderAll(payload);
+            var st = statusEl(); if (st) st.textContent = 'Review each item and sign off before dispatch work.';
+            updateSignoff();
+          }).withFailureHandler(function() {
+            paintManual('Unable to verify operational data automatically. Perform manual verification before signing off.');
+          }).getOperationalReadiness();
+        } catch (e) { paintManual(); }
+      };
+    })();
+  </script>
+</div>

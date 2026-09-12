@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preview Tubelight Navbar — AWQ Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+--bg:#F1F3F6;--panel:#FFFFFF;--text:#0F172A;--muted:#64748B;
+--nav-bg:rgba(255,255,255,0.78);--nav-border:rgba(15,23,42,0.08);
+--nav-active:rgba(200,16,46,0.10);--accent:#C8102E;--accent-soft:rgba(200,16,46,0.05);
+}
+[data-theme="dark"]{
+--bg:#0B0F17;--panel:#141B29;--text:#E6EBF2;--muted:#8A94A6;
+--nav-bg:rgba(15,20,30,0.72);--nav-border:rgba(255,255,255,0.08);
+--nav-active:rgba(255,59,82,0.14);--accent:#FF3B52;--accent-soft:rgba(255,59,82,0.08);
+}
+body{background:var(--bg);color:var(--text);font:600 14px/1.5 "Plus Jakarta Sans",system-ui,sans-serif;padding:96px 16px 120px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-size:20px;margin-bottom:4px}h2{font-size:14px;margin:32px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+p.sub{color:var(--muted);font-weight:500;margin-bottom:16px}
+.toolbar{display:flex;gap:8px;margin:12px 0 0}
+.toolbar button{border:1px solid var(--nav-border);background:var(--panel);color:var(--text);border-radius:999px;padding:6px 14px;font-weight:700;cursor:pointer}
+/* Tubelight — 1:1 port of tubelight-navbar.tsx, no framer-motion/next/link */
+.tl{position:fixed;left:50%;transform:translateX(-50%);z-index:50;bottom:24px}
+@media(min-width:768px){.tl{bottom:auto;top:24px}}
+.tl-pill{display:flex;align-items:center;gap:4px;background:var(--nav-bg);border:1px solid var(--nav-border);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:4px;border-radius:999px;box-shadow:0 8px 24px rgba(2,6,17,.12)}
+.tl-link{position:relative;cursor:pointer;font-size:13px;font-weight:700;padding:8px 20px;border-radius:999px;color:var(--muted);text-decoration:none;border:0;background:transparent;transition:color .2s,background .2s;white-space:nowrap}
+.tl-link:hover{color:var(--accent)}
+.tl-link.active{background:var(--nav-active);color:var(--accent)}
+.tl-label{display:none}
+@media(min-width:768px){.tl-label{display:inline}}
+.tl-icon{display:inline-flex}
+@media(min-width:768px){.tl-icon{display:none}}
+.tl-icon svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+/* Lamp — replaces motion.div layoutId="lamp" spring 300/30 */
+.tl-lamp{position:absolute;inset:0;width:100%;background:var(--accent-soft);border-radius:999px;z-index:-1;transition:transform .35s cubic-bezier(.3,1.4,.4,1)}
+.tl-tube{position:absolute;top:-8px;left:50%;transform:translateX(-50%);width:32px;height:4px;background:var(--accent);border-radius:4px 4px 0 0}
+.tl-tube::before{content:"";position:absolute;width:48px;height:24px;background:var(--accent);opacity:.2;border-radius:999px;filter:blur(8px);top:-8px;left:-8px}
+.tl-tube::after{content:"";position:absolute;width:16px;height:16px;background:var(--accent);opacity:.2;border-radius:999px;filter:blur(4px);top:0;left:8px}
+.demo-box{background:var(--panel);border:1px solid var(--nav-border);border-radius:16px;padding:16px;margin-top:12px;min-height:120px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+code{background:var(--nav-active);padding:2px 6px;border-radius:6px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Preview Tubelight Navbar</h1>
+<p class="sub">Vanilla port of <code>tubelight-navbar.tsx</code> + <code>demo.tsx</code>. No React / framer-motion / next/link. Open this file directly in a browser. Resize &lt;768px for mobile mode.</p>
+<div class="toolbar">
+<button onclick="document.documentElement.toggleAttribute('data-theme');this.textContent=document.documentElement.hasAttribute('data-theme')?'Mode: Dark':'Mode: Light'">Mode: Light</button>
+<button onclick="switchDemo('demo')">Original demo (4 items)</button>
+<button onclick="switchDemo('awq')">AWQ (11 tab)</button>
+</div>
+<h2>1 — Original demo (Home / About / Projects / Resume)</h2>
+<div class="demo-box" id="panel">Content: Home</div>
+<h2>2 — AWQ integration notes</h2>
+<div class="demo-box" style="display:block;text-align:left">
+- Mobile (&lt;768px): labels hidden, icons shown.<br>
+- Desktop: icons hidden, labels shown.<br>
+- State: <code>activeTab</code> defaults to first item, moves on click.<br>
+- Icons in this preview are placeholder SVGs; on integration use existing sprite <code>#i-plane #i-pen #i-note #i-alert #i-files #i-warn #i-arrow-r #i-stack #i-gear</code>.<br>
+- No image assets / Unsplash — navbar needs no images.
+</div>
+</div>
+<!-- NAV 1: original demo -->
+<nav class="tl" id="tl-demo" aria-label="Demo">
+<div class="tl-pill" id="pill-demo"></div>
+</nav>
+<!-- NAV 2 hidden by default; toggle via toolbar. Show one nav per file so fixed positions don't collide. -->
+<script>
+var ICONS={
+home:'<svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>',
+user:'<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+box:'<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+file:'<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/></svg>',
+plane:'<svg viewBox="0 0 24 24"><path d="M2 12l20-7-7 20-4-8z"/></svg>'
+};
+var DEMO=[
+{name:'Home',icon:'home'},{name:'About',icon:'user'},
+{name:'Projects',icon:'box'},{name:'Resume',icon:'file'}
+];
+var AWQ=[
+{name:'FLIGHT',icon:'plane'},{name:'UPDATE',icon:'file'},{name:'TAF',icon:'file'},
+{name:'NOTAM',icon:'file'},{name:'REPORT',icon:'box'},{name:'WX',icon:'box'},
+{name:'ROUTE',icon:'plane'},{name:'WAYPOINT',icon:'box'},{name:'FIR',icon:'plane'},
+{name:'FIR NOTAM',icon:'file'},{name:'SETTINGS',icon:'user'}
+];
+var current='demo', active='Home';
+function render(){
+var items=current==='demo'?DEMO:AWQ;
+var pill=document.getElementById('pill-demo');
+pill.innerHTML='';
+items.forEach(function(it){
+var a=document.createElement('a');
+a.href='#';a.className='tl-link'+(it.name===active?' active':'');
+a.innerHTML='<span class="tl-label">'+it.name+'</span><span class="tl-icon">'+ICONS[it.icon]+'</span>'+(it.name===active?'<span class="tl-lamp"><span class="tl-tube"></span></span>':'');
+a.onclick=function(e){e.preventDefault();active=it.name;render();document.getElementById('panel').textContent='Content: '+it.name;};
+pill.appendChild(a);
+});
+}
+function switchDemo(m){current=m;active=(m==='demo'?'Home':'FLIGHT');render();document.getElementById('panel').textContent='Content: '+active;}
+render();
+</script>
+</body>
+</html>

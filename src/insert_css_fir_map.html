@@ -1,0 +1,59 @@
+</style>
+  <!-- INSERT THIS AFTER .fir-map-btn:disabled section -->
+  
+  /* Leaflet Map Styling for Dark Mode */
+  .fir-ui .leaflet-container { font-family: var(--font-mono); }
+  .fir-ui .leaflet-tooltip {
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-medium);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lift);
+    backdrop-filter: blur(8px);
+  }
+  .fir-ui .leaflet-popup-content-wrapper {
+    background: var(--bg-panel-raised);
+    color: var(--text-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lift);
+  }
+  .fir-ui .leaflet-popup-content {
+    margin: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .fir-ui .leaflet-popup-tip {
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-medium);
+  }
+  
+  /* DARK MODE OVERRIDES FOR LEAFLET MAP */
+  [data-theme="dark"] .fir-ui .leaflet-tooltip,
+  [data-theme="dark"] .fir-ui .leaflet-tooltip-content,
+  [data-theme="dark"] .fir-ui .leaflet-tooltip-text {
+    background: var(--bg-panel-raised) !important;
+    border: 1px solid var(--border-medium) !important;
+    color: var(--text-primary) !important;
+    box-shadow: var(--shadow-lift) !important;
+  }
+  [data-theme="dark"] .fir-ui .leaflet-tooltip:before {
+    border-top-color: var(--border-medium) !important;
+    border-bottom-color: var(--border-medium) !important;
+    border-left-color: var(--border-medium) !important;
+    border-right-color: var(--border-medium) !important;
+  }
+  [data-theme="dark"] .fir-ui .leaflet-popup-content-wrapper,
+  [data-theme="dark"] .fir-ui .leaflet-popup-tip,
+  [data-theme="dark"] .fir-ui .leaflet-popup-close-button {
+    background: var(--bg-panel-raised) !important;
+    border: 1px solid var(--border-medium) !important;
+    box-shadow: var(--shadow-lift) !important;
+  }
+  [data-theme="dark"] .fir-ui .leaflet-popup-content,
+  [data-theme="dark"] .fir-ui .leaflet-popup-close-button {
+    color: var(--text-secondary) !important;
+  }
+  [data-theme="dark"] .fir-ui .leaflet-popup-close-button:hover {
+    background: rgba(255,255,255,0.15);
+  }

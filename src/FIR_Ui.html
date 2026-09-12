@@ -1,0 +1,1717 @@
+<!--
+  FIR_Ui.html — FIR Dispatch Control (map-first) parity module.
+  Ported from the standalone "FIR DISPATCH CONTROL" Vue app into the
+  dashboard shell (vanilla JS, window.* pattern). Provides:
+    - Active flight board + picker
+    - Leaflet vector map with route geometry (Route + LATLONG sheets, or
+      airport coordinate fallback)
+    - Active NOTAM layer (markers, polygons, radius circles)
+    - NOTAM hazard inspector for the selected flight
+    - Batch risk analysis table + persist (RISK LEVEL column)
+  Loaded into #view-fir via Index.html. Leaflet loads lazily via window.occEnsureLeaflet on first tab open.
+-->
+<style>
+  /* Hidden by default; only visible when the FIR view-section is active.
+     This guards against the module ever leaking into other tabs (e.g. Flight). */
+  .fir-ui {
+    display: none !important;
+  }
+
+  /* CRITICAL FIX: Show ONLY when parent .view-section.active contains it */
+  .view-section.active .fir-ui {
+    display: flex !important;
+    flex-direction: row;
+    gap: 14px;
+    height: calc(100vh - 120px);
+    overflow: hidden;
+    width: 100%;
+    padding: 0 !important;
+    margin: 0 !important;
+    
+    /* Ensure proper flex distribution */
+    align-items: stretch;
+  }
+  
+  .view-section.active .fir-ui * {
+    box-sizing: border-box !important;
+  }
+  
+  /* All panels become flex containers for optimal space distribution */
+  .view-section.active .fir-board-panel,
+  .view-section.active .fir-map-panel,
+  .view-section.active .fir-hazard-panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    visibility: visible !important;
+    opacity: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    
+    /* Ensure panels don't grow/shrink unexpectedly */
+    min-width: 0;
+    flex-shrink: 1;
+  }
+  
+  /* CRITICAL FIX: All panel styles now scoped to .view-section.active context */
+  .view-section.active .fir-ui .fir-board-panel {
+    flex-shrink: 0;
+    min-width: 320px;
+    max-width: 400px;
+  }
+  
+  .view-section.active .fir-ui .fir-panel-head {
+    padding: 12px 14px; 
+    border-bottom: 1px solid var(--border-subtle); 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  
+  .view-section.active .fir-ui .fir-panel-title {
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+  
+  .view-section.active .fir-ui .fir-board-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  
+  /* MIDDLE PANEL - Hazard Stack */
+  .view-section.active .fir-ui .fir-hazard-panel {
+    flex: 1;
+    min-width: 380px;
+    max-width: 600px;
+  }
+  
+  .view-section.active .fir-ui .fir-hazard-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  
+  .view-section.active .fir-ui .fir-hazard-tools {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  
+  .view-section.active .fir-ui .fir-hazard-chips {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+
+  .fir-ui .fir-hazard-filter-label {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .fir-ui .fir-hz-chip {
+    align-items: center;
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border-light);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 800;
+    gap: 5px;
+    min-height: 30px;
+    padding: 4px 9px;
+    white-space: nowrap;
+  }
+  .fir-ui .fir-hz-chip:hover,
+  .fir-ui .fir-hz-chip:focus-visible {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    outline: none;
+  }
+  .fir-ui .fir-hz-chip.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #fff;
+  }
+  .fir-ui .fir-hz-chip[data-r="HIGH"].active { background: var(--status-critical); border-color: var(--status-critical); }
+  .fir-ui .fir-hz-chip[data-r="MEDIUM"].active { background: var(--status-warning); border-color: var(--status-warning); color: #1c1917; }
+  .fir-ui .fir-hz-chip[data-r="LOW"].active { background: var(--status-safe); border-color: var(--status-safe); }
+  .fir-ui .fir-hz-chip-count {
+    background: rgba(255,255,255,.16);
+    border-radius: 999px;
+    font-size: 9px;
+    line-height: 1;
+    padding: 3px 5px;
+  }
+  .fir-ui .fir-hz-chip:not(.active) .fir-hz-chip-count { background: var(--overlay-hover); }
+  
+  .fir-ui .fir-hazard-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+  }
+  
+  /* RIGHT PANEL - Map */
+  .fir-ui .fir-map-panel {
+    flex: 1;
+    min-width: 360px;
+  }
+  
+  .fir-ui .fir-map-tools {
+    padding: 10px 14px; 
+    border-bottom: 1px solid var(--border-subtle); 
+    display: flex; 
+    align-items: center; 
+    gap: 10px; 
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  
+  .fir-ui .fir-map-wrap {
+    flex: 1;
+    min-height: 200px;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .fir-ui .fir-map-wrap #fir-map {
+    width: 100%; 
+    height: 100%; 
+    position: absolute; 
+    inset: 0;
+  }
+  .fir-ui .fir-hazard-actions { margin-top:8px; display:flex; gap:6px; }
+  .fir-ui .fir-empty { padding:20px; text-align:center; color:var(--text-muted); font-size:12px; }
+  .fir-ui .fir-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); box-shadow:0 8px 24px rgba(0,0,0,.18); }
+  /* Leaflet NOTAM popup */
+  .fir-ui .leaflet-popup.fir-notam-popup .leaflet-popup-content { font-family:var(--font-mono); font-size:11px; }
+  
+  /* Fullscreen map styles - MODIFIED to preserve layout integrity */
+    .fir-ui .fir-map-wrap:fullscreen,
+    .fir-ui .fir-map-wrap:-webkit-full-screen {
+      background: var(--bg-panel);
+    }
+    .fir-ui .fir-map-wrap:fullscreen #fir-map,
+    .fir-ui .fir-map-wrap:-webkit-full-screen #fir-map {
+      height: 100vh;
+    }
+    /* FIXED: Use flex-based expansion instead of fixed positioning
+       This preserves the 3-panel layout but gives more space to map */
+    .fir-ui .fir-map-wrap.is-fullscreen {
+      position: relative;
+      flex: 2;  /* Give map more space but keep it in flow */
+      min-width: 0;
+      height: 100%;
+      max-height: 100vh;
+    }
+    .fir-ui .fir-map-wrap.is-fullscreen #fir-map {
+      position: relative;
+      inset: auto;
+      width: 100%;
+      height: 100%;
+    }
+    .fir-ui .fir-map-wrap.is-fullscreen .fir-map-tools {
+      position: relative;
+      top: auto;
+      left: auto;
+      right: auto;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+    }
+    
+    /* When in expanded mode, adjust all panels proportionally */
+    .fir-ui.is-expanded {
+      flex-direction: row;
+    }
+    .fir-ui.is-expanded .fir-board-panel {
+      flex: 0 0 280px;  /* Reduced width */
+      min-width: 260px;
+    }
+    .fir-ui.is-expanded .fir-hazard-panel {
+      flex: 1;
+      min-width: 300px;
+    }
+    .fir-ui.is-expanded .fir-map-panel {
+      flex: 2;  /* Map gets 50% of space */
+      min-width: 400px;
+    }
+  
+  .fir-ui .fir-map-btn { 
+    display:inline-flex; 
+    align-items:center; 
+    justify-content:center; 
+    min-width:44px; 
+    min-height:44px; 
+    gap:6px; 
+    font-size:10px; 
+    font-weight:800; 
+    letter-spacing:.05em; 
+    padding:6px 12px; 
+    border:1px solid var(--border-light); 
+    background:var(--bg-panel-raised); 
+    color:var(--text-secondary); 
+    border-radius:var(--radius-sm); 
+    cursor:pointer; 
+    transition:all 0.2s ease;
+  }
+  .fir-ui .fir-map-btn:hover { 
+    border-color:var(--accent-primary); 
+    color:var(--accent-primary); 
+  }
+  .fir-ui .fir-map-btn.active { 
+    background:var(--accent-primary); 
+    color:#fff; 
+    border-color:var(--accent-primary); 
+  }
+  .fir-ui .fir-map-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  /* Leaflet Map Styling for Dark Mode */
+  [data-theme="dark"] .fir-ui .leaflet-tooltip,
+  [data-theme="dark"] .fir-ui .leaflet-tooltip-content,
+  [data-theme="dark"] .fir-ui .leaflet-tooltip-text {
+    background: var(--bg-panel-raised) !important;
+    border: 1px solid var(--border-medium) !important;
+    color: var(--text-primary) !important;
+    box-shadow: var(--shadow-lift) !important;
+    backdrop-filter: blur(8px);
+  }
+  [data-theme="dark"] .fir-ui .leaflet-tooltip:before {
+    border-top-color: var(--border-medium) !important;
+    border-bottom-color: var(--border-medium) !important;
+    border-left-color: var(--border-medium) !important;
+    border-right-color: var(--border-medium) !important;
+  }
+  [data-theme="dark"] .fir-ui .leaflet-popup-content-wrapper,
+  [data-theme="dark"] .fir-ui .leaflet-popup-tip,
+  [data-theme="dark"] .fir-ui .leaflet-popup-close-button {
+    background: var(--bg-panel-raised) !important;
+    border: 1px solid var(--border-medium) !important;
+    box-shadow: var(--shadow-lift) !important;
+  }
+  [data-theme="dark"] .fir-ui .leaflet-popup-content,
+  [data-theme="dark"] .fir-ui .leaflet-popup-close-button {
+    color: var(--text-secondary) !important;
+  }
+  [data-theme="dark"] .fir-ui .leaflet-popup-close-button:hover {
+    background: rgba(255,255,255,0.15);
+  }
+  
+  .fir-ui .fir-refresh-spinning {
+    animation: fir-spin 1s linear infinite;
+  }
+  @keyframes fir-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  .fir-ui .fir-notam-status { 
+    font-size:10px; 
+    color:var(--text-muted); 
+    font-family:var(--font-mono); 
+    min-width:80px;
+    text-align:center;
+  }
+  
+  .fir-ui .fir-map-legend { 
+    display:flex; 
+    gap:12px; 
+    align-items:center; 
+    font-size:10px; 
+    color:var(--text-muted); 
+    font-family:var(--font-mono); 
+  }
+  
+  .fir-ui .fir-legend-dot { 
+    display:inline-block; 
+    width:9px; 
+    height:9px; 
+    border-radius:50%; 
+    margin-right:4px; 
+    vertical-align:middle; 
+  }
+  
+  .fir-ui .fir-hazard-search { 
+    flex:1; 
+    min-width:120px; 
+    background:var(--bg-panel-alt); 
+    color:var(--text-primary); 
+    border:1px solid var(--border-light); 
+    border-radius:var(--radius-sm); 
+    padding:6px 9px; 
+    font-family:var(--font-mono); 
+    font-size:12px; 
+  }
+  .fir-ui .fir-hazard-search:focus { 
+    outline:none; 
+    border-color:var(--accent-primary); 
+  }
+  
+  .fir-ui .fir-hazard-count { 
+    font-size:11px; 
+    font-family:var(--font-mono); 
+    color:var(--text-muted); 
+    white-space:nowrap; 
+  }
+  
+  .fir-ui .fir-profile-grid { 
+    display:grid; 
+    grid-template-columns:repeat(4,minmax(0,1fr)); 
+    gap:8px; 
+    margin-bottom:12px; 
+  }
+  .fir-ui .fir-profile-item label { 
+    display:block; 
+    font-size:9px; 
+    font-weight:800; 
+    letter-spacing:.08em; 
+    text-transform:uppercase; 
+    color:var(--text-muted); 
+  }
+  .fir-ui .fir-profile-item .val { 
+    font-family:var(--font-mono); 
+    font-size:12px; 
+    color:var(--text-primary); 
+    margin-top:2px; 
+  }
+  
+  .fir-ui .fir-fir-pills { 
+    display:flex; 
+    flex-wrap:wrap; 
+    gap:6px; 
+  }
+  .fir-ui .fir-pill { 
+    font-family:var(--font-mono); 
+    font-size:10px; 
+    padding:3px 8px; 
+    border:1px solid var(--border-light); 
+    border-radius:999px; 
+    color:var(--text-secondary); 
+    background:var(--bg-panel-alt); 
+  }
+  
+  /* Hazard item cards */
+  .fir-ui .fir-hazard-item { 
+    padding:10px; 
+    border:1px solid var(--border-light); 
+    border-left-width:3px; 
+    border-radius:var(--radius-sm); 
+    margin-bottom:8px; 
+    background:var(--bg-panel); 
+  }
+  .fir-ui .fir-hazard-item.risk-HIGH { border-left-color:var(--status-critical); }
+  .fir-ui .fir-hazard-item.risk-MEDIUM { border-left-color:var(--status-warning); }
+  .fir-ui .fir-hazard-item.risk-LOW { border-left-color:var(--status-safe); }
+  
+  .fir-ui .fir-hazard-id { 
+    font-family:var(--font-mono); 
+    font-size:12px; 
+    font-weight:800; 
+    color:var(--text-primary); 
+  }
+  
+  .fir-ui .fir-hazard-text { 
+    font-size:12px; 
+    line-height:1.55; 
+    color:var(--text-secondary); 
+    white-space:pre-wrap; 
+    margin:6px 0 4px; 
+    font-family:var(--font-mono); 
+  }
+  
+  .fir-ui .fir-hazard-reason { 
+    font-size:10px; 
+    color:var(--status-warning); 
+    font-family:var(--font-mono); 
+  }
+  
+  .fir-ui .fir-hazard-meta { 
+    font-size:10px; 
+    color:var(--text-muted); 
+    font-family:var(--font-mono); 
+    margin-top:4px; 
+  }
+  
+  .fir-ui .fir-flight-item { 
+    padding:10px 14px; 
+    border-bottom:1px solid var(--border-subtle); 
+    cursor:pointer; 
+    transition:background .15s; 
+  }
+  .fir-ui .fir-flight-item:hover { 
+    background: var(--overlay-hover); 
+  }
+  .fir-ui .fir-flight-item.active { 
+    background: var(--nav-bg-active); 
+    border-left:3px solid var(--accent-primary); 
+  }
+  
+  .fir-ui .fir-flt-line { 
+    display:flex; 
+    align-items:center; 
+    justify-content:space-between; 
+    gap:8px; 
+  }
+  
+  .fir-ui .fir-callsign { 
+    font-weight:800; 
+    color:var(--text-primary); 
+    font-family:var(--font-mono); 
+    font-size:13px; 
+  }
+  
+  .fir-ui .fir-route { 
+    color:var(--text-secondary); 
+    font-size:11px; 
+    font-family:var(--font-mono); 
+  }
+  
+  .fir-ui .fir-flt-sub { 
+    display:flex; 
+    justify-content:space-between; 
+    margin-top:4px; 
+    font-size:10px; 
+    color:var(--text-muted); 
+    font-family:var(--font-mono); 
+  }
+  
+  .fir-ui .fir-risk-badge { 
+    font-size:9px; 
+    font-weight:900; 
+    padding:2px 8px; 
+    border-radius:999px; 
+    color:#fff; 
+  }
+  .fir-ui .fir-risk-HIGH { background: var(--status-critical); }
+  .fir-ui .fir-risk-MEDIUM { background: var(--status-warning); }
+  .fir-ui .fir-risk-LOW, 
+  .fir-ui .fir-risk-Clear { background: var(--status-safe); }
+  .fir-ui .fir-risk-NO_FIR_MAPPED, 
+  .fir-ui .fir-risk-NO_ROUTE { 
+    background: var(--status-warning); 
+    color:#1c1917; 
+  }
+  
+  /* Responsive Breakpoints */
+  @media (max-width: 1400px) {
+    /* Compact mode for smaller screens */
+    .fir-ui { gap: 10px; height: calc(100vh - 110px); }
+    .fir-ui .fir-board-panel { max-width: 280px; min-width: 260px; }
+    .fir-ui .fir-hazard-panel { max-width: 500px; }
+    .fir-ui .fir-map-wrap { min-height: 180px; }
+  }
+  
+  @media (max-width: 1200px) {
+    /* Mobile-first stack layout */
+    body #fir-dashboard .fir-ui { 
+      flex-direction: column; 
+      height: auto; 
+      overflow: visible;
+    }
+    body #fir-dashboard .fir-board-panel,
+    body #fir-dashboard .fir-hazard-panel,
+    body #fir-dashboard .fir-map-panel { 
+      height: auto;
+      max-height: none;
+      flex: none;
+    }
+    body #fir-dashboard .fir-board-scroll,
+    body #fir-dashboard .fir-hazard-scroll {
+      max-height: 400px;
+    }
+    body #fir-dashboard .fir-map-wrap {
+      min-height: 400px;
+    }
+  }
+  
+  @media (max-width: 768px) {
+    .fir-ui .fir-map-tools { align-items: stretch; }
+    .fir-ui .fir-map-legend { width: 100%; margin-left: 0; }
+    .fir-ui .fir-hazard-search { min-width: 0; }
+    .fir-ui .fir-panel-head { flex-wrap: wrap; }
+    .fir-ui .fir-map-tools { flex-wrap: wrap; }
+  }
+  
+</style>
+
+<div class="fir-ui" id="fir-ui-root">
+  <!-- Left: flight board -->
+  <div class="fir-board-panel">
+    <div class="fir-panel-head">
+      <span class="fir-panel-title">Flight Board</span>
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="fir-map-btn" id="fir-refresh-flights" title="Refresh flight list">
+          <svg class="ic"><use href="#i-sync"/></svg> REFRESH
+        </button>
+        <button type="button" class="fir-map-btn" id="fir-analyze-all">ANALYZE</button>
+      </div>
+    </div>
+    <div class="fir-board-scroll" id="fir-flight-list">
+      <div class="fir-empty">No active flights. Click "REFRESH" to load.</div>
+    </div>
+  </div>
+
+  <!-- Middle: Hazard Stack (Option A — dedicated full-height column) -->
+  <div class="fir-hazard-panel" id="fir-hazard-panel">
+    <div class="fir-hazard-head" id="fir-hazard-head">
+      <div class="fir-empty">Select a flight to view hazard stack.</div>
+    </div>
+    <div class="fir-hazard-tools">
+      <input type="search" class="fir-hazard-search" id="fir-hazard-search" aria-label="Search selected flight hazards" placeholder="Search NOTAM # / text...">
+<style>.fir-hazard-search:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }</style>
+      <span class="fir-hazard-count" id="fir-hazard-count" role="status" aria-atomic="true">0 shown of 0</span>
+    </div>
+    <div class="fir-hazard-chips" id="fir-hazard-chips" aria-label="Filter selected flight hazards"></div>
+    <div class="fir-hazard-scroll" id="fir-hazard-list">
+      <div class="fir-empty">No hazards yet.</div>
+    </div>
+  </div>
+
+  <!-- Right: map -->
+  <div class="fir-map-panel">
+    <div class="fir-map-tools">
+      <button type="button" class="fir-map-btn" id="fir-toggle-notams">NOTAM LAYER</button>
+      <button type="button" class="fir-map-btn" id="fir-expand-map" title="Expand map (F / ESC)">⛶ EXPAND</button>
+      <span class="fir-notam-status" id="fir-notam-status">NOTAM: —</span>
+      <span class="fir-map-legend" style="margin-left:auto;">
+        <span><span class="fir-legend-dot" style="background:var(--status-critical);"></span>High</span>
+        <span><span class="fir-legend-dot" style="background:var(--status-warning);"></span>Caution</span>
+        <span><span class="fir-legend-dot" style="background:var(--status-safe);"></span>Clear</span>
+      </span>
+    </div>
+    <div class="fir-map-wrap" id="fir-map-wrap">
+      <div id="fir-map"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  if (window.firUiInited) return;
+  window.firUiInited = true;
+
+  const esc = window.escapeHtml;
+
+  const state = {
+    map: null,
+    flights: [],
+    routes: [],
+    latlong: [],
+    notams: [],
+    showNotams: false,
+    selected: null,
+    markers: [],
+    notamLayerGroup: null,
+    notamGeomLayers: [],
+    notamShapeLayer: null,
+    notamPopup: null,
+    latLongCache: null,
+    mapFirFilter: null,
+    hazards: [],
+    hzQuery: '',
+    hzRisk: '',
+    flightDataLoaded: false  // Track if flight data has been loaded
+  };
+  // Exposed for FIR NOTAM UI to filter map by selected FIR tab
+  window.firSetMapFirFilter = function(loc) {
+    state.mapFirFilter = loc ? String(loc).trim().toUpperCase() : null;
+    if (state.showNotams) updateNotamLayer();
+    if (state.selected) updateMapForFlight(state.selected);
+    if (loc) addToast('Map filter: ' + loc);
+  };
+
+  function addToast(msg) {
+    let t = document.querySelector('.fir-toast');
+    if (!t) { t = document.createElement('div'); t.className = 'fir-toast'; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(window.__firToastTimer);
+    window.__firToastTimer = setTimeout(() => { t.style.display = 'none'; }, 2600);
+  }
+
+  /* ---------- Backend helpers ---------- */
+  function run(fnName) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        resolve({ error: 'google.script.run unavailable (local preview).' });
+        return;
+      }
+      const ok = (data) => {
+        // GAS can return null/undefined on serialization failure -> surface as error
+        if (data === null || data === undefined) {
+          console.error('[FIR] ' + fnName + ' returned null/undefined (likely stale deployment or Date serialization).');
+          resolve({ error: fnName + ' returned null - redeploy Apps Script as new version.' });
+        } else {
+          resolve(data);
+        }
+      };
+      const fail = (e) => resolve({ error: (e && e.message) || String(e) || 'Server error' });
+      let chain = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
+      try { chain[fnName].apply(chain, args); } catch (e) { resolve({ error: String(e && e.message || e) }); }
+    });
+  }
+
+  function getRiskClass(risk) {
+    const r = String(risk || '').toUpperCase();
+    return 'risk-' + (r === 'HIGH' ? 'HIGH' : r === 'MEDIUM' || r === 'MED' ? 'MEDIUM' : 'LOW');
+  }
+  function riskBadge(r) {
+    const v = r || 'Clear';
+    return '<span class="fir-risk-badge fir-risk-' + v.toUpperCase() + '">' + esc(v) + '</span>';
+  }
+  function formatTime(v) {
+    if (v == null) return '00:00';
+    if (String(v).indexOf('T') > -1) { try { return new Date(v).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', hour12:false }); } catch (e) {} }
+    return String(v);
+  }
+  function formatDate(v) {
+    if (!v) return '';
+    const s = String(v);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+    if (/^\d{8}$/.test(s)) return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8);
+    return s;
+  }
+  function formatDateTimeStamp(date) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  function getFIRArray(f) {
+    const out = [];
+    for (let i = 1; i <= 8; i++) { const v = f['FIR ' + i]; if (v && String(v).trim() !== '') out.push(String(v).trim()); }
+    return out;
+  }
+
+  /* ---------- Map / route geometry (ported from recovery Vue app) ---------- */
+  const airportCoords = {
+    'WIII':[106.6558,-6.1256],'WARR':[112.7875,-7.3797],'WADD':[115.1668,-8.7482],'WATO':[122.9625,-8.3444],
+    'WATE':[122.2372,-8.6389],'WATU':[120.3017,-9.6681],'WADT':[118.6872,-8.5475],'WAKR':[140.4186,-8.5203],
+    'WAHQ':[109.4042,-0.1506],'WAAA':[119.5540,-5.0616],'WAPG':[140.5160,-2.5769],'WALL':[116.8944,-1.2683],
+    'WAMM':[124.9264,1.5494],'WAPN':[132.8156,-2.9903],'WIDO':[104.5319,0.9236],'WIDD':[104.1189,1.1211],
+    'YPPH':[115.9672,-31.9403],'VTSP':[98.3169,8.1132],'WSSS':[103.9915,1.3644],'WMKK':[101.7099,2.7456],
+    'WBSB':[114.9283,4.9442],'VTBS':[100.7501,13.6900]
+  };
+
+  function parseDMS(val) {
+    if (val === null || val === undefined) return null;
+    const s = String(val).trim();
+    const m = s.match(/^([NSEW])\s*(\d{1,3})\s+(\d{1,2}(?:\.\d+)?)/i);
+    if (!m) return null;
+    let dec = parseInt(m[2],10) + parseFloat(m[3])/60;
+    if (/^[SW]$/i.test(m[1])) dec = -dec;
+    return dec;
+  }
+  function parseInlineCoord(tok) {
+    if (!tok) return null;
+    const m1 = tok.match(/^(\d{2,3})(\d{2})([NS])(\d{2,3})(\d{2})([EW])$/i);
+    if (m1) {
+      let lat = parseInt(m1[1],10) + parseInt(m1[2],10)/60;
+      if (/^S$/i.test(m1[3])) lat = -lat;
+      let lon = parseInt(m1[4],10) + parseInt(m1[5],10)/60;
+      if (/^W$/i.test(m1[6])) lon = -lon;
+      return [lon,lat];
+    }
+    const m2 = tok.match(/^(\d{1,2})([NS])(\d{1,3})([EW])$/i);
+    if (m2) {
+      let lat = parseInt(m2[1],10); if (/^S$/i.test(m2[2])) lat = -lat;
+      let lon = parseInt(m2[3],10); if (/^W$/i.test(m2[4])) lon = -lon;
+      return [lon,lat];
+    }
+    return null;
+  }
+  function buildLatLongLookup() {
+    if (state.latLongCache) return state.latLongCache;
+    const map = {};
+    (state.latlong || []).forEach(ll => {
+      if (!ll || !ll.ID || !ll.Waypoint) return;
+      const lat = parseDMS(ll.Latitude), lon = parseDMS(ll.Longitude);
+      if (lat === null || lon === null) return;
+      const rid = String(ll.ID).trim().toUpperCase();
+      if (!map[rid]) map[rid] = {};
+      map[rid][String(ll.Waypoint).trim().toUpperCase()] = [lon, lat];
+    });
+    state.latLongCache = map;
+    return map;
+  }
+  function getRouteCoords(flight) {
+    if (!flight) return null;
+    const lookup = buildLatLongLookup();
+    let route = null;
+    const routeId = flight['ACTIVE ROUTE ID'] || flight['ROUTE ID'];
+    if (routeId) route = state.routes.find(r => String(r.ID).trim().toUpperCase() === String(routeId).trim().toUpperCase());
+    if (!route) route = state.routes.find(r =>
+      String(r.DEP_AIRPORT).trim().toUpperCase() === String(flight.DEP).trim().toUpperCase() &&
+      String(r.ARR_AIRPORT).trim().toUpperCase() === String(flight.DES).trim().toUpperCase());
+    if (!route) return null;
+    const rid = String(route.ID).trim().toUpperCase();
+    const wpMap = lookup[rid] || {};
+    const allCoords = [];
+    (state.latlong || []).forEach(ll => {
+      if (!ll || String(ll.ID).trim().toUpperCase() !== rid || !ll.Waypoint) return;
+      const lat = parseDMS(ll.Latitude), lon = parseDMS(ll.Longitude);
+      if (lat === null || lon === null) return;
+      allCoords.push({ name: String(ll.Waypoint).trim().toUpperCase(), c: [lon, lat] });
+    });
+    const seqStr = String(route['WAYPOINT_SEQ (Airway & Fix)'] || route.ROUTE_STRING_ORIGINAL || '');
+    const tokens = seqStr.split(/\s+/).filter(t => t.trim() !== '');
+    const backbone = [];
+    const pushUnique = (wp) => {
+      if (!wp || !wp.c) return;
+      const last = backbone[backbone.length-1];
+      if (last && last.c[0] === wp.c[0] && last.c[1] === wp.c[1]) return;
+      backbone.push(wp);
+    };
+    const depCoord = wpMap[String(flight.DEP).trim().toUpperCase()] || null;
+    pushUnique({ name: String(flight.DEP).trim().toUpperCase(), c: depCoord });
+    tokens.forEach(tok => { const t = tok.trim().toUpperCase(); const c = wpMap[t] || parseInlineCoord(t); pushUnique({ name: t, c }); });
+    const desCoord = wpMap[String(flight.DES).trim().toUpperCase()] || null;
+    pushUnique({ name: String(flight.DES).trim().toUpperCase(), c: desCoord });
+    if (backbone.length < 2) return null;
+    const dist = (a,b) => Math.hypot(a[0]-b[0], a[1]-b[1]);
+    const enriched = [];
+    for (let i = 0; i < backbone.length-1; i++) {
+      const a = backbone[i], b = backbone[i+1];
+      enriched.push(a);
+      const segLen = dist(a.c, b.c);
+      if (segLen === 0) continue;
+      const minX = Math.min(a.c[0], b.c[0]) - 0.02, maxX = Math.max(a.c[0], b.c[0]) + 0.02;
+      const minY = Math.min(a.c[1], b.c[1]) - 0.02, maxY = Math.max(a.c[1], b.c[1]) + 0.02;
+      allCoords
+        .filter(p => p.c[0] >= minX && p.c[0] <= maxX && p.c[1] >= minY && p.c[1] <= maxY &&
+          !(p.c[0]===a.c[0]&&p.c[1]===a.c[1]) && !(p.c[0]===b.c[0]&&p.c[1]===b.c[1]))
+        .sort((p1,p2) => dist(a.c,p1.c) - dist(a.c,p2.c))
+        .forEach(p => enriched.push(p));
+    }
+    enriched.push(backbone[backbone.length-1]);
+    return enriched.length >= 2 ? enriched : null;
+  }
+
+  function safeRemoveLayer(m) {
+    if (!m) return;
+    try { if (m.closeTooltip) m.closeTooltip(); } catch (e) {}
+    try { if (m.unbindTooltip) m.unbindTooltip(); } catch (e) {}
+    try { if (m.closePopup) m.closePopup(); } catch (e) {}
+    if (state.map) { try { state.map.removeLayer(m); } catch (e) {} }
+  }
+  function clearMapMarkers() {
+    state.markers.forEach(m => safeRemoveLayer(m));
+    state.markers = [];
+  }
+
+  function updateMapForFlight(flight) {
+    if (!state.map) return;
+    clearMapMarkers();
+    if (!flight) return;
+    const bounds = L.latLngBounds([]);
+    let hasBounds = false;
+    const depCoords = airportCoords[flight.DEP] || null;
+    const desCoords = airportCoords[flight.DES] || null;
+    const routeCoords = getRouteCoords(flight);
+    const routeLineCoords = (routeCoords && routeCoords.length >= 2) ? routeCoords.map(w => w.c) : null;
+    const lineCoords = routeLineCoords || (depCoords && desCoords ? [depCoords, desCoords] : null);
+    const depMarkerPos = (routeCoords && routeCoords[0]) ? routeCoords[0].c : depCoords;
+    const desMarkerPos = (routeCoords && routeCoords.length >= 2) ? routeCoords[routeCoords.length-1].c : desCoords;
+
+    const depIcon = L.divIcon({ className:'flight-dep-icon', html:'<div class="dep-dot" style="width:12px;height:12px;border-radius:50%;background:var(--status-warning);border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.5);"></div>', iconSize:[12,12], iconAnchor:[6,6] });
+    const desIcon = L.divIcon({ className:'flight-des-icon', html:'<div class="des-dot" style="width:12px;height:12px;border-radius:50%;background:var(--status-safe);border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.5);"></div>', iconSize:[12,12], iconAnchor:[6,6] });
+
+    if (depMarkerPos) {
+      const m = L.marker([depMarkerPos[1],depMarkerPos[0]], { icon: depIcon }).addTo(state.map)
+        .bindPopup('<strong>DEP: ' + esc(flight.DEP) + '</strong>')
+        .bindTooltip(esc(flight.DEP)+' (DEP)', { permanent:true, direction:'bottom', offset:[0,8], opacity:1 });
+      state.markers.push(m); bounds.extend([depMarkerPos[1],depMarkerPos[0]]); hasBounds = true;
+    }
+    if (desMarkerPos) {
+      const m = L.marker([desMarkerPos[1],desMarkerPos[0]], { icon: desIcon }).addTo(state.map)
+        .bindPopup('<strong>DES: ' + esc(flight.DES) + '</strong>')
+        .bindTooltip(esc(flight.DES)+' (DES)', { permanent:true, direction:'bottom', offset:[0,8], opacity:1 });
+      state.markers.push(m); bounds.extend([desMarkerPos[1],desMarkerPos[0]]); hasBounds = true;
+    }
+    if (lineCoords && lineCoords.length >= 2) {
+      try {
+        const routeLatLngs = lineCoords.map(c => [c[1],c[0]]);
+        const lineLayer = L.polyline(routeLatLngs, { color:'#f0b429', weight:2, dashArray:'2 2', opacity:0.9 }).addTo(state.map);
+        state.markers.push(lineLayer);
+        if (routeCoords && routeCoords.length > 2) {
+          routeCoords.forEach(w => {
+            const wp = L.circleMarker([w.c[1],w.c[0]], { radius:3, color:'#13100a', weight:1, fillColor:'#f0b429', fillOpacity:1 })
+              .addTo(state.map).bindTooltip(w.name || '', { permanent:true, direction:'top', offset:[0,-8], opacity:1 });
+            state.markers.push(wp);
+          });
+        }
+        lineCoords.forEach(c => { bounds.extend([c[1],c[0]]); hasBounds = true; });
+      } catch (e) {}
+    }
+    if (state.showNotams && state.notams.length > 0) {
+      state.notams.forEach(n => { const ll = getNotamLatLon(n); if (ll) { bounds.extend(ll); hasBounds = true; } });
+    }
+    if (hasBounds) state.map.fitBounds(bounds, { padding:[50,50], maxZoom:8 });
+  }
+
+  /* ---------- NOTAM layer ---------- */
+  function nfield(obj) {
+    const names = Array.prototype.slice.call(arguments,1);
+    if (!obj || typeof obj !== 'object') return undefined;
+    for (const nm of names) { if (obj[nm] !== undefined && obj[nm] !== null && obj[nm] !== '') return obj[nm]; }
+    const lower = {};
+    try { Object.keys(obj).forEach(k => { lower[k.toLowerCase().trim()] = obj[k]; }); } catch (e) {}
+    for (const nm of names) { const v = lower[nm.toLowerCase()]; if (v !== undefined && v !== null && v !== '') return v; }
+    return undefined;
+  }
+  const firFallbackCoords = {
+    'WAAF':[119.9,-5.1],'WAAZ':[106.8,-5.5],'WAPP':[128.2,-3.7],'WIMZ':[98.7,3.5],'WIIF':[115.0,-2.0],
+    'WIIZ':[106.8,-6.2],'WRRZ':[106.8,-6.2],'WIBZ':[110.0,-3.0],'WIDD':[104.1,1.1],'WIKK':[110.0,-2.0],
+    'WATC':[122.2,-8.3],'WABP':[136.0,-3.0],'WAOO':[116.9,-1.3],'WRBB':[106.6,-6.1],
+    'WMFC':[101.7,2.7],'WSJC':[103.8,1.3],'WSXX':[103.8,1.2],'WMFP':[114.5,4.9],'WSSS':[104.0,1.4],
+    'VTBB':[100.6,13.7],'VVVV':[105.8,21.0],'VDPP':[104.9,11.5],'VLXX':[102.6,18.0],'VYYF':[96.2,16.8],
+    'VTSR':[98.3,8.1],'VVTS':[106.7,10.8],'RPHI':[122.0,14.0],'RPHL':[120.0,16.0],'RPLL':[121.0,14.5],
+    'ZGZU':[113.3,23.2],'ZSHA':[121.5,31.2],'ZBPE':[116.4,40.0],'ZPKM':[104.0,26.5],'ZGUK':[106.0,26.5],
+    'ZGGG':[113.3,23.2],'RCCC':[121.0,25.0],'RCAA':[121.0,25.0],'VHHH':[114.0,22.3],'VHHK':[113.9,22.3],
+    'RJTG':[140.4,35.6],'RJJJ':[140.4,35.6],'RJJK':[139.5,35.5],'RKRR':[127.0,36.5],'RKKS':[126.0,35.5],
+    'VEGF':[88.4,22.6],'VIDF':[77.2,28.6],'VOMF':[80.3,13.0],'VABF':[72.8,19.1],'VERF':[84.1,25.6],
+    'VTSF':[73.0,18.0],'VOML':[72.8,19.1],'VIBC':[80.3,13.0],'VECC':[88.4,22.6],'VIDD':[77.2,28.6],
+    'VNLK':[82.0,28.0],'VCBI':[79.9,7.2],'VGFV':[90.4,23.8],'OPKR':[67.0,30.2],'OPLR':[73.0,33.6],
+    'OPHR':[71.5,33.6],'ORMM':[45.0,33.0],'OEJD':[46.7,24.5],'OIIX':[51.0,35.7],'OSTT':[51.3,24.4],
+    'OMAE':[55.3,25.3],'OPLA':[35.9,31.9],'LSAZ':[31.0,30.0],'YBBB':[133.0,-22.0],'YMMM':[144.8,-37.7],
+    'YUXX':[151.2,-33.9],'YMML':[144.8,-37.7],'YSSY':[151.2,-33.9],'YBBN':[153.0,-27.5],'YPAD':[138.5,-34.9],
+    'YSCB':[149.2,-35.3],'YPCC':[100.7,-12.2],'YNTN':[132.0,-14.0],'AYPM':[147.2,-9.4],'AYPY':[147.2,-9.4],
+    'NZZC':[174.8,-36.9],'NZZO':[176.0,-38.0],'WXXX':[114.0,1.5],'EADD':[30.0,-1.0],'EGGX':[-10.0,53.0],
+    'KZAK':[-170.0,55.0],'KZNY':[-72.0,41.0],'KZWY':[-30.0,30.0],'SANFR':[22.0,-5.0],'WMKK':[101.7,2.7]
+  };
+  window.firFallbackCoords = firFallbackCoords;
+  function parseNotamCoordFromText(text) {
+    try {
+      if (!text || typeof text !== 'string') return null;
+      const toDec = (digits, hemi, isLat) => {
+        let deg=0,min=0,sec=0; const n=digits.length;
+        if (isLat) { if(n===6){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseInt(digits.slice(4,6),10);} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else {deg=parseInt(digits,10);} }
+        else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else {deg=parseInt(digits,10);} }
+        let dec = deg + min/60 + sec/3600; if (/S|W/i.test(hemi)) dec = -dec; return Math.round(dec*10000)/10000;
+      };
+      const m1 = text.match(/(\d{6})\s*([NS])\s*(\d{7})\s*([EW])/i); if (m1) return { lat:toDec(m1[1],m1[2],true), lon:toDec(m1[3],m1[4],false) };
+      const m2 = text.match(/(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/i); if (m2) return { lat:toDec(m2[1],m2[2],true), lon:toDec(m2[3],m2[4],false) };
+      const m3 = text.match(/(\d{3})\s*([NS])\s*(\d{3})\s*([EW])/i); if (m3) return { lat:toDec(m3[1],m3[2],true), lon:toDec(m3[3],m3[4],false) };
+      return null;
+    } catch (e) { return null; }
+  }
+  function getNotamLatLon(n) {
+    const location = nfield(n,'location','Location','LOCATION','FIR','FIR ID','ICAO');
+    let lon = nfield(n,'lon','Lon','LONG','Longitude','LONGITUDE');
+    let lat = nfield(n,'lat','Lat','LAT','Latitude','LATITUDE');
+    if (lon === undefined && lat === undefined) { const ll = nfield(n,'coord','Coord','COORDINATES','coords'); if (typeof ll === 'string' && /,/.test(ll)) { const p = ll.split(','); if (p.length === 2) { lat = parseFloat(p[0]); lon = parseFloat(p[1]); } } }
+    if (lon === undefined || lat === undefined) {
+      const c = nfield(n,'center','Center','CENTRE');
+      if (Array.isArray(c) && c.length === 2) { const clon=Number(c[0]),clat=Number(c[1]); if (!isNaN(clon)&&!isNaN(clat)){lon=clon;lat=clat;} }
+      else if (typeof c === 'string') { try { const parsed=JSON.parse(c); if (Array.isArray(parsed)&&parsed.length===2){const clon=Number(parsed[0]),clat=Number(parsed[1]); if(!isNaN(clon)&&!isNaN(clat)){lon=clon;lat=clat;}} } catch(e){} }
+    }
+    // ponytail: parse Q)/E) coord first — YMMM E3257/26 0407S08909E must be Hindia, not FIR centre Melbourne
+    if (lon === undefined || lat === undefined) { const text = nfield(n,'text','Text','NOTAM Text','NOTAM_TEXT','NOTAMTEXT'); const parsed = parseNotamCoordFromText(text); if (parsed && parsed.lat !== null && parsed.lon !== null) { lon = parsed.lon; lat = parsed.lat; } }
+    if (lon === undefined || lat === undefined) { const fb = firFallbackCoords[location]; if (fb) { lon = fb[0]; lat = fb[1]; } }
+    if (lon === undefined || lat === undefined) { if (typeof location === 'string' && /^[A-Z]{4}$/i.test(location.trim())) { 
+      // Default coordinate fallback by general FIR region if parse fails
+      const defaultFirCoords = { 'WAAF': [120.0, -5.0], 'WASA': [130.0, -3.0], 'WIII': [106.8, -6.2], 'WRRR': [115.1, -8.7], 'WIMM': [98.6, 3.6] };
+      const def = defaultFirCoords[location.trim().toUpperCase()];
+      if (def) { lon = def[0]; lat = def[1]; }
+      else { lon = 110.0; lat = -5.0; }
+    } }
+    if (lon === undefined || lat === undefined) return null;
+    return [lat, lon];
+  }
+  function normalizePolygon(poly) {
+    if (!poly) return [];
+    if (Array.isArray(poly)) return poly;
+    if (typeof poly === 'string') { try { const parsed = JSON.parse(poly); if (Array.isArray(parsed)) return parsed; if (parsed && Array.isArray(parsed.coordinates)) return parsed.coordinates; } catch(e){ return []; } return []; }
+    if (typeof poly === 'object' && Array.isArray(poly.coordinates)) return poly.coordinates;
+    return [];
+  }
+  function buildNotamGeom(p) {
+    if (!p) return [];
+    const polygon = normalizePolygon(p.polygon);
+    const center = (typeof p.center === 'string') ? (function(){ try { const c = JSON.parse(p.center); return (Array.isArray(c)&&c.length===2)?c:null; } catch(e){ return null; } })() : (Array.isArray(p.center)&&p.center.length===2) ? p.center : null;
+    let coords = [];
+    if (polygon.length >= 2) {
+      coords = polygon.map(c => [c[0],c[1]]);
+      if (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1]) coords.push([coords[0][0],coords[0][1]]);
+    } else if (p.radiusNm && center) {
+      const lon = center[0], lat = center[1];
+      const rDegLat = p.radiusNm/60;
+      const rDegLon = rDegLat / Math.max(0.01, Math.cos((lat*Math.PI)/180));
+      const steps = 64;
+      for (let i = 0; i <= steps; i++) { const a = (i/steps)*2*Math.PI; coords.push([lon + rDegLon*Math.sin(a), lat + rDegLat*Math.cos(a)]); }
+    }
+    return coords;
+  }
+  function buildNotamPopupHtml(p) {
+    const pPolygon = normalizePolygon(p.polygon);
+    let h = '<div style="min-width:200px;font-family:var(--font-mono);">';
+    h += '<div style="font-weight:800;color:var(--text-primary);margin-bottom:4px;">' + esc(p.location) + ' - ' + esc(p.number) + ' <span style="color:' + (p.risk==='HIGH'?'var(--status-critical)':p.risk==='MEDIUM'?'var(--status-warning)':'var(--status-safe)') + ';">● ' + esc(p.risk) + '</span></div>';
+    h += '<div style="color:var(--text-muted);font-size:10px;">' + (p.active ? 'ACTIVE' : 'EXPIRED') + (p.cls ? ' · Class ' + esc(p.cls) : '') + '</div>';
+    if (p.effectiveDate) h += '<div style="color:var(--text-muted);font-size:10px;">Effective: ' + esc(p.effectiveDate) + ' UTC</div>';
+    if (p.expirationDate) h += '<div style="color:var(--text-muted);font-size:10px;">Expiration: ' + esc(p.expirationDate) + ' UTC</div>';
+    h += '<div style="white-space:pre-wrap;margin-top:6px;color:var(--text-secondary);">' + esc(p.text) + '</div>';
+    if (p.radiusNm) h += '<div style="color:var(--text-muted);font-size:10px;">◯ Radius ' + esc(p.radiusNm) + ' NM</div>';
+    if (pPolygon.length >= 3) h += '<div style="color:var(--text-muted);font-size:10px;">△ Polygon ' + esc(pPolygon.length) + ' points</div>';
+    h += '</div>';
+    return h;
+  }
+  function clearNotamShape() {
+    if (!state.map) return;
+    try { if (state.notamShapeLayer) { state.map.removeLayer(state.notamShapeLayer); state.notamShapeLayer = null; } } catch(e){}
+  }
+  function drawNotamShape(p) {
+    clearNotamShape();
+    if (!state.map) return;
+    const riskColor = p.risk === 'HIGH' ? '#ef5350' : p.risk === 'MEDIUM' ? '#fb923c' : '#34d399';
+    const geom = buildNotamGeom(p);
+    if (!geom || !geom.length) return;
+    try {
+      const latlngs = geom.map(c => [c[1],c[0]]);
+      state.notamShapeLayer = L.layerGroup().addTo(state.map);
+      if (latlngs.length >= 3) {
+        L.polygon(latlngs, { color:riskColor, weight:2, dashArray:'3 2', fillColor:riskColor, fillOpacity:0.15 }).addTo(state.notamShapeLayer);
+      } else {
+        L.polyline(latlngs, { color:riskColor, weight:2, dashArray:'3 2' }).addTo(state.notamShapeLayer);
+      }
+    } catch (e) {}
+  }
+  function openNotamPopup(props, lat, lon) {
+    if (!state.map) return;
+    if (state.notamPopup) state.map.closePopup(state.notamPopup);
+    state.notamPopup = L.popup({ className:'fir-notam-popup', maxWidth:320 }).setLatLng([lat,lon]).setContent(buildNotamPopupHtml(props)).openOn(state.map);
+  }
+  function ensureNotamGroup() {
+    if (!state.notamLayerGroup) { state.notamLayerGroup = L.layerGroup(); if (state.map) state.notamLayerGroup.addTo(state.map); }
+    return state.notamLayerGroup;
+  }
+  function clearNotamGroup() {
+    if (!state.notamLayerGroup) return;
+    try { state.notamLayerGroup.getLayers().forEach(l => { if (state.map && state.map.hasLayer(l)) state.map.removeLayer(l); }); state.notamLayerGroup.clearLayers(); } catch(e){}
+  }
+  function updateNotamLayer() {
+    if (!state.map) { if (typeof L !== 'undefined') { try { initMap(); } catch(e){} } return; }
+    try { if (state.notamPopup) { state.map.closePopup(state.notamPopup); state.notamPopup = null; } } catch(e){}
+    clearNotamGroup();
+    state.notamGeomLayers = [];
+    let rendered = 0, geomCount = 0;
+    const firFilter = state.mapFirFilter ? String(state.mapFirFilter).trim().toUpperCase() : null;
+    (state.notams || []).forEach(n => {
+      const ll = getNotamLatLon(n); if (!ll) return;
+      const lat = ll[0], lon = ll[1];
+      const location = nfield(n,'location','Location','LOCATION','FIR','FIR ID','ICAO');
+      if (firFilter && String(location || '').trim().toUpperCase() !== firFilter) return;
+      const number = nfield(n,'number','Number','NOTAM #','NOTAM NUMBER','ID');
+      const risk = nfield(n,'risk','Risk','RISK LEVEL') || 'LOW';
+      const text = nfield(n,'text','Text','NOTAM Text','NOTAM_TEXT','NOTAMTEXT');
+      const center = nfield(n,'center','Center','CENTRE');
+      const radiusNm = nfield(n,'radiusNm','Radius NM','RADIUS');
+      const polygon = nfield(n,'polygon','Polygon','POLYGON');
+      const cls = nfield(n,'cls','Class','CLASS');
+      const active = n.active !== false;
+      const radius = !active ? 4 : risk === 'HIGH' ? 9 : risk === 'MEDIUM' ? 7 : 5;
+      const color = !active ? '#5a5f66' : risk === 'HIGH' ? '#ef5350' : risk === 'MEDIUM' ? '#fb923c' : '#34d399';
+      const props = {
+        location: location !== undefined ? location : n.location,
+        number: number !== undefined ? number : n.number,
+        cls: cls || null, active, risk, text,
+        effectiveDate: n.effectiveDate || null, expirationDate: n.expirationDate || null,
+        center: (Array.isArray(center) && center.length === 2) ? center : [lon, lat],
+        radiusNm: radiusNm || null,
+        polygon: normalizePolygon(polygon !== undefined ? polygon : n.polygon)
+      };
+      const ring = buildNotamGeom(props);
+      if (ring.length >= 3 && state.showNotams) {
+        const latlngs = ring.map(c => [c[1],c[0]]);
+        const geom = L.polygon(latlngs, { color, weight: active?2:1, dashArray:'4 3', fillColor:color, fillOpacity: active?0.12:0.05 });
+        geom.bindTooltip(String(props.location != null ? props.location : location), { className:'notam-tooltip' });
+        geom.on('click', () => { clearNotamShape(); drawNotamShape(props); openNotamPopup(props, lat, lon); });
+        geom.addTo(ensureNotamGroup()); state.notamGeomLayers.push(geom); geomCount++;
+      }
+      const marker = L.circleMarker([lat,lon], { pane:'notam-points', radius, color:'#0b0d12', weight: active?1.5:0.5, fillColor:color, fillOpacity: state.showNotams ? 0.9 : 0 });
+      marker.bindTooltip(String(props.location != null ? props.location : location), { direction:'top', offset:[0,-radius], className:'notam-tooltip' });
+      marker.on('click', () => { clearNotamShape(); drawNotamShape(props); openNotamPopup(props, lat, lon); });
+      if (state.showNotams) marker.addTo(ensureNotamGroup());
+      rendered++;
+    });
+    const filterSuffix = firFilter ? ' · FIR ' + firFilter : '';
+    document.getElementById('fir-notam-status').textContent = 'NOTAM: ' + rendered + '/' + (state.notams||[]).length + ' rendered, ' + geomCount + ' geom' + filterSuffix + (rendered===0?' (fallback)':'');
+  }
+  function toggleNotamLayer() {
+    state.showNotams = !state.showNotams;
+    const btn = document.getElementById('fir-toggle-notams');
+    if (btn) btn.classList.toggle('active', state.showNotams);
+    if (!state.map) { try { initMap(); } catch(e){} }
+    if (state.showNotams) { updateNotamLayer(); if (state.notamLayerGroup && !state.map.hasLayer(state.notamLayerGroup)) state.notamLayerGroup.addTo(state.map); }
+    else { clearNotamGroup(); clearNotamShape(); if (state.notamPopup) { state.map.closePopup(state.notamPopup); state.notamPopup = null; } }
+    if (state.selected) updateMapForFlight(state.selected);
+  }
+
+  // Fullscreen / expand map — ponytail: CSS :fullscreen + fallback .is-fullscreen so it works in iframe
+  function isMapExpanded() {
+    const root = document.getElementById('fir-ui-root');
+    return document.fullscreenElement === document.getElementById('fir-map-wrap')
+        || document.webkitFullscreenElement === document.getElementById('fir-map-wrap')
+        || document.getElementById('fir-map-wrap').classList.contains('is-fullscreen')
+        || (root && root.classList.contains('is-expanded'));
+  }
+  function syncExpandBtn() {
+    const btn = document.getElementById('fir-expand-map');
+    if (!btn) return;
+    btn.textContent = isMapExpanded() ? '✕ CLOSE' : '⛶ EXPAND';
+    btn.classList.toggle('active', isMapExpanded());
+    btn.title = isMapExpanded() ? 'Close (ESC / F)' : 'Expand map (F)';
+  }
+  function expandMap() {
+    const wrap = document.getElementById('fir-map-wrap');
+    const root = document.getElementById('fir-ui-root');
+    
+    // Try native fullscreen first; iframe/denied -> fallback flex expansion
+    const req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+    if (req) {
+      const p = req.call(wrap);
+      if (p && p.catch) {
+        p.catch(() => { 
+          // Native fullscreen failed, use flex-based expansion
+          root.classList.add('is-expanded');
+          syncExpandBtn(); 
+          setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 80); 
+        });
+      } else {
+        // Native fullscreen succeeded, but we'll still apply flex styling as backup
+        setTimeout(() => { 
+          root.classList.add('is-expanded');
+          syncExpandBtn(); 
+          if(state.map) state.map.invalidateSize(); 
+        }, 250);
+      }
+    } else {
+      // No fullscreen API support, use flex expansion
+      root.classList.add('is-expanded');
+      syncExpandBtn();
+    }
+    setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 120);
+    setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 350);
+  }
+  function closeMapExpand() {
+    const wrap = document.getElementById('fir-map-wrap');
+    const root = document.getElementById('fir-ui-root');
+    
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      const ex = document.exitFullscreen || document.webkitExitFullscreen;
+      if (ex) {
+        ex.call(document).then(() => {
+          // Clean up both fullscreen fallback modes
+          wrap.classList.remove('is-fullscreen');
+          root.classList.remove('is-expanded');
+          syncExpandBtn();
+          setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 80);
+          setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 300);
+        });
+        return;
+      }
+    }
+    
+    // Always remove expansion classes from parent container
+    wrap.classList.remove('is-fullscreen');
+    root.classList.remove('is-expanded');
+    syncExpandBtn();
+    setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 80);
+    setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 300);
+  }
+  function toggleMapExpand() { if (isMapExpanded()) closeMapExpand(); else expandMap(); }
+
+  function initMap() {
+    console.log('[FIR] Initializing Leaflet map...');
+    if (state.map || typeof L === 'undefined') {
+      console.warn('[FIR] Map already initialized or Leaflet not available');
+      return;
+    }
+    
+    try {
+      state.map = L.map('fir-map', { 
+        center:[-2.5,118.0], 
+        zoom:4, 
+        zoomControl:false, 
+        attributionControl:true 
+      });
+      
+      console.log('[FIR] Map container created');
+      
+      if (!state.map.getPane('notam-points')) {
+        state.map.createPane('notam-points').style.zIndex = 450;
+      }
+      
+      // Try OSM first, with fallback to CartoDB if blocked
+      let tileLayerAdded = false;
+      
+      // First try external tiles (might work in some cases)
+      const tileProviders = [
+        {
+          url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          name: 'OpenStreetMap',
+          options: { subdomains:'abc', maxZoom:19 }
+        },
+        {
+          url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+          name: 'CartoDB Positron', 
+          options: { maxZoom: 20 }
+        }
+      ];
+      
+      for (const provider of tileProviders) {
+        try {
+          L.tileLayer(provider.url, { 
+            ...provider.options,
+            attribution:'&copy; Contributors' 
+          }).addTo(state.map);
+          tileLayerAdded = true;
+          console.log(`[FIR] ${provider.name} tiles loaded successfully`);
+          break;
+        } catch(e) {
+          console.warn(`[FIR] ${provider.name} failed:`, e.message);
+        }
+      }
+      
+      // If all external providers fail, use simple colored placeholder
+      if (!tileLayerAdded) {
+        console.log('[FIR] All external tiles failed, using offline placeholder...');
+        
+        // Create a simple colored grid background instead of tiles
+        const mapDiv = document.getElementById('fir-map');
+        const width = mapDiv.offsetWidth || 400;
+        const height = mapDiv.offsetHeight || 400;
+        
+        mapDiv.innerHTML = `<div style="width:100%;height:100%;background:linear-gradient(135deg,#e8f4f8 0%,#d1e8f0 100%);display:flex;align-items:center;justify-content:center;color:#3a5a7a;font-family:sans-serif;text-align:center;padding:20px;">
+          <div>
+            <h3 style="margin-bottom:8px;font-size:18px;">🗺️ FIR Interactive Map</h3>
+            <p style="font-size:14px;margin-bottom:6px;">Interactive flight tracking and NOTAM visualization</p>
+            <p style="font-size:12px;color:var(--text-muted);margin-top:12px;">Map tiles are displayed when available.</p>
+          </div>
+        </div>`;
+        
+        // Add a subtle animation effect
+        mapDiv.querySelector('div').style.animation = 'pulse 2s ease-in-out infinite';
+        
+        // Inject keyframe animation
+        if (!document.getElementById('map-animation-style')) {
+          const style = document.createElement('style');
+          style.id = 'map-animation-style';
+          style.textContent = `
+            @keyframes pulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.7; }
+            }
+          `;
+          document.head.appendChild(style);
+        }
+      }
+      
+      if (tileLayerAdded) {
+        window.addEventListener('resize', () => { if (state.map) state.map.invalidateSize(); });
+        console.log('[FIR] Map resize listener added');
+        
+        setTimeout(() => {
+          updateNotamLayer();
+          if (state.selected) {
+            updateMapForFlight(state.selected);
+            console.log('[FIR] Flight updated on map');
+          }
+        }, 100);
+      }
+    } catch (e) {
+      console.error('[FIR] Map initialization failed:', e);
+      alert('Failed to initialize map: ' + String(e.message || e));
+    }
+  }
+
+  /* ---------- Inspector (Option A: Hazard-First middle column) ---------- */
+  function renderInspector(flight) {
+    const headBox = document.getElementById('fir-hazard-head');
+    const listBox = document.getElementById('fir-hazard-list');
+    if (!flight) {
+      headBox.innerHTML = '<div class="fir-empty">Select a flight to view hazard stack.</div>';
+      document.getElementById('fir-hazard-chips').innerHTML = '';
+      document.getElementById('fir-hazard-count').textContent = '0 shown of 0';
+      listBox.innerHTML = '<div class="fir-empty">No hazards yet.</div>';
+      state.hazards = [];
+      return;
+    }
+    state.hazards = flight.analysis || [];
+    let h = '';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">';
+    h += '<div><div class="fir-eyebrow">Selected Flight</div>';
+    h += '<div class="fir-flt-name">' + esc(flight.QZ) + ' &middot; ' + esc(flight.DEP) + ' &rarr; ' + esc(flight.DES) + '</div>';
+    h += '<div class="fir-flt-sub">Schedule ' + esc(formatTime(flight.STD)) + ' / ' + esc(formatTime(flight.STA)) + ' UTC &middot; FL' + esc(flight['CRZ FL'] || '&mdash;') + ' &middot; DOF ' + esc(formatDate(flight.DOF)) + ' &middot; REG ' + esc(flight.REG || 'N/A') + '</div></div>';
+    h += '<div>' + riskBadge(flight.riskLevel) + '</div>';
+    h += '</div>';
+    const flg = flight.flags || {};
+    if (flg.firMapped === false || flg.routeMapped === false || flg.dofInvalid) {
+      const notes = [];
+      if (flg.firMapped === false) notes.push('NO FIR MAPPING');
+      if (flg.routeMapped === false) notes.push('NO ROUTE');
+      if (flg.dofInvalid) notes.push('DOF INVALID');
+      h += '<div style="margin:10px 0;padding:6px 10px;border:1px solid var(--status-warning);border-radius:var(--radius-sm);background:var(--status-warning-bg);color:var(--status-warning);font:700 10px var(--font-mono);">&#9888; ' + esc(notes.join(' &middot; ')) + '</div>';
+    }
+    h += '<div class="fir-eyebrow" style="margin-top:10px;">Traversed FIR Boundaries</div><div class="fir-fir-pills" style="margin-top:4px;">';
+    const firs = getFIRArray(flight);
+    if (firs.length) firs.forEach(f => { h += '<span class="fir-pill">' + esc(f) + '</span>'; }); else h += '<span style="font-size:11px;color:var(--text-muted);">None specified</span>';
+    h += '</div>';
+    headBox.innerHTML = h;
+    renderHazardChips();
+    renderHazardList();
+  }
+
+  function hazardFiltered() {
+    const q = (state.hzQuery || '').toLowerCase();
+    return (state.hazards || []).filter(n => {
+      const risk = String(n.risk || 'LOW').toUpperCase();
+      if (state.hzRisk && risk !== state.hzRisk) return false;
+      if (q && !(String(n.location||'') + ' ' + String(n.number||'') + ' ' + String(n.text||'')).toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }
+
+  function renderHazardChips() {
+    const box = document.getElementById('fir-hazard-chips');
+    const countEl = document.getElementById('fir-hazard-count');
+    const all = state.hazards || [];
+    const count = (r) => all.filter(n => String(n.risk || 'LOW').toUpperCase() === r).length;
+    const opts = [['', 'ALL', all.length], ['HIGH', 'HIGH', count('HIGH')], ['MEDIUM', 'MEDIUM', count('MEDIUM')], ['LOW', 'LOW', count('LOW')]];
+    let h = '<span class="fir-hazard-filter-label">Risk</span>';
+    opts.forEach(o => {
+      const active = state.hzRisk === o[0];
+      h += '<button type="button" class="fir-hz-chip' + (active ? ' active' : '') + '" data-r="' + o[0] + '" aria-pressed="' + active + '">' + o[1] + '<span class="fir-hz-chip-count">' + o[2] + '</span></button>';
+    });
+    box.innerHTML = h;
+    const filteredLen = hazardFiltered().length;
+    countEl.textContent = filteredLen + ' shown of ' + all.length;
+    box.querySelectorAll('.fir-hz-chip').forEach(el => el.addEventListener('click', () => {
+      state.hzRisk = el.getAttribute('data-r');
+      renderHazardChips();
+      renderHazardList();
+    }));
+  }
+
+  function renderHazardList() {
+    const box = document.getElementById('fir-hazard-list');
+    const list = hazardFiltered();
+    document.getElementById('fir-hazard-count').textContent = list.length + ' shown of ' + (state.hazards || []).length;
+    if (!list.length) {
+      const hasHazards = (state.hazards || []).length > 0;
+      box.innerHTML = hasHazards ? '<div class="fir-empty">No hazards match current filter.</div>' : '<div class="fir-empty">No direct NOTAM impact found for current flight context.</div>';
+      return;
+    }
+    let h = '';
+    list.forEach(n => {
+      const risk = String(n.risk || 'LOW').toUpperCase();
+      h += '<div class="fir-hazard-item ' + getRiskClass(risk) + '">';
+      h += '<div class="fir-hazard-head"><span class="fir-hazard-id">' + esc(n.location) + ' - ' + esc(n.number) + '</span>' + riskBadge(risk) + '</div>';
+      h += '<div class="fir-hazard-text">' + esc(n.text) + '</div>';
+      h += '<div class="fir-hazard-meta">' + esc(String(n.status || 'ACTIVE')) + (n.isIndirectImpact ? ' &middot; INDIRECT' : '') + '</div>';
+      if (n.matchReason) h += '<div class="fir-hazard-reason">Conflict: ' + esc(n.matchReason) + '</div>';
+      h += '<div class="fir-hazard-actions"><button type="button" class="fir-map-btn" data-focus="' + esc(n.location + '|' + n.number) + '">Focus on Map</button></div>';
+      h += '</div>';
+    });
+    box.innerHTML = h;
+    box.querySelectorAll('[data-focus]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        const raw = btn.getAttribute('data-focus') || '';
+        const sep = raw.indexOf('|');
+        const loc = sep > -1 ? raw.slice(0, sep) : raw;
+        const num = sep > -1 ? raw.slice(sep + 1) : '';
+        const match = (state.hazards || []).find(x => String(x.location) === loc && String(x.number) === num) || { location: loc, number: num };
+        focusHazardOnMap(match);
+      });
+    });
+  }
+
+  function focusHazardOnMap(n) {
+    if (!n) return;
+    try {
+      // Prevent page scroll-jump if already on FIR tab
+      const isFirActive = document.getElementById('view-fir') && document.getElementById('view-fir').classList.contains('active');
+      if (!isFirActive && typeof window.switchTab === 'function') {
+        window.switchTab('fir');
+      }
+      if (typeof window.firFocusNotamOnMap === 'function') {
+        // Call without switchTab side-effect — firFocusNotamOnMap itself also tries to switch,
+        // but we have already ensured the tab is active, so it will be a no-op (early return in switchTab logic)
+        window.firFocusNotamOnMap(n);
+      } else if (state.map) {
+        const ll = getNotamLatLon(n);
+        if (ll) state.map.setView([ll[0], ll[1]], 8);
+      }
+      addToast('Focused on map: ' + n.location + ' ' + n.number);
+    } catch (err) {
+      console.error('focusHazardOnMap error', err);
+      addToast('Focus failed: ' + (err && err.message ? err.message : String(err)));
+    }
+  }
+
+  function renderFlightList() {
+    const box = document.getElementById('fir-flight-list');
+    if (!box) return;
+    
+    // Update refresh button appearance based on state
+    const refreshBtn = document.getElementById('fir-refresh-flights');
+    if (refreshBtn && !state.flightDataLoaded) {
+      refreshBtn.style.opacity = '0.6';
+    } else if (refreshBtn) {
+      refreshBtn.style.opacity = '1';
+    }
+    
+    if (!state.flights.length) {
+      box.innerHTML = '<div class="fir-empty">No active flights. Click "REFRESH" to load.</div>';
+      return;
+    }
+    
+    let h = '';
+    state.flights.forEach(f => {
+      const active = state.selected && state.selected._rowId === f._rowId;
+      h += '<div class="fir-flight-item' + (active ? ' active' : '') + '" data-row="' + f._rowId + '">';
+      h += '<div class="fir-flt-line"><span class="fir-callsign">' + esc(f.QZ) + '</span>' + riskBadge(f.riskLevel) + '</div>';
+      h += '<div class="fir-route">' + esc(f.DEP) + ' → ' + esc(f.DES) + '</div>';
+      h += '<div class="fir-flt-sub"><span>' + esc(formatDate(f.DOF)) + '</span><span>' + esc(formatTime(f.STD)) + '/' + esc(formatTime(f.STA)) + 'Z</span></div>';
+      h += '</div>';
+    });
+    box.innerHTML = h;
+    box.querySelectorAll('.fir-flight-item').forEach(el => {
+      el.addEventListener('click', () => selectFlight(Number(el.getAttribute('data-row'))));
+    });
+  }
+
+  async function loadActiveNotams() {
+    const data = await run('getActiveNotams', true);
+    if (data && !data.error) {
+      state.notams = (data.notams || []).filter(n => n.active !== false);
+    }
+    if (!state.notams.length) state.notams = [];
+    updateNotamLayer();
+    document.getElementById('fir-notam-status').textContent = 'NOTAM: ' + state.notams.length + ' active';
+  }
+
+  async function selectFlight(rowId) {
+    const row = Number(rowId);
+    const boardFlight = state.flights.find(f => Number(f._rowId) === row);
+    if (!boardFlight) return;
+
+    // Load full flight fields (ROUTE ID, CRZ FL, FIR 1..8) plus route/latlong
+    // sheets so route geometry and the inspector render correctly.
+    const full = await run('getSelectedFlightsData', [row], true);
+    let flight = boardFlight;
+    if (full && !full.error && full.flights && full.flights.length) {
+      flight = full.flights[0];
+      state.routes = full.routes || state.routes;
+      state.latlong = full.latlong || state.latlong;
+      state.latLongCache = null;
+    }
+
+    state.selected = flight;
+    renderFlightList();
+    updateMapForFlight(flight);
+    renderInspector(Object.assign({}, flight, { analysis: [] }));
+
+    const result = await run('analyzeFlightNotams', row);
+    if (result && !result.error) {
+      const idx = state.flights.findIndex(f => Number(f._rowId) === row);
+      if (idx > -1) {
+        // Merge: keep board display fields (QZ/DES etc), take analysis/risk/flags
+        const base = state.flights[idx];
+        const merged = Object.assign({}, base, {
+          analysis: result.analysis || [],
+          riskLevel: result.riskLevel || base.riskLevel,
+          flags: result.flags || base.flags
+        });
+        state.flights[idx] = merged;
+        if (state.selected && Number(state.selected._rowId) === row) state.selected = merged;
+        renderFlightList();
+        renderInspector(merged);
+      }
+    } else if (result && result.error) {
+      addToast('Analysis error: ' + result.error);
+    }
+  }
+
+  // Resolve active board rowIds from Flight_Ui.html (source of truth = Flight Board)
+  function getActiveBoardRowIds() {
+    try {
+      if (Array.isArray(window.activeBoardRowIds) && window.activeBoardRowIds.length) return window.activeBoardRowIds.map(n => Number(n)).filter(n => !isNaN(n));
+      // localStorage fallback (occ_active_board)
+      const raw = localStorage.getItem('occ_active_board');
+      if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr.map(n => Number(n)).filter(n => !isNaN(n)); }
+      // window.allDbFlights filtered by board? last resort: all rowIdx on current board filter
+      if (Array.isArray(window.allDbFlights) && window.allDbFlights.length && typeof window.getFilteredBoardFlights === 'function' && typeof window.flightFilter !== 'undefined') {
+        try {
+          const boardFlights = window.allDbFlights.filter(f => window.activeBoardRowIds && window.activeBoardRowIds.includes(f.rowIdx));
+          if (boardFlights.length) return boardFlights.map(f => f.rowIdx);
+        } catch(e) {}
+      }
+    } catch(e) {}
+    return [];
+  }
+
+  async function loadFlights() {
+    const box = document.getElementById('fir-flight-list');
+    box.innerHTML = '<div class="fir-empty">Loading flights...</div>';
+    
+    const boardIds = getActiveBoardRowIds();
+    if (!boardIds.length) {
+      console.log('[FIR] loadFlights: no flights on Flight Board (occ_active_board empty)');
+      state.flights = [];
+      if (state.flightDataLoaded) {
+        box.innerHTML = '<div class="fir-empty">No flights on Flight Board.<br><span style="font-size:10px;opacity:.7;">Add flights to the board in FLIGHT tab first.</span></div>';
+      }
+      renderFlightList();
+      return;
+    }
+    console.log('[FIR] loadFlights -> active board rowIds:', boardIds);
+    // Load only active board flights via getSelectedFlightsData (full fields + route/latlong)
+    let data = await run('getSelectedFlightsData', boardIds, true);
+    console.log('[FIR] getSelectedFlightsData payload:', data);
+    if (!data || data.error) {
+      console.error('[FIR] getSelectedFlightsData error:', data && data.error, data);
+      data = await run('getSelectedFlightsData', boardIds, false);
+      console.log('[FIR] getSelectedFlightsData(false) payload:', data);
+    }
+    // Normalize to same shape as before but filtered to board only
+    if (data && !data.error && data.flights) {
+      // seed route/latlong so map works immediately
+      if (data.routes) state.routes = data.routes;
+      if (data.latlong) state.latlong = data.latlong;
+      state.latLongCache = null;
+      // flights already filtered to boardIds + active by backend (firIsActiveFlightRecord)
+      // keep minimal fields for board, but enrich with full fields for inspector/map
+      data = { flights: data.flights.map(f => ({
+        _rowId: f._rowId, QZ: String(f.QZ||f.FLIGHT||''), DOF: String(f.DOF||''),
+        DEP: String(f.DEP||''), DES: String(f.DES||f.ARR||''), STD: String(f.STD||''), STA: String(f.STA||''), REG: String(f.REG||''),
+        'ROUTE ID': f['ACTIVE ROUTE ID']||f['ROUTE ID']||'', 'CRZ FL': f['CRZ FL']||f.ALT||'', riskLevel: f.riskLevel||f['RISK LEVEL']||'Clear'
+      })) };
+    }
+    if (false) { // keep old getActiveFlightList path dead but visible for reference
+      let _data = await run('getActiveFlightList', true);
+      if (!_data || _data.error) _data = await run('getActiveFlightList', false);
+    }
+    if (data && !data.error && data.flights) {
+      state.flights = data.flights;
+      state.flightDataLoaded = true;
+      
+      // Log what we loaded for debugging
+      console.log(`[FIR] Successfully loaded ${state.flights.length} flight(s) from board`);
+      
+      renderFlightList();
+      if (state.flights.length) { await selectFlight(Number(state.flights[0]._rowId)); }
+    } else {
+      console.error('[FIR] Failed to load flights, full payload:', data);
+      const hint = (data && data.error && String(data.error).includes('null')) ? '<br><span style="font-size:10px;opacity:.7;">Hint: Apps Script deployment is stale - redeploy as New Version, then hard-reload.</span>' : '';
+      box.innerHTML = '<div class="fir-empty">Failed to load flights.' + (data && data.error ? '<br><span style="font-size:10px;opacity:.7;">' + esc(String(data.error)) + '</span>' : '<br><span style="font-size:10px;opacity:.7;">Invalid or empty response</span>') + hint + '</div>';
+    }
+  }
+
+  async function analyzeAll() {
+    try {
+      // Force reload flight data before analysis
+      await loadFlights();
+      
+      const analysisButton = document.getElementById('fir-analyze-all');
+      if (analysisButton) {
+        analysisButton.textContent = 'ANALYZING...';
+        analysisButton.disabled = true;
+      }
+      
+      addToast('Analyzing flights…');
+      
+      // Only analyze flights that are on the Flight Board
+      const boardIds = getActiveBoardRowIds();
+      const ids = (boardIds.length ? boardIds : state.flights.map(f => Number(f._rowId)));
+      if (!ids.length) {
+        addToast('No flights to analyze');
+        return;
+      }
+      
+      const results = await run('analyzeFlightList', ids);
+      if (results && !results.error && Array.isArray(results)) {
+        results.forEach(af => { const idx = state.flights.findIndex(f => Number(f._rowId) === Number(af._rowId)); if (idx > -1) { const base = state.flights[idx]; state.flights[idx] = Object.assign({}, base, { analysis: af.analysis || [], riskLevel: af.riskLevel || base.riskLevel, flags: af.flags || base.flags }); } });
+        renderFlightList();
+        if (state.selected) { const upd = state.flights.find(f => Number(f._rowId) === Number(state.selected._rowId)); if (upd) { state.selected = upd; renderInspector(upd); updateMapForFlight(upd); } }
+        addToast('Analysis complete for ' + results.length + ' flight(s).');
+        const persist = await run('persistAnalysisResults', results);
+        if (persist && persist.error) addToast('Risk write-back: ' + persist.error);
+        else if (persist && persist.success) addToast('Risk saved to sheet for ' + persist.count + ' flight(s).');
+      } else {
+        addToast('Analysis error: ' + ((results && results.error) || 'unknown'));
+      }
+    } catch (e) {
+      console.error('[FIR] Analysis failed:', e);
+      addToast('Analysis error: ' + String(e.message || e));
+    } finally {
+      // Restore button state
+      const analysisButton = document.getElementById('fir-analyze-all');
+      if (analysisButton) {
+        setTimeout(() => {
+          analysisButton.textContent = 'ANALYZE';
+          analysisButton.disabled = false;
+        }, 500);
+      }
+    }
+  }
+
+  function init() {
+    if (typeof L !== 'undefined') { setTimeout(initMap, 0); }
+    document.getElementById('fir-toggle-notams').addEventListener('click', toggleNotamLayer);
+    const expBtn = document.getElementById('fir-expand-map');
+    if (expBtn) expBtn.addEventListener('click', toggleMapExpand);
+    // ESC / F hotkeys when FIR tab active
+    document.addEventListener('keydown', (e) => {
+      const firActive = document.getElementById('view-fir') && document.getElementById('view-fir').classList.contains('active');
+      if (!firActive) return;
+      if (e.key === 'Escape' && isMapExpanded()) { e.preventDefault(); closeMapExpand(); }
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && e.target && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
+        e.preventDefault(); toggleMapExpand();
+      }
+    });
+    // Keep button in sync when user exits via browser chrome ESC
+    document.addEventListener('fullscreenchange', () => {
+      const wrap = document.getElementById('fir-map-wrap');
+      if (!document.fullscreenElement && wrap.classList.contains('is-fullscreen') && !wrap.matches(':fullscreen')) {
+        // keep fallback open until explicit close — don't auto-clear
+      }
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) syncExpandBtn();
+      setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 60);
+      setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 250);
+    });
+    document.addEventListener('webkitfullscreenchange', () => {
+      if (!document.webkitFullscreenElement) syncExpandBtn();
+      setTimeout(() => { if(state.map) state.map.invalidateSize(); }, 60);
+    });
+    document.getElementById('fir-analyze-all').addEventListener('click', analyzeAll);
+    
+    // Manual refresh remains explicit; first use must also load data.
+    const refreshBtn = document.getElementById('fir-refresh-flights');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', async () => {
+        console.log('[FIR] User triggered manual refresh');
+        refreshBtn.disabled = true;
+        try {
+          await loadFlights();
+          addToast('Flight list refreshed');
+        } catch (e) {
+          console.error('[FIR] Refresh failed:', e);
+          addToast('Refresh failed: ' + String(e.message || e));
+        } finally {
+          refreshBtn.disabled = false;
+        }
+      });
+    }
+    
+    const hzSearch = document.getElementById('fir-hazard-search');
+    if (hzSearch) hzSearch.addEventListener('input', (e) => { state.hzQuery = e.target.value; renderHazardChips(); renderHazardList(); });
+    
+    // REMOVED: Auto-reload event listeners (occ:boardChanged, storage)
+    // REMOVED: Auto-load flight on init (loadFlights())
+    
+    loadActiveNotams();
+    // The view-section becomes active before this runs, but Leaflet may have
+    // measured the map while it was hidden; refresh size once visible.
+    setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 60);
+  }
+
+  window.initFirDashboard = init;
+
+  /**
+   * Focus the FIR map on a specific NOTAM (called from the FIR NOTAM Results tab).
+   * Switches to the FIR view, ensures the map + NOTAM layer are ready, then
+   * centers on the NOTAM location and opens its popup.
+   * @param {Object} notam  { Location, 'NOTAM #', ... } from the FIR editor.
+   */
+  window.firFocusNotamOnMap = async function (notam) {
+    try {
+      const wasFirActive = document.getElementById('view-fir') && document.getElementById('view-fir').classList.contains('active');
+      if (!wasFirActive && typeof window.switchTab === 'function') window.switchTab('fir');
+      if (typeof L === 'undefined') return;
+      if (!state.map) { try { initMap(); } catch (e) {} }
+      if (!state.map) return;
+      if (!state.showNotams) {
+        state.showNotams = true;
+        const btn = document.getElementById('fir-toggle-notams');
+        if (btn) btn.classList.add('active');
+      }
+      // Ensure NOTAM data is loaded.
+      if (!state.notams || !state.notams.length) {
+        try { await loadActiveNotams(); } catch (e) {}
+      }
+      const loc = String(notam && (notam.Location || notam.location) || '').trim().toUpperCase();
+      const num = String(notam && (notam['NOTAM #'] || notam.number) || '').trim().toUpperCase();
+      const match = (state.notams || []).find(function (n) {
+        const nl = String(n.location || n.Location || '').trim().toUpperCase();
+        const nn = String(n.number || n['NOTAM #'] || '').trim().toUpperCase();
+        return nl === loc && nn === num;
+      }) || (state.notams || []).find(function (n) {
+        return String(n.location || n.Location || '').trim().toUpperCase() === loc;
+      });
+      if (!match) {
+        // Fallback: center on the location code using the shared fallback coords.
+        const fb = window.firFallbackCoords && window.firFallbackCoords[loc];
+        if (fb) state.map.setView([fb[1], fb[0]], 7);
+        return;
+      }
+      const ll = getNotamLatLon(match);
+      if (!ll) return;
+      const lat = ll[0], lon = ll[1];
+      const props = {
+        location: match.location != null ? match.location : match.Location,
+        number: match.number != null ? match.number : match['NOTAM #'],
+        cls: match.cls || null,
+        active: match.active !== false,
+        risk: match.risk || 'LOW',
+        text: match.text || match['NOTAM Text'] || '',
+        effectiveDate: match.effectiveDate || null,
+        expirationDate: match.expirationDate || null,
+        center: (Array.isArray(match.center) && match.center.length === 2) ? match.center : [lon, lat],
+        radiusNm: match.radiusNm || null,
+        polygon: normalizePolygon(match.polygon)
+      };
+      clearNotamShape();
+      drawNotamShape(props);
+      state.map.setView([lat, lon], 8);
+      openNotamPopup(props, lat, lon);
+      setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 120);
+    } catch (e) {
+      console.error('firFocusNotamOnMap error:', e);
+    }
+  };
+})();
+</script>
+

@@ -1,0 +1,76 @@
+-- Draft Schema D1 (SQLite) untuk AWQ - CLOUD
+-- Ini adalah translasi awal dari tabel Sheet sebelumnya (FLT INFO, NOTAM, FIR, dll.)
+
+CREATE TABLE IF NOT EXISTS flights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    callsign TEXT NOT NULL,
+    dep TEXT,
+    dest TEXT,
+    ac_type TEXT,
+    etd DATETIME,
+    eta DATETIME,
+    alt TEXT,
+    taf_dep TEXT,
+    taf_arr TEXT,
+    cgo TEXT,
+    enr1 TEXT,
+    enr2 TEXT,
+    enr3 TEXT,
+    atc TEXT,
+    remarks TEXT,
+    dof TEXT,
+    active_route_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notams (
+    id TEXT PRIMARY KEY, -- Nomor NOTAM, e.g., A1234/23
+    location TEXT NOT NULL, -- ICAO code
+    q_code TEXT,
+    message TEXT,
+    valid_from DATETIME,
+    valid_to DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS firs (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    risk_level TEXT -- e.g., 'HIGH', 'MED', 'LOW'
+);
+
+CREATE TABLE IF NOT EXISTS airport_firs (
+    airport_icao TEXT NOT NULL,
+    fir_code TEXT NOT NULL,
+    PRIMARY KEY (airport_icao, fir_code)
+);
+
+CREATE TABLE IF NOT EXISTS routes (
+    id TEXT PRIMARY KEY,
+    dep_airport TEXT,
+    arr_airport TEXT,
+    dep_rwy TEXT,
+    sid TEXT,
+    waypoint_seq TEXT,
+    star TEXT,
+    arr_rwy TEXT,
+    route_string TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS aircraft (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    registration TEXT UNIQUE NOT NULL,
+    ac_type TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS tafs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station TEXT NOT NULL,
+    raw_text TEXT,
+    issue_time DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Note: Schema ini bisa disesuaikan lagi mengikuti kebutuhan data spesifik dari Apps Script sebelumnya.

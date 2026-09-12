@@ -1,0 +1,429 @@
+<div id="view-report" class="view-section">
+  <div class="report-control-bar">
+    <div class="rcb-info">
+      <h2 class="header-title">BRIEFING REPORT</h2>
+      <div class="header-sub">
+        SYSTEM READY <span class="sep">|</span> BRIEFING PACKAGE COMPILATION v2.4
+      </div>
+    </div>
+    <div class="rcb-actions" style="display: flex; gap: 12px;">
+      <button class="control-btn" onclick="window.resetReportEngine()"><svg class="ic ic-sm"><use href="#i-sync"/></svg> RESET FORM</button>
+      <button class="btn-execute-cbr btn-solid-primary" onclick="window.compileFinalCbr()" id="btn-exec-cbr">
+        <svg class="ic ic-sm"><use href="#i-bolt"/></svg> CREATE REPORT
+      </button>
+    </div>
+  </div>
+  
+  <div class="report-split-container">
+    <div class="report-sidebar">
+      <div class="summary-card">
+        <div class="summary-header">BRIEFING CONTEXT</div>
+        <div class="summary-item">
+          <span class="summary-label">FLIGHTS SELECTED</span>
+          <span class="summary-val" id="report-sum-count">0</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">FLIGHT NUMBERS</span>
+          <div class="summary-list" id="report-sum-flights">NONE</div>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">NOTAM SYNC</span>
+          <span class="summary-val" id="report-sum-notams">0</span>
+        </div>
+        <div class="summary-sep"></div>
+        <div class="summary-item">
+          <span class="summary-label">ENGINE READINESS</span>
+          <span class="summary-val" id="report-sum-status" style="color: var(--status-warning);">AWAITING CONTEXT</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="report-main">
+      <div id="report-status" class="terminal-window" style="display: none;"></div>
+    </div>
+  </div>
+
+  <style>
+    /* fonts loaded via Index.html preconnect */
+    /* a11y: local focus ring (global lives in Index.html shell) */
+    #view-report button:focus-visible, #view-report [role="button"]:focus-visible { outline:3px solid var(--accent-primary); outline-offset:2px; }
+    /* =========================================================
+       AWQ BRIEFING TERMINAL (SPLIT PANEL)
+       ========================================================= */
+    .report-control-bar {
+      display: flex; justify-content: space-between; align-items: center;
+      min-width: 0;
+      background: var(--nav-item-bg); 
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-light);
+      padding: 24px 32px; border-radius: var(--radius-lg); 
+      margin-bottom: 24px;
+      box-shadow: var(--shadow-soft);
+    }
+    
+    .report-split-container {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .report-sidebar {
+      position: sticky;
+      top: 120px;
+      min-width: 0;
+    }
+
+    .summary-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .summary-header {
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--accent-primary);
+      letter-spacing: 0.15em;
+      margin-bottom: 24px;
+      padding: 0 0 12px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+      border-left: 3px solid var(--accent-primary);
+    }
+
+    .summary-item { margin-bottom: 20px; }
+    .summary-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .summary-val {
+      font-family: var(--font-mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .summary-list {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      max-height: none;
+      overflow-y: visible;
+      padding-right: 0;
+    }
+    .summary-sep { height: 1px; background: var(--border-subtle); margin: 20px 0; }
+    .flight-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--border-subtle); border-radius:var(--radius-sm); margin-bottom:8px; background:var(--bg-panel-alt); }
+    .flight-row-main { flex:1; font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--text-primary); }
+    .flight-row-no-sig { display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-muted); cursor:pointer; user-select:none; white-space:nowrap; }
+    .flight-row-no-sig input { accent-color: var(--accent-primary); width:14px; height:14px; }
+    .flight-row-no-sig.active { color: var(--status-info); }
+    .no-sig-hint { font-size:10px; color:var(--text-muted); font-family:var(--font-mono); margin-top:6px; line-height:1.4; }
+    .conflict-warn { background: var(--status-warning-bg); border:1px solid var(--status-warning); color: var(--status-warning); padding:6px 8px; border-radius:var(--radius-sm); font-size:10px; font-family:var(--font-mono); margin-top:8px; }
+
+    .btn-execute-cbr {
+      padding: 0 32px; height: 44px;
+      font-size: 11px; font-weight: 900; 
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    /* TERMINAL WINDOW */
+    .terminal-window {
+      background: var(--bg-panel-sunken); 
+      border: 1px solid var(--border-light); 
+      border-radius: var(--radius-lg); 
+      padding: 32px; 
+      font-family: var(--font-mono); 
+      font-size: 14.5px; line-height: 1.7; 
+      min-height: 480px; max-height: 650px; 
+      overflow-y: auto; color: var(--text-primary); 
+      box-shadow: var(--overlay-inset);
+      position: relative;
+    }
+    .terminal-window::after {
+      content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(var(--scanline) 1px, transparent 1px);
+      background-size: 100% 3px;
+      pointer-events: none;
+      opacity: 0.2;
+    }
+    
+    .terminal-header {
+      color: var(--accent-primary); font-weight: 900; margin-bottom: 24px;
+      font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+      border-bottom: 1px solid var(--border-subtle); padding-bottom: 16px;
+      opacity: 0.8;
+    }
+
+    .terminal-line { 
+      display: flex; gap: 14px; padding: 4px 0; 
+      animation: termFadeIn 0.3s ease-out forwards; 
+    }
+    @keyframes termFadeIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+
+    .terminal-timestamp { color: var(--text-disabled); font-size: 12.5px; white-space: nowrap; opacity: 0.6; }
+    .terminal-prompt { color: var(--accent-primary); opacity: 0.6; font-weight: 900; }
+    
+    .term-success { color: var(--status-safe); }
+    .term-error { color: var(--status-critical); background: rgba(255, 77, 77, 0.1); padding: 0 6px; border-radius: 3px; }
+    .term-warn { color: var(--status-warning); }
+    .term-info { color: var(--status-info); }
+
+    @media (max-width: 1200px) {
+      .report-split-container { grid-template-columns: minmax(0, 1fr); }
+      .report-sidebar { position: static; }
+    }
+    @media (max-width: 600px) {
+      #view-report .report-control-bar { align-items: stretch; flex-direction: column; padding: 16px; }
+      #view-report .report-control-bar > * { min-width: 0; }
+      #view-report .btn-execute-cbr { width: 100%; min-height: 44px; }
+      #view-report .terminal-window { min-width: max-content; }
+    }
+  </style>
+
+  <script>
+    window.reportState = { isBusy: false, lastHash: "", lastFlightSelectionKey: null };
+
+    const esc = window.escapeHtml;
+
+    // ---- NO SIGNIFICANT helpers (per-station B1) ----
+    function getNoSigStationMap(){
+      return window.safeStorage ? window.safeStorage.get('occ_report_no_sig_station', {}) : {};
+    }
+    function setNoSigStation(stn, val){
+      var m = getNoSigStationMap();
+      var key = String(stn).trim().toUpperCase();
+      if(val) m[key]=true; else delete m[key];
+      if (window.safeStorage) window.safeStorage.set('occ_report_no_sig_station', m);
+      window.renderReportPreview();
+    }
+    window.getNoSigStationMap = getNoSigStationMap;
+    // keep legacy per-flight key for migration/clear
+    function getNoSigMap(){ return getNoSigStationMap(); }
+
+    function getReportFlightSelectionKey(flights){
+      return (flights || []).map(function(f){ return String(f.rowIdx); }).sort().join(',');
+    }
+    function resetNoSigOnFlightChange(selectedFlights){
+      var nextKey = getReportFlightSelectionKey(selectedFlights);
+      var previousKey = window.reportState.lastFlightSelectionKey;
+      if (previousKey === null && window.safeStorage) previousKey = window.safeStorage.get('occ_report_no_sig_flight_key', null);
+      var changed = previousKey !== null && previousKey !== nextKey;
+      if (changed && window.safeStorage) window.safeStorage.remove('occ_report_no_sig_station');
+      window.reportState.lastFlightSelectionKey = nextKey;
+      if (window.safeStorage) window.safeStorage.set('occ_report_no_sig_flight_key', nextKey);
+      return changed;
+    }
+
+    window.renderReportPreview = function() {
+       const statusDiv = document.getElementById('report-status');
+       const btn = document.getElementById('btn-exec-cbr');
+       const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+       resetNoSigOnFlightChange(selectedFlights);
+       
+         // Get NOTAM analysis count
+        let notamCount = 0;
+        let analysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
+        if (analysis && typeof analysis === 'object') {
+          Object.values(analysis).forEach(arr => { if(Array.isArray(arr)) notamCount += arr.length; });
+        }
+        var noSigStationMap = getNoSigStationMap();
+        // stations from selected flights
+        var stations = [...new Set(selectedFlights.flatMap(function(f){ return [f.DEP,f.ARR,f.ALT,f.ENR1,f.ENR2,f.ENR3].map(function(s){ return s? String(s).trim().toUpperCase():''; }).filter(Boolean); }))];
+        var noSigCount = stations.filter(function(s){ return !!noSigStationMap[s]; }).length;
+
+        // Update Summary Sidebar
+        if (document.getElementById('report-sum-count')) document.getElementById('report-sum-count').innerText = selectedFlights.length;
+        if (document.getElementById('report-sum-notams')) document.getElementById('report-sum-notams').innerText = notamCount + (noSigCount? ' + '+noSigCount+' NO SIG':'');
+        if (document.getElementById('report-sum-flights')) {
+          var box = document.getElementById('report-sum-flights');
+          if(selectedFlights.length===0){
+            box.innerHTML='NONE SELECTED';
+          } else {
+            var html='<div style="margin-bottom:8px;">'+selectedFlights.map(function(f){ return '• '+esc(f.FLIGHT)+' '+esc(f.DEP||'')+'→'+esc(f.ARR||''); }).join('<br>')+'</div>';
+            html+='<div style="font-size:10px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--text-secondary);margin:12px 0 6px;">STATION NO SIGNIFICANT</div>';
+            if(stations.length===0){
+              html+='<div style="font-size:11px;color:var(--text-muted);">No stations</div>';
+            } else {
+              stations.forEach(function(stn){
+                var isNoSig = !!noSigStationMap[stn];
+                html += '<div class="flight-row">'
+                  + '<span class="flight-row-main">'+esc(stn)+'</span>'
+                  + '<label class="flight-row-no-sig'+(isNoSig?' active':'')+'"><input type="checkbox" aria-label="No significant weather for '+esc(stn)+'" data-no-sig-station="'+esc(stn)+'" '+(isNoSig?'checked':'')+'> NO SIG</label>'
+                  + '</div>';
+              });
+            }            box.innerHTML=html;
+            box.querySelectorAll('[data-no-sig-station]').forEach(function(cb){
+              cb.addEventListener('change', function(){ setNoSigStation(cb.getAttribute('data-no-sig-station'), cb.checked); });
+            });
+          }
+        }
+        
+        const sumStatus = document.getElementById('report-sum-status');
+        if (sumStatus) {
+          if (selectedFlights.length === 0) {
+             sumStatus.innerText = 'AWAITING CONTEXT';
+             sumStatus.style.color = 'var(--status-warning)';
+          } else if(noSigCount>0){
+               sumStatus.innerText = 'READY — '+noSigCount+' NO SIG STATION';
+               sumStatus.style.color = 'var(--status-info)';
+          } else {
+               sumStatus.innerText = 'READY TO GENERATE';
+               sumStatus.style.color = 'var(--status-safe)';
+          }
+        }
+
+        // Create a persistent hash based on unique flight row IDs and NOTAM count + NO SIG station
+        const currentHash = selectedFlights.map(f => f.rowIdx).sort().join(',') + `|notams:${notamCount}|nosigSt:${JSON.stringify(noSigStationMap)}`;
+        
+        // IF busy or already showing results for the SAME selection, do NOT reset
+        if (window.reportState.isBusy || (statusDiv.innerHTML.length > 50 && window.reportState.lastHash === currentHash)) {
+            console.log('[REPORT] State persistent: Selection/NOTAMs unchanged or process active.');
+            return;
+        }
+
+       window.reportState.lastHash = currentHash;
+       statusDiv.style.display = 'block';
+       statusDiv.innerHTML = '<div class="terminal-header">AWQ :: BRIEFING ENGINE :: CORE_STABLE_v2.4</div>';
+       
+       if (selectedFlights.length === 0) {
+           btn.disabled = true;
+           btn.innerHTML = `WAITING FOR CONTEXT`;
+           printTerminalLine("CRITICAL: NO FLIGHT DATA DETECTED IN ACTIVE CACHE.", "error");
+           printTerminalLine("INSTRUCTION: SELECT AT LEAST ONE FLIGHT FROM MONITORING BOARD.", "warn");
+       } else {
+           btn.disabled = false;
+           btn.innerHTML = `<svg class="ic ic-sm"><use href="#i-bolt"/></svg> CREATE REPORT`;
+           printTerminalLine(`SYSTEM READY: ${selectedFlights.length} FLIGHTS DETECTED.`, "success");
+           if (noSigCount>0) printTerminalLine(`NO SIG: ${noSigCount} STATION(S) MARKED NO SIGNIFICANT NOTAM.`, "info");
+           if (notamCount > 0) {
+             printTerminalLine(`NOTAM SYNC: ${notamCount} ANALYSIS SELECTIONS IMPORTED.`, "success");
+           } else {
+             printTerminalLine("NOTAM SYNC: NO MANUAL SELECTIONS FOUND IN ANALYSIS DESK.", "warn");
+           }
+           // Info B: actual NOTAM wins if station flagged but a real NOTAM exists
+           if(noSigCount>0 && notamCount>0) printTerminalLine("INFO: B — If a station is NO SIG but a real NOTAM exists for it, the real NOTAM will show.", "info");
+           printTerminalLine("AWAITING OPERATOR CONFIRMATION TO PROCEED...", "info");
+       }
+    };
+
+    window.resetReportEngine = function() {
+      if (window.reportState.isBusy) return;
+      window.reportState.lastHash = "";
+      const statusDiv = document.getElementById('report-status');
+      statusDiv.innerHTML = '<div class="terminal-header">AWQ :: BRIEFING ENGINE :: CORE_STABLE_v2.4</div>';
+      printTerminalLine("MANUAL RESET TRIGGERED. RE-SYNCING WITH MISSION_DB AND NOTAM_ANALYSIS...", "info");
+      setTimeout(() => window.renderReportPreview(), 300);
+    };
+
+    const printTerminalLine = (text, type='info', opts={}) => {
+       const statusDiv = document.getElementById('report-status');
+       const d = new Date();
+       const timeStr = `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}Z`;
+
+       const typeMap = { 'success': 'term-success', 'error': 'term-error', 'warn': 'term-warn', 'info': 'term-info' };
+       const colorClass = typeMap[type] || 'term-info';
+       // Terminal lines are text by default; raw HTML only for internally
+       // constructed, pre-escaped content (opts.allowRawHtml).
+       const body = opts.allowRawHtml ? String(text) : esc(text);
+
+       statusDiv.insertAdjacentHTML('beforeend', `
+         <div class="terminal-line">
+            <span class="terminal-timestamp">[${timeStr}]</span>
+            <span class="terminal-prompt">></span>
+            <span class="${colorClass}">${body}</span>
+         </div>
+       `);
+       statusDiv.scrollTop = statusDiv.scrollHeight;
+    };
+
+    window.compileFinalCbr = function() {
+       const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+       if (selectedFlights.length === 0) return;
+       
+        const btn = document.getElementById('btn-exec-cbr');
+        const statusDiv = document.getElementById('report-status');
+        
+        window.reportState.isBusy = true;
+        btn.disabled = true;
+        btn.innerHTML = `<svg class="ic ic-sm"><use href="#i-bolt"/></svg> GENERATING...`;
+       
+       statusDiv.innerHTML = '<div class="terminal-header">AWQ :: BRIEFING ENGINE :: CORE_STABLE_v2.4</div>';
+       printTerminalLine("PROCESS START: INITIALIZING DYNAMIC COMPILATION...", "info");
+       
+       const uxSteps = [
+         "ESTABLISHING SECURE HANDSHAKE WITH MISSION_DB...",
+         "VALIDATING ROUTE PROFILES AND EQUIPMENT REGISTRY...",
+         "PREPPING DYNAMIC BRIEFING TEMPLATES...",
+         "FETCHING LIVE WEATHER DATA FROM GLOBAL ENDPOINTS...",
+         "CORRELATING NOTAM ANALYTICS WITH FLIGHT WINDOWS...",
+         "INJECTING STRUCTURED DATA INTO BRIEFING CONTEXT..."
+       ];
+       
+       let stepIndex = 0;
+       const statusCycle = setInterval(() => {
+           if (stepIndex < uxSteps.length) {
+               printTerminalLine(uxSteps[stepIndex++], "info");
+           } else {
+               clearInterval(statusCycle);
+               printTerminalLine("WAIT: FINALIZING PACKAGE AND GENERATING ACCESS URL...", "warn");
+           }
+       }, 1200);
+
+        let savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
+        let noSigStationMap = getNoSigStationMap();
+        // Per-station B: warn if station flagged but has selections (actual wins) — not blocking, just info
+        try{
+          var stationsForCheck = [...new Set(selectedFlights.flatMap(function(f){ return [f.DEP,f.ARR,f.ALT,f.ENR1,f.ENR2,f.ENR3].map(function(s){return s? String(s).trim().toUpperCase():'';}).filter(Boolean); }))];
+          var hasWarn=false;
+          stationsForCheck.forEach(function(stn){
+            var isNoSig=!!noSigStationMap[stn];
+            var hasSelForStn = selectedFlights.some(function(f){
+              var uses=[f.DEP,f.ARR,f.ALT,f.ENR1,f.ENR2,f.ENR3].map(function(x){return x? String(x).trim().toUpperCase():'';});
+              return uses.indexOf(stn)!==-1 && (savedNotamAnalysis[f.FLIGHT]||[]).length>0;
+            });
+            if(isNoSig && hasSelForStn) hasWarn=true;
+          });
+          if(hasWarn) printTerminalLine("WARN: Station flagged NO SIG but has selected NOTAMs — actual NOTAM will be shown (B).", "warn");
+        }catch(e){}
+       
+
+       google.script.run
+         .withSuccessHandler(res => {
+             clearInterval(statusCycle);
+              if (res.status === "SUCCESS") {
+                  printTerminalLine(`SUCCESS: ${res.message}`, "success");
+                  const rawUrl = String(res.url || '').trim();
+                  // Only render a link for a well-formed https URL (href injection guard).
+                  if (/^https:\/\/[^\s"'<>]+$/i.test(rawUrl)) {
+                      printTerminalLine(`<a href="${esc(rawUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">[ CLICK HERE TO OPEN GENERATED BRIEFING PACKAGE ]</a>`, "success", { allowRawHtml: true });
+                  } else {
+                      printTerminalLine("PACKAGE GENERATED BUT NO VALID HTTPS URL WAS RETURNED.", "warn");
+                  }
+                  btn.innerHTML = `GENERATE COMPLETE`;
+              } else {
+                  printTerminalLine(`EXCEPTION: ${res.message}`, "error");
+                  btn.disabled = false;
+                  btn.innerHTML = `RETRY GENERATION`;
+              }
+              window.reportState.isBusy = false;
+          })
+          .withFailureHandler(err => { 
+              clearInterval(statusCycle);
+              printTerminalLine(`FATAL ERROR: ${err.message}`, "error");
+              btn.disabled = false;
+              btn.innerHTML = `RETRY GENERATION`;
+              window.reportState.isBusy = false;
+          })
+          .generateBriefingPackage(selectedFlights, savedNotamAnalysis, noSigStationMap);
+    };
+  </script>
+</div>

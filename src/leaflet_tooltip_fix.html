@@ -1,0 +1,71 @@
+  .fir-notam-ui .leaflet-container { font-family: var(--font-mono); }
+  /* Leaflet tooltip - map labels DARK MODE OVERRIDE */
+  [data-theme="dark"] .fir-notam-ui .leaflet-tooltip,
+  [data-theme="dark"] .fir-notam-ui .leaflet-tooltip-content,
+  [data-theme="dark"] .fir-notam-ui .leaflet-tooltip-text {
+    background: var(--bg-panel-raised) !important;
+    border: 1px solid var(--border-medium) !important;
+    color: var(--text-primary) !important;
+    box-shadow: var(--shadow-lift) !important;
+    backdrop-filter: blur(8px) !important;
+  }
+  [data-theme="dark"] .fir-notam-ui .leaflet-tooltip:before {
+    border-top-color: var(--border-medium) !important;
+    border-bottom-color: var(--border-medium) !important;
+    border-left-color: var(--border-medium) !important;
+    border-right-color: var(--border-medium) !important;
+  }
+  /* Leaflet tooltip default (light mode) */
+  .fir-notam-ui .leaflet-tooltip {
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-medium);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lift);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-top:before { border-top-color: var(--border-medium); }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-bottom:before { border-bottom-color: var(--border-medium); }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-left:before { border-left-color: var(--border-medium); }
+  .fir-notam-ui .leaflet-tooltip.leaflet-tooltip-right:before { border-right-color: var(--border-medium); }
+  
+  /* Leaflet popup - detailed NOTAM info DARK MODE OVERRIDE */
+  [data-theme="dark"] .fir-notam-ui .leaflet-popup-content-wrapper,
+  [data-theme="dark"] .fir-notam-ui .leaflet-popup-tip,
+  [data-theme="dark"] .fir-notam-ui .leaflet-popup-close-button {
+    background: var(--bg-panel-raised) !important;
+    border: 1px solid var(--border-medium) !important;
+    box-shadow: var(--shadow-lift) !important;
+  }
+  [data-theme="dark"] .fir-notam-ui .leaflet-popup-content,
+  [data-theme="dark"] .fir-notam-ui .leaflet-popup-close-button {
+    color: var(--text-secondary) !important;
+  }
+  [data-theme="dark"] .fir-notam-ui .leaflet-popup-close-button:hover {
+    background: rgba(255,255,255,0.1) !important;
+  }
+  /* Leaflet popup default (light mode) */
+  .fir-notam-ui .leaflet-popup-content-wrapper {
+    background: var(--bg-panel-raised);
+    color: var(--text-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lift);
+    padding: 0;
+  }
+  .fir-notam-ui .leaflet-popup-content {
+    margin: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+  .fir-notam-ui .leaflet-popup-tip {
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-medium);
+  }
+  @media (max-width: 900px) { .fir-notam-ui .firn-map-wrap { height:340px; } }

@@ -1,0 +1,1127 @@
+﻿<!DOCTYPE html>
+<!-- PREVIEW ONLY â€” live harness for Weather_Warning_Ui.html P0+P1+polish review.
+     Head = shell tokens + GAS stubs + fixture flights. Middle = BYTE COPY of
+     Weather_Warning_Ui.html at backup time. Open via file:// in a browser.
+     Delete after approval. Production file untouched. -->
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview â€” WX P0+P1+Polish (live harness)</title>
+<style>
+  :root{
+    --bg-panel:#FFFFFF; --bg-panel-raised:#FFFFFF; --bg-panel-sunken:#EEF1F5; --bg-panel-alt:#F7F8FA;
+    --border-light:#CBD5E1; --border-subtle:#E2E8F0; --border-medium:#94A3B8;
+    --radius-sm:4px; --radius-md:6px; --radius-lg:10px; --radius-pill:9999px;
+    --accent-primary:#C8102E;
+    --status-safe:#0E7A4B; --status-safe-bg:#E6F4ED;
+    --status-warning:#8A5F0E; --status-warning-bg:#FEF3C7;
+    --status-critical:#C8102E; --status-critical-bg:#FEF0F2;
+    --status-info-bg:#E8F1FA;
+    --text-primary:#0F172A; --text-secondary:#334155; --text-muted:#5B6B7F; --text-disabled:#94A3B8;
+    --shadow-soft:0 1px 3px rgba(15,23,42,.06),0 12px 32px rgba(15,23,42,.07);
+    --shadow-lift:0 8px 30px rgba(15,23,42,.10),0 20px 60px rgba(15,23,42,.12);
+    --font-display:'Arial Narrow',sans-serif; --font-ui:system-ui,-apple-system,sans-serif; --font-mono:Consolas,monospace;
+  }
+  html,body{margin:0;background:#F1F3F6;color:var(--text-primary);font-family:var(--font-ui);}
+  .pv-wrap{max-width:1100px;margin:0 auto;padding:24px 16px 64px;}
+  .pv-bar{background:#fff;border:1px dashed #C8102E;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;line-height:2;}
+  .pv-bar button{margin:2px 6px 2px 0;padding:10px 14px;min-height:36px;cursor:pointer;font-weight:800;font-size:12px;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px;}
+  .kpi-card{background:#fff;border:1px solid var(--border-light);border-radius:6px;padding:8px 12px;display:flex;flex-direction:column;}
+  .kpi-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);}
+  .kpi-val{font-family:var(--font-mono);font-weight:700;font-size:22px;line-height:1;}
+  .kpi-sub{font-size:11px;color:var(--text-muted);}
+  .header-sub{font-size:11px;color:var(--text-muted);font-weight:700;letter-spacing:.06em;}
+  .control-btn{font:inherit;cursor:pointer;border-radius:999px;border:1px solid var(--border-light);background:#fff;}
+  .btn-solid-primary{background:var(--accent-primary);color:#fff;border-color:var(--accent-primary);}
+  .ic{width:1em;height:1em;vertical-align:-.12em;}
+  .action-btn-group{display:flex;gap:8px;}
+</style>
+</head>
+<body><div class="pv-wrap">
+<div class="pv-bar"><strong>PREVIEW HARNESS</strong> â€” live Weather_Warning_Ui.html + stub GAS (AI dimatikan di preview).<br>
+Mode: <button type="button" onclick="window.__wxMode='ok';window.initWeatherDashboard(true)">Reload OK</button><button type="button" onclick="window.__wxMode='fail-config';window.initWeatherDashboard(true)">Simulate config failure</button><button type="button" onclick="window.__wxMode='fail-board';window.initWeatherDashboard(true)">Simulate board failure</button><button type="button" onclick="window.__wxMode='timeout';window.initWeatherDashboard(true)">Simulate hang (tunggu 15â€“20s)</button><br>
+Cek: Tab â†’ Details â†’ Enter (drawer buka/tutup) Â· Reference toggle Â· error + RETRY Â· teks 10â€“12px Â· target â‰¥36px visual/44px efektif Â· lebar 390px.</div>
+<script>
+window.__wxMode = 'ok';
+window.escapeHtml = function(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+window.activeBoardRowIds = [101,102,103,104];
+window.__wxFixtures = [
+  {rowIdx:101, flightNo:'QZ501', depApt:'WADD', arrApt:'WSSS', altApt:'WAJJ', std:'08:00', sta:'11:00',
+   tafDep:'TAF WADD 080500Z 0806/0912 3000 FG SCT010 BECMG 0810/0812 9999 NSW', tafDepTime:'0805',
+   tafArr:'TAF WSSS 080500Z 0806/0912 9999 SCT020 TEMPO 0810/0814 TSRA', tafArrTime:'0805',
+   tafAlt:'TAF WAJJ 080500Z 0806/0912 9999 FEW020', tafAltTime:'0805'},
+  {rowIdx:102, flightNo:'QZ502', depApt:'WADD', arrApt:'WIII', altApt:'WARR', std:'09:00', sta:'10:00',
+   tafDep:'No TAF data for WADD', tafDepTime:'--',
+   tafArr:'TAF WIII 080500Z 0806/0912 9999 SCT018', tafArrTime:'0805',
+   tafAlt:'TAF WARR 080500Z 0806/0912 9999 FEW022', tafAltTime:'0805'},
+  {rowIdx:103, flightNo:'QZ503', depApt:'WIII', arrApt:'WADD', altApt:'WSSS', std:'12:00', sta:'15:00',
+   tafDep:'TAF WIII 081100Z 0812/0918 9999 FEW020', tafDepTime:'0811',
+   tafArr:'TAF WADD 081100Z 0812/0918 9999 SCT016', tafArrTime:'0811',
+   tafAlt:'TAF WSSS 081100Z 0812/0918 9999 FEW018', tafAltTime:'0811'},
+  {rowIdx:104, flightNo:'QZ504', depApt:'WSSS', arrApt:'WADD', altApt:'WAJJ', std:'14:00', sta:'17:00',
+   tafDep:'TAF WSSS 081300Z 0814/0920 9999 SCT020', tafDepTime:'0813',
+   tafArr:'TAF WADD 081300Z 0814/0920 9999 SCT014 TEMPO 0815/0819 2000 +RA BR', tafArrTime:'0813',
+   tafAlt:'TAF WAJJ 081300Z 0814/0920 9999 FEW020', tafAltTime:'0813'}
+];
+function __wxRespond(method, call){
+  var mode = window.__wxMode;
+  function ok(v){ if(call._ok) call._ok(v); }
+  function fail(){ if(call._fail) call._fail(); }
+  if(mode === 'timeout'){ return; }
+  if(mode === 'fail-config' && (method === 'getWxRules' || method === 'getWxManualExcerpt')){ fail(); return; }
+  if(mode === 'fail-board' && method === 'getActiveFlightDataForWarning'){ fail(); return; }
+  if(method === 'getWxRules'){ ok({rules:[{tokenRegex:'FG|SQ|FC',type:'DANGER',chapterRef:'CH 2.1',visMin:null},{tokenRegex:'TS|VCTS',type:'WARNING',chapterRef:'CH 3.4',visMin:null}],useRules:true,source:'preview'}); return; }
+  if(method === 'getWxManualExcerpt'){ ok({sections:[{section:'Thunderstorm',doc:'CASR',items:[{text:'Do not dispatch into known CB',source:'CASR',action:'Hold or reroute'}]}]}); return; }
+  if(method === 'getActiveFlightDataForWarning'){ ok(JSON.stringify(window.__wxFixtures)); return; }
+  if(method === 'wxAiGetCatalog'){ ok({enabled:false,catalog:[]}); return; }
+  if(method === 'analyzeWxWithManual'){ ok({dep:{status:'WARNING',reason:'TSRA TEMPO previews',chapter:'CH 3.4',action:'Monitor'},arr:{status:'CLEAR',reason:'No significant weather',chapter:'',action:''},alt:{status:'CLEAR',reason:'No significant weather',chapter:'',action:''}}); return; }
+  ok(null);
+}
+function __wxChild(){
+  var c = {};
+  var px = new Proxy(c, { get: function(t, p){ if(p in t) return t[p]; return function(){ var self = px; setTimeout(function(){ __wxRespond(p, self); }, 350); return self; }; } });
+  c.withSuccessHandler = function(h){ c._ok = h; return px; };
+  c.withFailureHandler = function(h){ c._fail = h; return px; };
+  return px;
+}
+function __wxMakeRunner(){
+  var root = {};
+  root.withSuccessHandler = function(h){ return __wxChild().withSuccessHandler(h); };
+  root.withFailureHandler = function(h){ return __wxChild().withFailureHandler(h); };
+  return new Proxy(root, { get: function(t, p){ if(p in t) return t[p]; return function(){ var c = __wxChild(); setTimeout(function(){ __wxRespond(p, c); }, 350); return c; }; } });
+}
+window.google = { script: { run: __wxMakeRunner() } };
+</script>
+
+<!-- 
+  Weather_Warning_Ui.html
+  Vanilla JS version for integration into DISPATCH IO.
+-->
+<div id="view-weather" class="view-section">
+  <style>
+    /* fonts loaded via Index.html preconnect */
+    /* a11y: local focus ring (global lives in Index.html shell) */
+    #view-weather button:focus-visible, #view-weather [role="button"]:focus-visible, #view-weather select:focus-visible, #view-weather input:focus-visible, #view-weather a:focus-visible { outline:3px solid var(--accent-primary); outline-offset:2px; }
+    .weather-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .weather-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      padding: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: border-color 160ms ease-out, box-shadow 160ms ease-out, transform 160ms ease-out, background 160ms ease-out;
+    }
+    @media (hover: hover) and (pointer: fine) {
+      .weather-card:hover {
+        background: var(--bg-panel-raised);
+        border-color: var(--accent-primary);
+        box-shadow: 0 8px 24px rgba(200, 16, 46, 0.14);
+      }
+    }
+    
+    /* Fase 2: header + 3-lane (ganti grid 5-kolom linier yang sesak) */
+    .weather-card-main {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: stretch;
+      padding: 0;
+    }
+    .wx-card-head {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      grid-column: 1 / -1;
+    }
+    .wx-head-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .wx-pill {
+      font-size: 12px; font-weight: 800; letter-spacing: 0.06em;
+      padding: 3px 10px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap;
+    }
+    .wx-pill-danger { color: var(--status-critical); border-color: var(--status-critical); background: var(--status-critical-bg); }
+    .wx-pill-warning { color: var(--status-warning); border-color: var(--status-warning); background: var(--status-warning-bg); }
+    .wx-pill-clear { color: var(--status-safe); border-color: var(--status-safe); background: var(--status-safe-bg); }
+    .wx-pill-nodata { color: var(--text-muted); border-color: var(--border-medium); background: var(--bg-panel-sunken); border-style: dashed; }
+
+    .flight-info-group {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .weather-flight-no {
+      font-weight: 900;
+      font-size: 24px;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+    .weather-route {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      font-family: var(--font-mono);
+    }
+
+    .weather-point {
+      padding: 14px 18px;
+      border-radius: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 0;
+      min-width: 0;
+      border-left: 4px solid var(--border-light);
+    }
+    .weather-point + .weather-point { border-left: 1px solid var(--border-subtle); }
+    .weather-point.status-danger { border-left: 4px solid var(--status-critical); }
+    .weather-point.status-warning { border-left: 4px solid var(--status-warning); }
+    .weather-point.status-clear { border-left: 4px solid var(--status-safe); }
+    @media (max-width: 900px) {
+      .weather-card-main { grid-template-columns: minmax(0, 1fr); }
+      .weather-point + .weather-point { border-top: 1px solid var(--border-subtle); }
+    }
+
+    .point-label {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      opacity: 0.7;
+    }
+    .point-val {
+      font-family: var(--font-mono);
+      font-weight: 900;
+      font-size: 18px;
+    }
+    .point-status {
+      font-size: 10px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      text-transform: uppercase;
+    }
+
+    /* Modern Status Colors */
+    .status-clear { background: var(--status-safe-bg); color: var(--status-safe); border: 1px solid var(--status-safe); border-left: 3px solid var(--status-safe); }
+    .status-warning { background: var(--status-warning-bg); color: var(--status-warning); border: 1px solid var(--status-warning); border-left: 3px solid var(--status-warning); }
+    .status-danger { background: var(--status-critical-bg); color: var(--status-critical); border: 1px solid var(--status-critical); border-left: 3px solid var(--status-critical); }
+    .status-nodata { background: var(--bg-panel-sunken); color: var(--text-muted); border: 1px dashed var(--border-medium); border-left: 3px solid var(--border-medium); }
+
+    .taf-details-btn {
+      background: var(--text-primary);
+      color: var(--bg-panel);
+      border: none;
+      padding: 10px 18px;
+      min-height: 36px;
+      position: relative;
+      border-radius: var(--radius-sm);
+      font-weight: 900;
+      font-size: 12px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: transform 120ms ease-out, background 160ms ease-out, color 160ms ease-out;
+    }
+    .taf-details-btn::after { content: ''; position: absolute; inset: -6px; }
+    .taf-details-btn:hover {
+      background: var(--accent-primary);
+      color: white;
+    }
+    .taf-details-btn:active { transform: scale(0.97); }
+
+    /* Fase 3: accordion halus via grid-rows (pengganti display:none instan) */
+    .wx-drawer-wrap {
+      display: grid;
+      grid-template-rows: 0fr;
+      opacity: 0.35;
+      visibility: hidden;
+      transition: grid-template-rows 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms ease-out, visibility 200ms ease-out;
+    }
+    .wx-drawer-wrap.open { grid-template-rows: 1fr; opacity: 1; visibility: visible; }
+    .wx-drawer-wrap:not(.open) { pointer-events: none; }
+    .wx-drawer-inner { overflow: hidden; min-height: 0; }
+    .taf-drawer {
+      background: var(--bg-panel-sunken);
+      border-top: 1px solid var(--border-subtle);
+      padding: 16px 24px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    /* Fase 3: entrance stagger + skeleton shimmer */
+    @keyframes wx-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes wx-shimmer { to { background-position: -200% 0; } }
+    @keyframes wx-fade { from { opacity: 0; } to { opacity: 1; } }
+    .weather-card.animate-in { animation: wx-rise 320ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+    .wx-skel-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      padding: 16px 20px;
+    }
+    .wx-skel-bar {
+      height: 12px; border-radius: 6px;
+      background: linear-gradient(90deg, var(--bg-panel-sunken) 25%, var(--border-light) 50%, var(--bg-panel-sunken) 75%);
+      background-size: 200% 100%;
+      animation: wx-shimmer 1.2s linear infinite;
+    }
+    .wx-ai-result { transition: opacity 200ms ease-out; }
+    #wx-manual-body { animation: wx-fade 200ms ease-out; }
+
+    .taf-sub-block {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .taf-sub-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      font-weight: 900;
+      color: var(--accent-primary);
+      letter-spacing: 0.1em;
+    }
+
+    .taf-text {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-primary);
+      background: var(--bg-panel-sunken);
+      padding: 10px;
+      border-radius: var(--radius-sm);
+      line-height: 1.5;
+      min-height: 60px;
+      border-left: 2px solid var(--border-light);
+    }
+    .taf-text mark {
+      background: #FDE68A;
+      color: #1A1206;
+      padding: 0 3px;
+      border-radius: 3px;
+      border: 1px solid transparent;
+    }
+    /* Fase 1: chip pasal diwarnai mengikuti severity lane induk */
+    .weather-point.status-danger div span,
+    .status-danger .wx-ref-chip { border-color: rgba(255, 93, 93, 0.55) !important; color: var(--status-critical) !important; }
+    .weather-point.status-warning div span,
+    .status-warning .wx-ref-chip { border-color: rgba(255, 178, 36, 0.55) !important; color: var(--status-warning) !important; }
+    .wx-trigger {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-primary);
+      margin-top: 6px;
+      overflow-wrap: anywhere;
+    }
+    .wx-ai-row {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: baseline;
+      padding: 7px 0;
+      border-top: 1px dashed var(--border-light);
+    }
+    .wx-ai-row:first-child { border-top: 0; }
+    .wx-ai-leg { font-size: 12px; font-weight: 800; letter-spacing: 0.06em; }
+    .wx-ai-reason { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
+    .wx-ai-chapter { font-size: 11px; color: var(--text-muted); text-align: right; }
+    @media (max-width: 720px) {
+      .wx-ai-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+      .wx-ai-chapter { text-align: left; }
+      .taf-drawer { grid-template-columns: minmax(0, 1fr); }
+    }
+    /* WX theme: ikut shell (Titanium Light / Ethereal Dark) — tanpa override hardcoded.
+       Kartu/drawer/panel memakai var(--bg-panel) dkk dari Index.html sehingga
+       toggle #theme-toggle otomatis berlaku. Hanya tweak per-tema yang butuh
+       nilai eksplisit didefinisikan via [data-theme="dark"] di bawah. */
+    #view-weather .weather-card { box-shadow: var(--shadow-soft); }
+    #view-weather .weather-card:hover { border-color: var(--accent-primary); box-shadow: var(--shadow-lift); }
+    #view-weather .taf-details-btn:disabled { opacity: 0.55; cursor: wait; }
+    #view-weather .taf-text mark { background: #FEF3C7; color: #92400E; border: 1px solid #F59E0B; }
+    #view-weather .wx-trigger { color: var(--text-secondary); }
+    #view-weather .wx-ai-chapter { color: var(--text-secondary); }
+    #view-weather .wx-ai-action { color: var(--accent-primary); font-weight: 700; }
+    #view-weather select { background: var(--bg-panel-sunken); color: var(--text-primary); min-height: 36px; }
+    /* AI REVIEW v2.1 — badge semantik, ganti semua-merah. Override render saja, engine tetap.
+       Semua var(--*) Titanium jadi otomatis ikut light (:root) + dark ([data-theme="dark"]). */
+    #view-weather .wx-ai-result { display:grid; gap:0; }
+    #view-weather .wx-ai-head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;
+      font-family:Consolas,monospace; font-size:11px; font-weight:700; line-height:1; margin:0 12px 6px;
+      color:var(--text-primary); }
+    #view-weather .wx-ai-model-badge { display:inline-flex; align-items:center; gap:6px;
+      font-size:11px; font-weight:800; letter-spacing:.06em;
+      border:1px solid var(--border-light); border-radius:999px; padding:2px 10px;
+      background:var(--bg-panel-sunken); color:var(--text-primary); white-space:nowrap; }
+    #view-weather .wx-ai-model-badge .vendor { color:var(--accent-primary); }
+    #view-weather .wx-ai-row { display:grid; grid-template-columns:150px minmax(0,1fr) 230px; gap:0;
+      border-top:1px solid var(--border-subtle); border-left:4px solid var(--border-light);
+      padding:0; align-items:stretch; }
+    #view-weather .wx-ai-row.st-danger { border-left-color:var(--status-critical); }
+    #view-weather .wx-ai-row.st-warning { border-left-color:var(--status-warning); }
+    #view-weather .wx-ai-row.st-ok { border-left-color:var(--status-safe); }
+    #view-weather .wx-ai-leg { padding:10px 12px; display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+    #view-weather .wx-ai-badge { display:inline-flex; align-items:center; gap:6px;
+      font-size:11px; font-weight:900; letter-spacing:.06em; white-space:nowrap;
+      padding:3px 10px; border-radius:999px; border:1px solid transparent; }
+    #view-weather .wx-ai-badge svg { width:11px; height:11px; flex:none; }
+    #view-weather .b-danger { color:var(--status-critical); border-color:var(--status-critical); background:var(--status-critical-bg); }
+    #view-weather .b-warning { color:var(--status-warning); border-color:var(--status-warning); background:var(--status-warning-bg); }
+    #view-weather .b-ok { color:var(--status-safe); border-color:var(--status-safe); background:var(--status-safe-bg); }
+    #view-weather .b-nodata { color:var(--text-muted); border-color:var(--border-medium); background:var(--bg-panel-sunken); border-style:dashed; }
+    #view-weather .wx-ai-phase { font-size:10px; font-weight:800; letter-spacing:.08em; color:var(--text-muted); }
+    #view-weather .wx-ai-reason { padding:10px 14px; min-width:0;
+      border-left:1px solid var(--border-subtle); border-right:1px solid var(--border-subtle);
+      font-family:var(--font-mono); font-size:12px; color:var(--text-primary); overflow-wrap:anywhere; }
+    #view-weather .wx-ai-action { display:block; margin-top:3px; font-family:var(--font-ui); font-size:12px; font-weight:700; }
+    #view-weather .wx-ai-action::before { content:"→ "; font-weight:800; }
+    #view-weather .st-danger .wx-ai-action { color:var(--status-critical); }
+    #view-weather .st-warning .wx-ai-action { color:var(--status-warning); }
+    #view-weather .st-ok .wx-ai-action { color:var(--status-safe); }
+    #view-weather .wx-ai-chapter { padding:10px 12px; display:flex; align-items:flex-start; justify-content:flex-end; }
+    #view-weather .wx-ai-src { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--text-muted);
+      border:1px solid var(--border-light); border-radius:999px; padding:8px 12px; max-width:100%;
+      background:transparent; font-family:inherit; cursor:pointer; min-height:36px; position:relative; }
+    #view-weather .wx-ai-src::after { content:''; position:absolute; inset:-4px; }
+    #view-weather .wx-ai-src:hover { border-color:var(--accent-primary); color:var(--accent-primary); }
+    #view-weather .wx-ai-src svg { width:11px; height:11px; flex:none; }
+    #view-weather .wx-ai-src span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* v2.2: drawer select per kartu (shortcut ke master #wx-ai-model). */
+    #view-weather .wx-ai-head select.wx-ai-model-sel { font-family:Consolas,monospace; font-size:11px; font-weight:700;
+      color:var(--text-primary); background:var(--bg-panel); border:1px solid var(--border-light); border-radius:6px;
+      padding:8px 10px; min-height:36px; max-width:240px; cursor:pointer; }
+    #view-weather .wx-ai-head select.wx-ai-model-sel:hover { border-color:var(--accent-primary); }
+    #view-weather .wx-ai-head .wxv-cap { font-size:10px; font-weight:800; letter-spacing:.06em;
+      color:var(--text-muted); white-space:nowrap; }
+    @media (max-width:720px) {
+      #view-weather .wx-ai-row { grid-template-columns:minmax(0,1fr); }
+      #view-weather .wx-ai-reason { border-left:none; border-right:none; border-top:1px solid var(--border-subtle); border-bottom:1px solid var(--border-subtle); }
+      #view-weather .wx-ai-chapter { justify-content:flex-start; }
+      #view-weather .wx-ai-src span { white-space:normal; }
+    }
+    /* Night-ops tweak: hanya saat shell dark — mark lembut, tombol outline cyan, glow gelap. */
+    [data-theme="dark"] #view-weather .weather-card { box-shadow: 0 0 0 1px #16294A, 0 12px 32px rgba(0, 0, 0, 0.45); }
+    [data-theme="dark"] #view-weather .weather-card:hover { border-color: var(--accent-primary); box-shadow: 0 0 0 1px var(--accent-primary), 0 12px 32px rgba(0, 0, 0, 0.5); }
+    [data-theme="dark"] #view-weather .taf-details-btn { background: transparent; border: 1px solid var(--accent-primary); color: var(--accent-primary); }
+    [data-theme="dark"] #view-weather .taf-details-btn:hover { background: var(--accent-primary); color: #04121F; }
+    [data-theme="dark"] #view-weather .taf-text mark { background: rgba(255, 178, 36, 0.25); color: #FFD480; border: 1px solid rgba(255, 178, 36, 0.4); }
+    /* Fase 1: hormati pengguna yang mengurangi gerak + cegah hover lengket di sentuh */
+    @media (prefers-reduced-motion: reduce) {
+      #view-weather .weather-card, #view-weather .taf-details-btn,
+      #view-weather .wx-drawer-wrap, #view-weather .wx-skel-bar,
+      #view-weather .weather-card.animate-in { transition: none; animation: none; opacity: 1; transform: none; }
+    }
+  </style>
+
+  <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 24px;">
+    <div>
+      <div style="color: var(--accent-primary); font-weight: 900; font-size: 32px; letter-spacing: -0.02em;">WEATHER <span style="color: var(--text-primary); opacity: 0.9;">WARNING</span></div>
+      <div id="weather-last-update" class="header-sub" role="status" aria-live="polite">ACTIVE FLIGHT WATCH (UTC OPERATIONS) • LAST UPDATE: --:--:-- Z</div>
+    </div>
+    <div class="action-btn-group">
+      <button class="control-btn btn-solid-primary" style="padding: 10px 20px;" onclick="window.initWeatherDashboard(true)"><svg class="ic ic-sm"><use href="#i-sync"/></svg> REFRESH ENGINE</button>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card accent"><span class="kpi-label">Flights Watched</span><span class="kpi-val" id="wx-kpi-total">0</span><span class="kpi-sub">active on board</span></div>
+    <div class="kpi-card crit"><span class="kpi-label">Restricted</span><span class="kpi-val" id="wx-kpi-danger">0</span><span class="kpi-sub">visibility / severe</span></div>
+    <div class="kpi-card warn"><span class="kpi-label">Monitor</span><span class="kpi-val" id="wx-kpi-warn">0</span><span class="kpi-sub">ts / reduced</span></div>
+    <div class="kpi-card safe"><span class="kpi-label">Operational</span><span class="kpi-val" id="wx-kpi-clear">0</span><span class="kpi-sub">no impact</span></div>
+    <div class="kpi-card"><span class="kpi-label">No TAF</span><span class="kpi-val" id="wx-kpi-nodata">0</span><span class="kpi-sub">unverified — check source</span></div>
+  </div>
+
+  <div id="wx-ai-bar" style="margin:12px 0;display:flex;align-items:center;gap:8px;font-size:12px;">
+    <label for="wx-ai-model" style="font-weight:800;opacity:.75;">AI MODEL</label>
+    <select id="wx-ai-model" style="font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--border-light);">
+      <option value="">Auto</option>
+      <option value='{"provider":"gemini","model":"gemini-3.5-flash-lite"}'>Gemini · 3.5-flash-lite</option>
+      <option value='{"provider":"custom","model":"kl/deepseek-v3.2"}'>CIZ-AI · deepseek-v3.2</option>
+      <option value='{"provider":"custom","model":"kl/hy3"}'>CIZ-AI · hy3</option>
+      <option value='{"provider":"custom","model":"kl/gemini-3.8-flash"}'>CIZ-AI · gemini-3.8-flash</option>
+      <option value='{"provider":"custom","model":"kl/gemini-3.1-pro"}'>CIZ-AI · gemini-3.1-pro</option>
+    </select>
+  </div>
+  <div id="weather-container" class="weather-grid">
+    <div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">
+      INITIALIZING WEATHER ENGINE...
+    </div>
+  </div>
+
+  <div id="wx-manual-panel" data-open="0" style="margin:12px 0;padding:12px 16px;border:1px solid var(--border-light);border-radius:12px;font-size:12px;color:var(--text-primary);">
+    <span style="opacity:.65">[ REFERENCE: loading... ]</span>
+  </div>
+
+  <script>
+    (function() {
+      window.weatherDataCache = null;
+      window.weatherLastUpdate = null;
+      window.wxRules = null;   // {rules,useRules,source} from getWxRules()
+      window.wxManual = null;  // {sections,source} from getWxManualExcerpt()
+      window.wxRefs = [];      // CHAPTER_REFs collected by the last evaluateWeather call
+      window.wxAiResults = {}; // rowIdx → AI payload (survives tab switches + re-renders)
+      window.wxAiPending = {}; // rowIdx → true while a request is in flight
+
+      function evaluateWeather(icao, startHour, rawTaf) {
+        window.wxTriggerBlock = '';
+        // Never fabricate a verdict when TAF is unavailable — report NO DATA.
+        if (!rawTaf || String(rawTaf).includes("No TAF data")) {
+          return 'NO_DATA';
+        }
+
+        // 1. Prepare Text
+        let taf = rawTaf.toUpperCase();
+        const icaoPattern = new RegExp('\\b' + icao.toUpperCase() + '\\b', 'g');
+        taf = taf.replace('TAF', '').replace(icaoPattern, '');
+
+        // Helper: Get Visibility (4 digits)
+        const getVis = (txt) => {
+          // Filter out validity periods (e.g. 06/12) and timestamps (e.g. 0500Z) 
+          // to avoid false positives for visibility check
+          const clean = txt.replace(/\b\d{4}\/\d{4}\b/g, '').replace(/\b\d{6}Z\b/g, '');
+          const match = clean.match(/\b(\d{4})\b/);
+          return match ? parseInt(match[1]) : 9999;
+        };
+
+        // WX S2: server-driven rules. Active only when USE_WX_RULES is on AND
+        // WX_RULES is non-empty; otherwise legacy regex below (verbatim).
+        const wxActiveRules = () => {
+          const w = window.wxRules;
+          return (w && w.useRules && w.rules && w.rules.length) ? w.rules : null;
+        };
+        const wxRuleFires = (rule, txt, vis) => {
+          let re; try { re = new RegExp(rule.tokenRegex); } catch (e) { return false; }
+          if (!re.test(txt)) return false;
+          if (rule.visMin !== null && rule.visMin !== undefined && vis > rule.visMin) return false;
+          return true;
+        };
+        // Classify one uppercased block. Returns {status, refs} on the rules path,
+        // null when legacy fallback applies. Refs feed the CHAPTER_REF chips.
+        const wxMatchBlock = (txt) => {
+          const rules = wxActiveRules();
+          if (!rules) return null;
+          const vis = getVis(txt);
+          let warned = false;
+          const refs = [];
+          for (const r of rules) {
+            if (wxRuleFires(r, txt, vis)) {
+              if (r.type === 'DANGER') return { status: 'DANGER', refs: r.chapterRef ? [r.chapterRef] : [] };
+              if (r.type === 'WARNING') {
+                warned = true;
+                if (r.chapterRef && !refs.includes(r.chapterRef)) refs.push(r.chapterRef);
+              }
+            }
+          }
+          return warned ? { status: 'WARNING', refs } : { status: 'CLEAR', refs: [] };
+        };
+        // Categorization Rules (legacy fallback preserved verbatim)
+        const wxLegacyDanger = (txt) => {
+          if (getVis(txt) <= 3000) return true; // Visibility Restricted
+          return /FG|SQ|FC|\+RA/.test(txt);    // Severe Weather
+        };
+        const wxLegacyWarning = (txt) => /TS|RA|DZ|SH|HZ|BR|VCTS/.test(txt); // TSRA moved to Warning
+        const isDanger = (txt) => {
+          const m = wxMatchBlock(txt);
+          if (m) return m.status === 'DANGER';
+          return wxLegacyDanger(txt);
+        };
+        const isWarning = (txt) => {
+          const m = wxMatchBlock(txt);
+          if (m) return m.status === 'WARNING';
+          return wxLegacyWarning(txt);
+        };
+
+        // 2. Split into blocks (S2: rule verdicts carry CHAPTER_REFs; legacy fallback keeps refs empty)
+        const classify = (txt) => {
+          const m = wxMatchBlock(txt);
+          if (m) return m;
+          if (wxLegacyDanger(txt)) return { status: 'DANGER', refs: [] };
+          if (wxLegacyWarning(txt)) return { status: 'WARNING', refs: [] };
+          return { status: 'CLEAR', refs: [] };
+        };
+        const mergeRefs = (dst, src) => { (src || []).forEach(r => { if (r && !dst.includes(r)) dst.push(r); }); return dst; };
+        const parts = taf.split(/\s+(?=TEMPO|BECMG|FM|PROB|INTER)/);
+        window.wxRefs = [];
+        const baseM = classify(parts[0]);
+        let baseStatus = baseM.status;
+        mergeRefs(window.wxRefs, baseM.refs);
+        if (baseM.status === 'DANGER' || baseM.status === 'WARNING') window.wxTriggerBlock = parts[0];
+
+        const flightHour = parseInt(startHour);
+        let worstStatus = baseStatus;
+
+        // 3. Analyze change blocks
+        for (let i = 1; i < parts.length; i++) {
+          const block = parts[i];
+          const timeMatch = block.match(/(\d{2})(\d{2})\/(\d{2})(\d{2})/);
+          
+          let isActive = false;
+          let isPermanent = block.includes('BECMG') || block.includes('FM');
+
+          if (timeMatch) {
+            const startH = parseInt(timeMatch[2]);
+            const endH = parseInt(timeMatch[4]);
+            
+            if (startH <= endH) {
+              // Inclusive window for safety (e.g. 08/12 covers hour 12)
+              if (flightHour >= startH && flightHour <= endH) isActive = true;
+              // Persistence for BECMG/FM
+              if (isPermanent && flightHour > endH) isActive = true;
+            } else {
+              // Over midnight
+              if (flightHour >= startH || flightHour <= endH) isActive = true;
+              if (isPermanent && flightHour > endH && flightHour < startH) isActive = true;
+            }
+          } else if (block.includes('FM')) {
+            const fmMatch = block.match(/FM(\d{2})(\d{2})(\d{2})/);
+            if (fmMatch && flightHour >= parseInt(fmMatch[2])) isActive = true;
+          }
+
+          if (isActive) {
+            const cm = classify(block);
+            if (cm.status === 'DANGER') { mergeRefs(window.wxRefs, cm.refs); if (!window.wxTriggerBlock) window.wxTriggerBlock = block; return 'DANGER'; } // Exit early if Restricted
+            if (cm.status === 'WARNING') { worstStatus = 'WARNING'; mergeRefs(window.wxRefs, cm.refs); if (!window.wxTriggerBlock) window.wxTriggerBlock = block; }
+          }
+        }
+
+        return worstStatus;
+      }
+
+      function getStatusClass(status) {
+        if (status === 'DANGER') return 'status-danger';
+        if (status === 'WARNING') return 'status-warning';
+        if (status === 'NO_DATA') return 'status-nodata';
+        return 'status-clear';
+      }
+
+      function getStatusLabel(status) {
+        if (status === 'DANGER') return '<svg class="ic ic-sm"><use href="#i-prohibit"/></svg> RESTRICTED';
+        if (status === 'WARNING') return '<svg class="ic ic-sm"><use href="#i-warn"/></svg> MONITOR';
+        if (status === 'NO_DATA') return '<svg class="ic ic-sm"><use href="#i-alert"/></svg> NO TAF DATA';
+        return '<svg class="ic ic-sm"><use href="#i-check"/></svg> OPERATIONAL';
+      }
+
+      function formatTafText(text) {
+        if (!text || text.includes("No TAF data")) return window.escapeHtml ? window.escapeHtml(text) : (text || '');
+        const escaped = window.escapeHtml ? window.escapeHtml(text) : String(text);
+        return escaped
+          .replace(/\s+(BECMG|FM|TEMPO|PROB|INTER)/g, '<br>&nbsp;&nbsp;$1')
+          .replace(/(FG|SQ|FC|\+RA|VCTS|TS|\bRA\b|\bDZ\b|\bSH\b|\bHZ\b|\bBR\b)/g, '<mark>$1</mark>');
+      }
+
+      // S2: CHAPTER_REF chips collected from firing WX rules (empty on legacy fallback).
+      function wxRefChips(refs) {
+        if (!refs || !refs.length) return '';
+        const e2 = window.escapeHtml;
+        return '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + refs.map(r =>
+          '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid var(--border-light);color:var(--text-muted);">' + (e2 ? e2(r) : r) + '</span>'
+        ).join('') + '</div>';
+      }
+      // Preview port: short firing span for the lane (first ~6 tokens of the
+      // recorded block, escaped). Empty when CLEAR/NO_DATA. Verdict stays engine-owned.
+      function wxShortTrigger(block) {
+        if (!block) return '';
+        const e6 = window.escapeHtml;
+        const toks = String(block).split(/\s+/).filter(Boolean).slice(0, 6).join(' ');
+        return e6 ? e6(toks) : toks;
+      }
+
+      // Fase 2 AI: per-flight Gemini review. AI text is untrusted — always escaped.
+      // Transport/API failure collapses to NO_DATA (fail-closed, never blank).
+      // v2.1: badge semantik + 3 kolom Status|Detail|Source. Urutan DEP/ARR/ALT dipertahankan.
+      window.wxAiLegHtml = function(label, leg) {
+        const e4 = window.escapeHtml;
+        const esc = (s) => e4 ? e4(s) : s;
+        const st = (leg && leg.status) || 'NO_DATA';
+        const rs = (leg && leg.reason) || '';
+        const ch = (leg && leg.chapter) || '';
+        const ac = (leg && leg.action) || '';
+        const rowCls = st === 'DANGER' ? 'st-danger' : st === 'WARNING' ? 'st-warning' : st === 'CLEAR' ? 'st-ok' : 'st-nodata';
+        const bCls = st === 'DANGER' ? 'b-danger' : st === 'WARNING' ? 'b-warning' : st === 'CLEAR' ? 'b-ok' : 'b-nodata';
+        const icon = st === 'DANGER'
+          ? '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1 15 14H1L8 1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="12" r=".9" fill="currentColor"/></svg>'
+          : st === 'WARNING'
+          ? '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 4.8V8l2.2 1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+          : st === 'CLEAR'
+          ? '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="m5.5 8.2 1.8 1.8 3.2-3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+          : '';
+        const phase = label === 'DEP' ? 'AI DEP · ORIGIN' : label === 'ARR' ? 'AI ARR · DEST' : 'AI ALT · ALTN';
+        return '<div class="wx-ai-row ' + rowCls + '"><div class="wx-ai-leg"><span class="wx-ai-badge ' + bCls + '">' + icon + esc(st) + '</span>'
+          + '<span class="wx-ai-phase">' + esc(phase) + '</span></div>'
+          + '<div class="wx-ai-reason">' + esc(rs) + (ac ? '<span class="wx-ai-action">' + esc(ac) + '</span>' : '') + '</div>'
+          + '<div class="wx-ai-chapter">' + (ch ? '<button class="wx-ai-src" type="button" title="' + esc(ch) + '"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>' + esc(ch) + '</span></button>' : '<span></span>') + '</div></div>';
+      }
+      // Dropdown choice → per-call override; empty = follow server properties.
+      window.wxAiChoice = function() {
+        const sel = document.getElementById('wx-ai-model');
+        if (!sel || !sel.value) return {};
+        try { return JSON.parse(sel.value); } catch (e) { return {}; }
+      };
+      // Fase 2d: katalog dari Settings (wxAiGetCatalog), sekali per sesi kecuali force.
+      // Dropdown hanya berisi enabled:true; master OFF → bar + tombol AI disembunyikan.
+      window.wxAiCatalogLoad = function(force) {
+        if (window.wxAiCatalog && !force) { window.wxAiCatalogApply(); return; }
+        if (typeof google==='undefined' || !google.script || !google.script.run) return; // preview: biarkan hardcode
+        google.script.run.withSuccessHandler(function(res){
+          try {
+            if (res && res.ok) { window.wxAiCatalog = { enabled: !!res.enabled, catalog: res.catalog || [] }; }
+            else { window.wxAiCatalog = { enabled: true, catalog: [] }; }
+          } catch (e) { window.wxAiCatalog = { enabled: true, catalog: [] }; }
+          window.wxAiCatalogApply();
+        }).wxAiGetCatalog();
+      };
+      window.wxAiCatalogApply = function(){
+        const cat = window.wxAiCatalog || { enabled: true, catalog: [] };
+        const sel = document.getElementById('wx-ai-model');
+        const bar = document.getElementById('wx-ai-bar');
+        const e5 = window.escapeHtml;
+        if (sel && cat.catalog && cat.catalog.length) {
+          const cur = sel.value;
+          const opts = ['<option value="">Auto</option>'].concat(cat.catalog.filter(function(m){ return m.enabled !== false; }).map(function(m){
+            const v = JSON.stringify({ provider: m.provider, model: m.model }).replace(/'/g, '&#39;');
+            return '<option value=\'' + v + '\'>' + (e5 ? e5(m.label) : m.label) + '</option>';
+          }));
+          sel.innerHTML = opts.join('');
+          try { sel.value = cur; } catch (e) {}
+          if (sel.selectedIndex === -1) sel.selectedIndex = 0;
+        }
+        const on = cat.enabled !== false;
+        window.wxAiEnabled = on;
+        if (bar) bar.style.display = on ? '' : 'none';
+        document.querySelectorAll('.taf-details-btn[onclick*="wxAiReview"]').forEach(function(b){ b.style.display = on ? '' : 'none'; });
+        if (!on) document.querySelectorAll('.wx-ai-result').forEach(function(bx){ bx.style.display = 'none'; });
+        window.wxAiDrawerSync();
+      };
+      // v2.2: drawer select per kartu (shortcut ke master #wx-ai-model).
+      // Options selalu clone dari master (katalog server) — tidak hardcode.
+      window.wxAiDrawerModel = function(sel, rowIdx) {
+        const master = document.getElementById('wx-ai-model');
+        if (master && sel) { try { master.value = sel.value; } catch { /* ignore */ } }
+        window.wxAiDrawerSync();
+        const card = sel ? sel.closest('.weather-card') : null;
+        const btn = card ? card.querySelector('.taf-details-btn[onclick*="wxAiReview"]') : null;
+        if (btn) window.wxAiReview(btn, rowIdx);
+      };
+      window.wxAiDrawerSync = function() {
+        const master = document.getElementById('wx-ai-model');
+        if (!master) return;
+        document.querySelectorAll('#view-weather select.wx-ai-model-sel').forEach(function(sel) {
+          if (sel.options.length !== master.options.length) sel.innerHTML = master.innerHTML;
+          try { sel.value = master.value; } catch { /* ignore */ }
+          if (sel.selectedIndex === -1) sel.selectedIndex = 0;
+        });
+      };
+      window.wxAiHeader = function(r, rowIdx) {
+        const master = document.getElementById('wx-ai-model');
+        const opts = master ? master.innerHTML : '<option value="">Auto</option>';
+        const rid = (rowIdx === undefined || rowIdx === null) ? -1 : rowIdx;
+        return '<div class="wx-ai-head"><span class="wxv-cap">AI REVIEW · MODEL</span>'
+          + '<select class="wx-ai-model-sel" aria-label="Pilih model AI" onchange="window.wxAiDrawerModel(this, ' + rid + ')">' + opts + '</select></div>';
+      };
+       window.wxAiCached = function(rowIdx) {
+         const r = (window.wxAiResults || {})[rowIdx];
+         // Pertahankan status pending saat render ulang (mis. kembali dari tab lain):
+         // tampilkan lagi indikator ANALYZING agar tidak terlihat "berhenti".
+         if (!r) {
+           if ((window.wxAiPending || {})[rowIdx]) return '<div class="wx-ai-result" style="display:grid;"><div style="font-size:12px;opacity:.65;">ANALYZING... (you may switch tabs, result will be saved)</div></div>';
+           return '<div class="wx-ai-result" style="display:none;"></div>';
+         }
+        return '<div class="wx-ai-result" style="display:grid;">' + window.wxAiHeader(r, rowIdx)
+          + window.wxAiLegHtml('DEP', r.dep) + window.wxAiLegHtml('ARR', r.arr) + window.wxAiLegHtml('ALT', r.alt) + '</div>';
+      };
+      window.wxAiReview = function(btn, rowIdx) {
+        if (window.wxAiEnabled === false) {
+          const cardX = btn ? btn.closest('.weather-card') : null;
+          const boxX = cardX ? cardX.querySelector('.wx-ai-result') : null;
+          if (boxX) { boxX.style.display = 'grid'; boxX.innerHTML = '<div style="font-size:12px;opacity:.65;">AI disabled by admin (Settings → WX AI Models).</div>'; }
+          return;
+        }
+        window.wxAiPending = window.wxAiPending || {};
+        window.wxAiResults = window.wxAiResults || {};
+        const card = btn ? btn.closest('.weather-card') : null;
+        const box = card ? card.querySelector('.wx-ai-result') : null;
+         const f = (window.weatherDataCache || []).find(x => x.rowIdx === rowIdx);
+         if (!f) return; // unknown flight
+         if (window.wxAiPending[rowIdx]) {
+           // Beri tahu pengguna, jangan tolak diam-diam (terlihat "berhenti").
+           const card0 = btn ? btn.closest('.weather-card') : null;
+           const box0 = card0 ? card0.querySelector('.wx-ai-result') : null;
+           if (box0) {
+             box0.style.display = 'grid';
+             if (!/ANALYZING/.test(box0.innerHTML)) box0.innerHTML = '<div style="font-size:12px;opacity:.65;">STILL ANALYZING... please wait, result will appear automatically.</div>';
+           }
+           return;
+         }
+        window.wxAiPending[rowIdx] = true;
+        window.wxAiTimers = window.wxAiTimers || {};
+        if (window.wxAiTimers[rowIdx]) { try { clearTimeout(window.wxAiTimers[rowIdx]); } catch (e) {} }
+        const orig = btn ? btn.innerText : '';
+        if (btn) { btn.disabled = true; btn.innerText = 'ANALYZING...'; }
+        if (box) { box.style.display = 'grid'; box.innerHTML = '<div style="font-size:12px;opacity:.65;">ANALYZING... (you may switch tabs, result will be saved)</div>'; }
+        const stdH = f.std ? String(f.std).split(':')[0] : '0';
+        const staH = f.sta ? String(f.sta).split(':')[0] : '0';
+        const altH = String((parseInt(staH, 10) + 1) % 24);
+        const clearWxTimer = () => {
+          try { if (window.wxAiTimers && window.wxAiTimers[rowIdx]) { clearTimeout(window.wxAiTimers[rowIdx]); delete window.wxAiTimers[rowIdx]; } } catch (e) {}
+        };
+        const finish = () => {
+          clearWxTimer();
+          delete window.wxAiPending[rowIdx];
+          if (btn && btn.isConnected) { btn.disabled = false; btn.innerText = orig || 'AI REVIEW'; }
+          try {
+            const curR = document.querySelector('.weather-card[data-row="' + rowIdx + '"]');
+            const bR = curR ? curR.querySelector('.taf-details-btn[onclick*="wxAiReview"]') : null;
+            if (bR) { bR.disabled = false; bR.innerText = 'AI REVIEW'; }
+          } catch (e) {}
+        };
+        // Watchdog: server GAS kadang tidak pernah menjawab (hang/timeout) sehingga
+        // neither success nor failure fires. Tanpa ini tombol macet ANALYZING selamanya
+        // dan render ulang justru mengabadikannya via wxAiCached.
+        window.wxAiTimers[rowIdx] = setTimeout(() => {
+          if (!((window.wxAiPending || {})[rowIdx])) return;
+          delete window.wxAiPending[rowIdx];
+          try { delete window.wxAiTimers[rowIdx]; } catch (e) {}
+          const curT = document.querySelector('.weather-card[data-row="' + rowIdx + '"]');
+          const liveBoxT = (box && box.isConnected) ? box : (curT ? curT.querySelector('.wx-ai-result') : null);
+          if (liveBoxT && liveBoxT.isConnected) {
+            liveBoxT.innerHTML = '<div style="font-size:11px;font-weight:900;">AI REVIEW — TIMEOUT (30s, server did not respond, click AI REVIEW to retry)</div>';
+            liveBoxT.style.display = 'grid';
+          }
+          const liveBtnT = (btn && btn.isConnected) ? btn : (curT ? curT.querySelector('.taf-details-btn[onclick*="wxAiReview"]') : null);
+          if (liveBtnT) { liveBtnT.disabled = false; liveBtnT.innerText = 'AI REVIEW'; }
+        }, 30000);
+        google.script.run
+         .withSuccessHandler(function(res) {
+             clearWxTimer();
+             const r = res || {};
+             window.wxAiResults[rowIdx] = r; // persist: re-rendered on tab return
+             // Refresh kartu yang sedang tampil (bisa beda node bila sempat render ulang
+             // saat pindah tab — jangan hanya andalkan referensi box/btn lama).
+             const cur = document.querySelector('.weather-card[data-row="' + rowIdx + '"]');
+             const liveBox = (box && box.isConnected) ? box : (cur ? cur.querySelector('.wx-ai-result') : null);
+              if (liveBox && liveBox.isConnected) {
+                liveBox.innerHTML = window.wxAiHeader(r, rowIdx)
+                  + window.wxAiLegHtml('DEP', r.dep) + window.wxAiLegHtml('ARR', r.arr) + window.wxAiLegHtml('ALT', r.alt);
+                liveBox.style.display = 'grid';
+                window.wxAiDrawerSync();
+              }
+             const liveBtn = (btn && btn.isConnected) ? btn : null;
+             finish();
+             if (cur && !liveBtn) {
+               const b = cur.querySelector('.taf-details-btn[onclick*="wxAiReview"]');
+               if (b) { b.disabled = false; b.innerText = 'AI REVIEW'; }
+             }
+          })
+           .withFailureHandler(function() {
+             const curF = document.querySelector('.weather-card[data-row="' + rowIdx + '"]');
+             const liveF = (box && box.isConnected) ? box : (curF ? curF.querySelector('.wx-ai-result') : null);
+             if (liveF && liveF.isConnected) {
+               liveF.innerHTML = '<div style="font-size:11px;font-weight:900;">AI REVIEW — NO_DATA (request failed)</div>';
+               liveF.style.display = 'grid';
+             }
+             finish();
+             if (curF && !(btn && btn.isConnected)) {
+               const bF = curF.querySelector('.taf-details-btn[onclick*="wxAiReview"]');
+               if (bF) { bF.disabled = false; bF.innerText = 'AI REVIEW'; }
+             }
+           })
+          .analyzeWxWithManual(Object.assign({
+            tafDep: f.tafDep, tafArr: f.tafArr, tafAlt: f.tafAlt,
+            stdH: stdH, staH: staH, altH: altH
+          }, window.wxAiChoice()));
+      };
+
+      // S1+S2 config loader: rules + static manual excerpt, once per session.
+      // P0 harden: fail-closed with visible error + retry (never stick in skeleton).
+      window.wxConfigError = null;
+      window.wxShowBoardError = function(msg) {
+        const c = document.getElementById('weather-container');
+        if (!c) return;
+        const e = window.escapeHtml;
+        const safe = e ? e(msg) : msg;
+        c.innerHTML = '<div role="alert" style="text-align:center;padding:40px;color:var(--status-critical);">'
+          + '<div style="font-weight:900;letter-spacing:.06em;">WEATHER ENGINE — LOAD FAILED</div>'
+          + '<div style="margin-top:6px;font-size:11px;opacity:.8;">' + safe + '</div>'
+          + '<button class="taf-details-btn" style="margin-top:12px;" onclick="window.initWeatherDashboard(true)">RETRY LOAD</button></div>';
+      };
+      window.loadWxConfig = function(force, cb) {
+        if (window.wxRules && window.wxManual && !force) { if (cb) cb(); return; }
+        if (typeof google === 'undefined' || !google.script || !google.script.run) {
+          window.wxConfigError = 'BRIDGE UNAVAILABLE (preview without google.script.run)';
+          renderWxManual();
+          window.wxShowBoardError(window.wxConfigError + ' — open via Index shell or click RETRY.');
+          return;
+        }
+        let done = false;
+        const to = setTimeout(function() {
+          if (done) return;
+          done = true;
+          window.wxConfigError = 'CONFIG TIMEOUT (15s, server did not respond)';
+          renderWxManual();
+          window.wxShowBoardError(window.wxConfigError + ' — click RETRY LOAD.');
+        }, 15000);
+        const finishOk = function() { if (!done) { done = true; clearTimeout(to); window.wxConfigError = null; if (cb) cb(); } };
+        const finishFail = function(msg) {
+          if (done) return;
+          done = true; clearTimeout(to);
+          window.wxConfigError = msg;
+          renderWxManual();
+          window.wxShowBoardError(msg + ' — click RETRY LOAD.');
+        };
+        try {
+          google.script.run
+            .withSuccessHandler(function(rulesRes) {
+              try { window.wxRules = rulesRes || null; } catch (e) { window.wxRules = null; }
+              try {
+                google.script.run
+                  .withSuccessHandler(function(mRes) {
+                    try { window.wxManual = mRes || null; } catch (e) { window.wxManual = null; }
+                    renderWxManual();
+                    finishOk();
+                  })
+                  .withFailureHandler(function() { finishFail('CONFIG FAILED (getWxManualExcerpt request failed)'); })
+                  .getWxManualExcerpt();
+              } catch (e) { finishFail('CONFIG FAILED (getWxManualExcerpt threw)'); }
+            })
+            .withFailureHandler(function() { finishFail('CONFIG FAILED (getWxRules request failed)'); })
+            .getWxRules();
+        } catch (e) { finishFail('CONFIG FAILED (bridge threw)'); }
+      };
+
+      // S1: collapsible static reference panel (collapsed by default, lives bottom).
+      window.wxToggleDrawer = function(btn) {
+        const card = btn ? btn.closest('.weather-card') : null;
+        const wrap = card ? card.querySelector('.wx-drawer-wrap') : null;
+        if (!btn || !wrap) return;
+        const willOpen = !wrap.classList.contains('open');
+        wrap.classList.toggle('open', willOpen);
+        wrap.setAttribute('aria-hidden', String(!willOpen));
+        btn.setAttribute('aria-expanded', String(willOpen));
+      };
+      window.wxToggleManual = function() {
+        const panel = document.getElementById('wx-manual-panel');
+        const body = document.getElementById('wx-manual-body');
+        const arrow = document.getElementById('wx-manual-arrow');
+        const btn = panel ? panel.querySelector('.wx-manual-toggle') : null;
+        if (!panel || !body) return;
+        const open = panel.dataset.open === '1';
+        const willOpen = !open;
+        panel.dataset.open = willOpen ? '1' : '0';
+        if (willOpen) { body.removeAttribute('hidden'); body.style.display = 'block'; }
+        else { body.setAttribute('hidden', ''); body.style.display = 'none'; }
+        if (btn) btn.setAttribute('aria-expanded', String(willOpen));
+        if (arrow) arrow.innerText = willOpen ? '▾' : '▸';
+      };
+      function renderWxManual() {
+        const panel = document.getElementById('wx-manual-panel');
+        if (!panel) return;
+        const e3 = window.escapeHtml;
+        const m = window.wxManual;
+        const head = (sub) => '<button type="button" class="wx-manual-toggle" style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:900;letter-spacing:.08em;background:none;border:0;padding:6px 0;color:inherit;font:inherit;position:relative;" aria-expanded="false" aria-controls="wx-manual-body" onclick="window.wxToggleManual()">WEATHER REFERENCE (STATIC)' + sub + ' <span id="wx-manual-arrow" aria-hidden="true">▸</span></button>';
+        if (!m || !m.sections || !m.sections.length) {
+          panel.innerHTML = head('') + '<div id="wx-manual-body" hidden style="display:none;margin-top:8px;"><span style="opacity:.65">[ WX_MANUAL_EXCERPT not configured ]</span></div>';
+          return;
+        }
+        panel.innerHTML = head(' <span style="opacity:.6;">· ' + m.sections.length + ' bagian</span>')
+          + '<div id="wx-manual-body" hidden style="display:none;margin-top:8px;">' + m.sections.map(s => {
+            const doc = s.doc || '';
+            return '<div style="margin-bottom:6px;"><div style="font-size:11px;font-weight:800;opacity:.8;">' + (e3 ? e3((doc ? '[' + doc + '] ' : '') + s.section) : ((doc ? '[' + doc + '] ' : '') + s.section)) + '</div>' +
+            '<ul style="margin:2px 0 0 16px;padding:0;font-size:12px;">' +
+            s.items.map(it => {
+              const tx = (typeof it === 'string') ? it : it.text; // tolerate pre-SOURCE cache
+              const sc = (it && it.source) || '';
+              const ac = (it && it.action) || '';
+              return '<li>' + (e3 ? e3(tx) : tx) + (sc && sc !== doc ? ' <span style="opacity:.6;">[' + (e3 ? e3(sc) : sc) + ']</span>' : '') + (ac ? '<div style="font-size:11px;font-weight:700;">→ ' + (e3 ? e3(ac) : ac) + '</div>' : '') + '</li>';
+            }).join('') + '</ul></div>';
+          }).join('') + '</div>';
+      }
+
+      window.initWeatherDashboard = function(forceRefresh = false) {
+        const container = document.getElementById('weather-container');
+        if (window.wxAiCatalogLoad) window.wxAiCatalogLoad(forceRefresh);
+        if (window.weatherDataCache && !forceRefresh) {
+          renderWeather(window.weatherDataCache);
+          return;
+        }
+        container.innerHTML = [0, 1, 2].map(() => '<div class="wx-skel-card"><div class="wx-skel-bar" style="width:38%;margin-bottom:10px"></div><div class="wx-skel-bar" style="width:92%;margin-bottom:8px"></div><div class="wx-skel-bar" style="width:78%"></div></div>').join('');
+        window.loadWxConfig(forceRefresh, function() {
+        if (typeof google === 'undefined' || !google.script || !google.script.run) {
+          window.wxShowBoardError('BRIDGE UNAVAILABLE (preview without google.script.run) — open via Index shell or click RETRY.');
+          return;
+        }
+        let settled = false;
+        const boardTo = setTimeout(function() {
+          if (settled) return;
+          settled = true;
+          window.wxShowBoardError('BOARD TIMEOUT (20s, getActiveFlightDataForWarning did not respond) — click RETRY LOAD.');
+        }, 20000);
+        google.script.run
+          .withSuccessHandler(function(json) {
+            if (settled) return;
+            settled = true; clearTimeout(boardTo);
+            let flights;
+            try { flights = JSON.parse(json); }
+            catch (e) { window.wxShowBoardError('BOARD FAILED (invalid server response) — click RETRY LOAD.'); return; }
+            if (flights.error) {
+              const safeWxErr = window.escapeHtml ? window.escapeHtml(flights.error) : 'Unable to load flight data';
+              container.innerHTML = `<div role="alert" style="text-align: center; padding: 40px; color: var(--status-critical);">${safeWxErr}<br><button class="taf-details-btn" style="margin-top:12px;" onclick="window.initWeatherDashboard(true)">RETRY LOAD</button></div>`;
+              return;
+            }
+            window.weatherDataCache = flights;
+            window.weatherLastUpdate = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' Z';
+            renderWeather(flights);
+          })
+          .withFailureHandler(function() {
+            if (settled) return;
+            settled = true; clearTimeout(boardTo);
+            window.wxShowBoardError('BOARD FAILED (getActiveFlightDataForWarning request failed) — click RETRY LOAD.');
+          })
+          .getActiveFlightDataForWarning();
+        });
+      };
+
+      function renderWeather(flights) {
+        const container = document.getElementById('weather-container');
+        const esc = window.escapeHtml;
+        const updateEl = document.getElementById('weather-last-update');
+        if (updateEl && window.weatherLastUpdate) {
+          updateEl.innerText = 'ACTIVE FLIGHT WATCH (UTC OPERATIONS) • LAST UPDATE: ' + window.weatherLastUpdate;
+        }
+
+        const activeBoardIds = window.activeBoardRowIds || [];
+        const activeFlights = flights.filter(f => activeBoardIds.includes(f.rowIdx));
+
+        if (activeFlights.length === 0) {
+          container.innerHTML = '<div style="text-align: center; padding: 80px; color: var(--text-muted); font-family:var(--font-mono); border: 2px dashed var(--border-light); border-radius: 12px;">NO ACTIVE FLIGHTS ON BOARD</div>';
+          return;
+        }
+
+        let kpiDanger = 0, kpiWarn = 0, kpiClear = 0, kpiNoData = 0;
+
+        container.innerHTML = activeFlights.map((f, idx) => {
+          const stdH = f.std ? f.std.split(':')[0] : 0;
+          const staH = f.sta ? f.sta.split(':')[0] : 0;
+          const altWindowStart = (parseInt(staH) + 1) % 24;
+          const altWindowEnd = (parseInt(staH) + 3) % 24;
+
+          const depStatus = evaluateWeather(f.depApt, stdH, f.tafDep); const depRefs = window.wxRefs.slice(); const depTrig = wxShortTrigger(window.wxTriggerBlock);
+          const arrStatus = evaluateWeather(f.arrApt, staH, f.tafArr); const arrRefs = window.wxRefs.slice(); const arrTrig = wxShortTrigger(window.wxTriggerBlock);
+          const altStatus = evaluateWeather(f.altApt, altWindowStart, f.tafAlt); const altRefs = window.wxRefs.slice(); const altTrig = wxShortTrigger(window.wxTriggerBlock);
+
+          // Flight-level worst status: DANGER > WARNING > NO DATA > CLEAR.
+          const statuses = [depStatus, arrStatus, altStatus];
+          let flightWorst = 'CLEAR';
+          if (statuses.includes('DANGER')) { kpiDanger++; flightWorst = 'DANGER'; }
+          else if (statuses.includes('WARNING')) { kpiWarn++; flightWorst = 'WARNING'; }
+          else if (statuses.includes('NO_DATA')) { kpiNoData++; flightWorst = 'NO_DATA'; }
+          else kpiClear++;
+          const aggPill = flightWorst === 'DANGER'
+            ? '<span class="wx-pill wx-pill-danger">1 RESTRICTED</span>'
+            : flightWorst === 'WARNING'
+              ? '<span class="wx-pill wx-pill-warning">1 MONITOR</span>'
+              : flightWorst === 'NO_DATA'
+                ? '<span class="wx-pill wx-pill-nodata">NO TAF — CHECK SOURCE</span>'
+                : '<span class="wx-pill wx-pill-clear">OPERATIONAL</span>';
+           const altWindowLabel = String(altWindowStart).padStart(2,'0') + ':00–' + String(altWindowEnd).padStart(2,'0') + ':00';
+           const aiPending = !!((window.wxAiPending || {})[f.rowIdx]);
+           const aiOff = window.wxAiEnabled === false;
+           const aiBtnHtml = aiOff ? ''
+            : aiPending
+              ? '<button class="taf-details-btn" style="margin-left:6px;" disabled onclick="window.wxAiReview(this, ' + f.rowIdx + ')">ANALYZING...</button>'
+              : '<button class="taf-details-btn" style="margin-left:6px;" onclick="window.wxAiReview(this, ' + f.rowIdx + ')">AI REVIEW</button>';
+
+          const staggerDelay = Math.min(idx * 40, 240);
+          return `
+            <div class="weather-card animate-in" data-row="${f.rowIdx}" style="animation-delay:${staggerDelay}ms">
+              <div class="wx-card-head">
+                <div class="flight-info-group">
+                  <div class="weather-flight-no">${esc(f.flightNo)}</div>
+                  <div class="weather-route">${esc(f.depApt)} → ${esc(f.arrApt)} · ALT ${esc(f.altApt) || '???'}</div>
+                </div>
+                <div class="wx-head-right">${aggPill}
+                  <button class="taf-details-btn" aria-expanded="false" aria-controls="wx-drawer-${f.rowIdx}" onclick="window.wxToggleDrawer(this)">Details</button>
+                  ${aiBtnHtml}
+                </div>
+              </div>
+              <div class="weather-card-main">
+                <div class="weather-point ${getStatusClass(depStatus)}">
+                  <div class="point-label">DEPARTURE · ${esc(f.depApt)}</div>
+                  <div class="point-val">${esc(f.std) || '--:--'}</div>
+                  <div class="point-status">${getStatusLabel(depStatus)}</div>
+                  ${depTrig ? '<div class="wx-trigger">' + depTrig + '</div>' : ''}
+                  ${wxRefChips(depRefs)}
+                </div>
+
+                <div class="weather-point ${getStatusClass(arrStatus)}">
+                  <div class="point-label">ARRIVAL · ${esc(f.arrApt)}</div>
+                  <div class="point-val">${esc(f.sta) || '--:--'}</div>
+                  <div class="point-status">${getStatusLabel(arrStatus)}</div>
+                  ${arrTrig ? '<div class="wx-trigger">' + arrTrig + '</div>' : ''}
+                  ${wxRefChips(arrRefs)}
+                </div>
+
+                <div class="weather-point ${getStatusClass(altStatus)}">
+                  <div class="point-label">ALT WINDOW · ${esc(f.altApt) || '???'} · ${altWindowLabel}</div>
+                  <div class="point-val">${altWindowLabel}</div>
+                  <div class="point-status">${getStatusLabel(altStatus)}</div>
+                  ${altTrig ? '<div class="wx-trigger">' + altTrig + '</div>' : ''}
+                  ${wxRefChips(altRefs)}
+                </div>
+              </div>
+              
+              <div class="wx-drawer-wrap" id="wx-drawer-${f.rowIdx}" aria-hidden="true"><div class="wx-drawer-inner"><div class="taf-drawer">
+                <div class="taf-sub-block">
+                  <div class="taf-sub-header"><span>TAF DEP (${esc(f.depApt)})</span> <span>${esc(f.tafDepTime)} Z</span></div>
+                  <div class="taf-text">${formatTafText(f.tafDep)}</div>
+                </div>
+                <div class="taf-sub-block">
+                  <div class="taf-sub-header"><span>TAF ARR (${esc(f.arrApt)})</span> <span>${esc(f.tafArrTime)} Z</span></div>
+                  <div class="taf-text">${formatTafText(f.tafArr)}</div>
+                </div>
+                <div class="taf-sub-block">
+                  <div class="taf-sub-header"><span>TAF ALT (${esc(f.altApt) || 'NIL'})</span> <span>${esc(f.tafAltTime)} Z</span></div>
+                  <div class="taf-text">${formatTafText(f.tafAlt)}</div>
+                </div>
+              </div></div></div>
+              ${window.wxAiCached(f.rowIdx)}
+            </div>
+          `;
+        }).join('');
+
+        const s = (id, v) => { const el = document.getElementById(id); if (el) el.innerText = v; };
+        s('wx-kpi-total', activeFlights.length);
+        s('wx-kpi-danger', kpiDanger);
+        s('wx-kpi-warn', kpiWarn);
+        s('wx-kpi-clear', kpiClear);
+        s('wx-kpi-nodata', kpiNoData);
+        window.wxAiDrawerSync();
+        if (!window.wxAiMasterHooked) {
+          window.wxAiMasterHooked = true;
+          document.addEventListener('change', function(ev) {
+            if (ev && ev.target && ev.target.id === 'wx-ai-model') window.wxAiDrawerSync();
+          });
+        }
+      }
+    })();
+  </script>
+</div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){ if(window.initWeatherDashboard) window.initWeatherDashboard(true); });
+</script>
+</div></body></html>
+

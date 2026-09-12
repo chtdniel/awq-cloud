@@ -1,0 +1,204 @@
+<!--
+  Fir_Update_Ui.html — FIR UPDATE (bulk import) page.
+  Loaded into #view-fir-update via Index.html. 1:1 move of the bulk import drawer
+  (HTML + JS) previously embedded in FIR_Notam_Ui.html. Backend functions
+  firParseBulkNotamText / firBulkPreviewNotams / firBulkImportNotams are reused unchanged.
+-->
+<style>
+  .fir-update-ui { display: none; }
+  .view-section.active .fir-update-ui { display: block; }
+  .fir-update-ui .firn-panel {
+    background: var(--bg-panel); border:1px solid var(--border-light); border-radius:var(--radius-md);
+  }
+  .fir-update-ui .firn-panel-head { padding:12px 14px; border-bottom:1px solid var(--border-subtle); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .fir-update-ui .firn-panel-title { font-size:10px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); }
+  .fir-update-ui .firn-form { padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .fir-update-ui .firn-field label { display:block; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); margin-bottom:4px; }
+  .fir-update-ui .firn-field textarea {
+    width:100%; box-sizing:border-box; background:var(--bg-panel-alt); color:var(--text-primary);
+    border:1px solid var(--border-light); border-radius:var(--radius-sm); padding:8px 10px;
+    font-family:var(--font-mono); font-size:12px; min-height:110px; resize:vertical; line-height:1.5;
+  }
+  .fir-update-ui .firn-field textarea:focus { outline:none; border-color:var(--accent-primary); }
+  .fir-update-ui .firn-actions { display:flex; gap:8px; margin-top:4px; }
+  .fir-update-ui .firn-btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:44px; min-height:44px; font-size:10px; font-weight:800; letter-spacing:.05em;
+    text-transform:uppercase; padding:8px 14px; border:1px solid var(--border-light); background:var(--bg-panel-raised);
+    color:var(--text-secondary); border-radius:var(--radius-sm); cursor:pointer;
+  }
+  .fir-update-ui .firn-btn:hover { border-color:var(--accent-primary); color:var(--accent-primary); }
+  .fir-update-ui .firn-btn:focus-visible { outline:3px solid var(--accent-primary); outline-offset:2px; }
+  .fir-update-ui .firn-btn.primary { background:var(--accent-primary); color:#fff; border-color:var(--accent-primary); }
+  .fir-update-ui .firn-btn.primary:hover { opacity:.9; color:#fff; }
+  .fir-update-ui .firn-btn:disabled { opacity:.5; cursor:not-allowed; }
+  .fir-update-ui .firn-hint { font-size:10px; color:var(--text-muted); font-family:var(--font-mono); line-height:1.5; }
+  .fir-update-ui .firn-toast, .firn-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); box-shadow:0 8px 24px rgba(0,0,0,.18); }
+</style>
+
+<div class="fir-update-ui" id="fir-update-ui-root">
+  <div class="firn-panel">
+    <div class="firn-panel-head">
+      <span class="firn-panel-title">Bulk Import FIR NOTAM</span>
+      <span style="font:9px var(--font-mono); color:var(--text-muted);">Sheet FIR • TSV DINS or Raw ICAO (multi Q) • Append + dedup • TSV from DINS: copy table (Header Location … NOTAM Condition) → paste</span>
+    </div>
+    <div class="firn-form">
+      <div class="firn-field">
+        <label for="firn-bulk-raw">Paste TSV (Excel/DINS) or Raw ICAO (multiple Q) → Preview</label>
+        <textarea id="firn-bulk-raw" placeholder="TSV: Location&#9;NOTAM #/LTA #&#9;Class&#9;Issue Date&#9;Effective Date&#9;Expiration Date&#9;NOTAM Condition/LTA subject&#10;YBBB&#9;J5531/25&#9;International...&#9;...&#9;Q)YBBB/Q...&#10;&#10;Or Raw ICAO:&#10;Q)WIII/QWULW/...&#10;A)WIII B)260827...&#10;E)RWY ...&#10;Q)WAAA/Q..."></textarea>
+      </div>
+      <div class="firn-actions" style="flex-wrap:wrap;">
+        <button type="button" class="firn-btn" id="firn-bulk-preview">👁 PREVIEW</button>
+        <button type="button" class="firn-btn primary" id="firn-bulk-import" disabled>⬇ IMPORT APPEND</button>
+        <button type="button" class="firn-btn" id="firn-bulk-overwrite" disabled title="Erase FIR then refill">⚠ OVERWRITE</button>
+        <span id="firn-bulk-status" style="font:10px var(--font-mono); color:var(--text-muted); align-self:center;"></span>
+      </div>
+      <div id="firn-bulk-preview-box" style="border:1px solid var(--border-subtle); border-radius:var(--radius-sm); overflow:auto; max-height:380px; display:none;">
+        <table style="width:100%; border-collapse:collapse; font:11px var(--font-mono);">
+          <thead style="position:sticky; top:0; background:var(--bg-panel-alt);"><tr>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--border-subtle);">Location</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--border-subtle);">NOTAM #</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--border-subtle);">Class</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--border-subtle);">Eff</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--border-subtle);">Exp</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--border-subtle);">Status</th>
+          </tr></thead>
+          <tbody id="firn-bulk-tbody"></tbody>
+        </table>
+      </div>
+      <div class="firn-hint">TSV DINS: header `Location  NOTAM #/LTA #  Class  ...  NOTAM Condition` auto-detected. Raw ICAO: split per `Q)`. Duplicate `Location|NOTAM #` already in `FIR`/`NOTAM` will be skipped. PERM supported.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  if (window.firUpdateUiInited) return;
+  window.firUpdateUiInited = true;
+
+  function $(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+
+  function addToast(msg) {
+    var t = document.querySelector('.firn-toast');
+    if (!t) { t = document.createElement('div'); t.className = 'firn-toast'; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(window.__firnToastTimer);
+    window.__firnToastTimer = setTimeout(function () { t.style.display = 'none'; }, 2600);
+  }
+
+  function run(fnName) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    // ponytail: bulk ops need longer (TSV 700 rows ~ 20s on first run)
+    var timeoutMs = /Bulk/i.test(fnName) ? 60000 : 15000;
+    return new Promise(function (resolve) {
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        resolve({ error: 'google.script.run unavailable (local preview).' });
+        return;
+      }
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        resolve({ error: fnName + ' timed out after '+(timeoutMs/1000)+' seconds. Check Apps Script deployment and execution log.' });
+      }, timeoutMs);
+      var ok = function (data) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (data === null || data === undefined) {
+          resolve({ error: fnName + ' returned null - redeploy Apps Script as new version.' });
+        } else { resolve(data); }
+      };
+      var fail = function (e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ error: (e && e.message) || String(e) || 'Server error' });
+      };
+      var chain = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
+      try { chain[fnName].apply(chain, args); } catch (e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ error: String(e && e.message || e) });
+      }
+    });
+  }
+
+  // ---- Bulk FIR helpers ----
+  var bulkState = { lastPreview: null, raw: '' };
+  function renderBulkPreview(data){
+    var box=$('firn-bulk-preview-box'), tb=$('firn-bulk-tbody'), st=$('firn-bulk-status');
+    var imp=$('firn-bulk-import'), over=$('firn-bulk-overwrite');
+    if(!data || !data.ok){
+      if(st) st.textContent = data && data.error ? 'Error: '+data.error : 'Preview failed';
+      if(box) box.style.display='none';
+      if(imp) imp.disabled=true;
+      if(over) over.disabled=true;
+      return;
+    }
+    bulkState.lastPreview=data;
+    var total=data.total||0, valid=data.valid||0, invalid=data.invalid||0, dup=data.duplicates||0;
+    var note = data.truncated ? ' • '+ (data.note||'truncated') : '';
+    if(st) st.textContent = (data.isTSV?'TSV':'Raw')+' • total '+total+' • valid '+valid+' • invalid '+invalid+' • dup '+dup + note;
+    if(tb){
+      tb.innerHTML = (data.preview||[]).map(function(r){
+        var badge = r.ok ? '<span style="color:var(--status-safe); font-weight:800;">✔ OK</span>' : '<span style="color:var(--status-critical);">'+esc(r.error||'invalid')+'</span>';
+        return '<tr style="border-bottom:1px solid var(--border-subtle);">'
+          +'<td style="padding:6px 8px;">'+esc(r.Location)+'</td>'
+          +'<td style="padding:6px 8px;">'+esc(r["NOTAM #"])+'</td>'
+          +'<td style="padding:6px 8px;">'+esc(r.Class)+'</td>'
+          +'<td style="padding:6px 8px;">'+esc(r["Effective Date"]||'')+'</td>'
+          +'<td style="padding:6px 8px;">'+esc(r["Expiration Date"]||'')+'</td>'
+          +'<td style="padding:6px 8px;">'+badge+'</td>'
+          +'</tr>';
+      }).join('');
+    }
+    if(box) box.style.display = total ? '' : 'none';
+    if(imp) imp.disabled = valid===0;
+    if(over) over.disabled = valid===0;
+  }
+  async function doBulkPreview(){
+    var raw=$('firn-bulk-raw') ? $('firn-bulk-raw').value : '';
+    if(!raw.trim()){ addToast('Paste TSV or Raw ICAO first.'); return; }
+    bulkState.raw=raw;
+    var st=$('firn-bulk-status'); if(st) st.textContent='⏳ Preview...';
+    var res=await run('firBulkPreviewNotams', raw);
+    renderBulkPreview(res);
+    if(res && res.ok) addToast('Preview '+res.total+' • '+res.valid+' valid');
+  }
+  async function doBulkImport(mode){
+    var raw=bulkState.raw || ($('firn-bulk-raw') ? $('firn-bulk-raw').value : '');
+    if(!raw.trim()){ addToast('Paste first & Preview.'); return; }
+    if(mode==='overwrite' && !confirm('OVERWRITE: erase all FIR then refill with '+ (bulkState.lastPreview? bulkState.lastPreview.total : '?') +' NOTAM?')) return;
+    var btn = mode==='overwrite' ? $('firn-bulk-overwrite') : $('firn-bulk-import');
+    var orig = btn ? btn.textContent : '';
+    if(btn){ btn.disabled=true; btn.textContent='⏳ IMPORT...'; }
+    var res=await run('firBulkImportNotams', raw, mode);
+    if(btn){ btn.textContent=orig; btn.disabled=false; }
+    if(res && res.ok){
+      addToast((mode==='overwrite'?'Overwritten ':'Appended ')+res.appended+' • skip dup '+res.skippedDup+' • invalid '+res.skippedInvalid);
+      bulkState.raw='';
+      if($('firn-bulk-raw')) $('firn-bulk-raw').value='';
+      var box=$('firn-bulk-preview-box'); if(box) box.style.display='none';
+      var st=$('firn-bulk-status'); if(st) st.textContent='Done '+res.appended+' appended';
+    } else {
+      addToast('Import failed: '+esc((res&&res.error)||'unknown'));
+      var st2=$('firn-bulk-status'); if(st2) st2.textContent='Error: '+(res&&res.error||'unknown');
+    }
+  }
+
+  function init() {
+    var bp=$('firn-bulk-preview'); if(bp) bp.addEventListener('click', doBulkPreview);
+    var bi=$('firn-bulk-import'); if(bi) bi.addEventListener('click', function(){ doBulkImport('append'); });
+    var bo=$('firn-bulk-overwrite'); if(bo) bo.addEventListener('click', function(){ doBulkImport('overwrite'); });
+  }
+
+  window.initFirUpdateDashboard = init;
+})();
+</script>
