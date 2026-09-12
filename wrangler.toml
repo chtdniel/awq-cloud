@@ -1,5 +1,5 @@
 name = "awq-cloud"
-main = "D1_Worker_Backend.js"
+# main = "D1_Worker_Backend.js"
 compatibility_date = "2024-03-20"
 pages_build_output_dir = "public" # Commented out if deploying as a standard Worker instead of Pages
 
