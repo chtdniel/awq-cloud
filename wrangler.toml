@@ -1,8 +1,0 @@
-name = "awq-cloud"
-compatibility_date = "2024-03-20"
-pages_build_output_dir = "public" # Commented out if deploying as a standard Worker instead of Pages
-
-[[d1_databases]]
-binding = "DB"
-database_name = "awq-db"
-database_id = "470bf61d-b694-4d4d-a716-0b74f56a5a8a"
