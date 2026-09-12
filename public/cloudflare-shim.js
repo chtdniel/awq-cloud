@@ -1,60 +1,66 @@
 // Cloudflare Shim for google.script.run
+// Per-call runner: withSuccessHandler/withFailureHandler return a NEW runner
+// so parallel calls (e.g. getAirportNotes + getFlightDashboardData) never
+// overwrite each other's callbacks (fixes race that zeroed allDbFlights).
 window.google = window.google || {};
 window.google.script = window.google.script || {};
 
-window.google.script.run = new Proxy({}, {
-  get: function(target, prop) {
-    if (prop === 'withSuccessHandler') {
-      return function(callback) {
-        target._successHandler = callback;
-        return window.google.script.run;
-      };
-    }
-    if (prop === 'withFailureHandler') {
-      return function(callback) {
-        target._failureHandler = callback;
-        return window.google.script.run;
-      };
-    }
-    
-    // It's a backend function call (e.g. google.script.run.getFlights())
-    return async function(...args) {
-      try {
-        console.log(`[Shim] Calling backend function: ${prop}`, args);
-        const response = await fetch('/api/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: prop, args: args })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+(function () {
+  function makeRunner(successHandler, failureHandler) {
+    return new Proxy({}, {
+      get: function (target, prop) {
+        if (prop === 'withSuccessHandler') {
+          return function (callback) {
+            return makeRunner(callback, failureHandler);
+          };
         }
-        
-        const result = await response.json();
-        
-        if (result.error) {
-          if (target._failureHandler) {
-            target._failureHandler(result.error);
-          } else {
-            console.error(`[Shim] Backend error from ${prop}:`, result.error);
+        if (prop === 'withFailureHandler') {
+          return function (callback) {
+            return makeRunner(successHandler, callback);
+          };
+        }
+
+        // It's a backend function call (e.g. google.script.run.getFlights())
+        // Capture handlers in closure — immune to parallel-call overwrite.
+        var onSuccess = successHandler;
+        var onFailure = failureHandler;
+        return async function (...args) {
+          try {
+            console.log(`[Shim] Calling backend function: ${prop}`, args);
+            const response = await fetch('/api/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: prop, args: args })
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            if (result && Object.prototype.hasOwnProperty.call(result, 'error') && result.error) {
+              if (onFailure) {
+                onFailure(result.error);
+              } else {
+                console.error(`[Shim] Backend error from ${prop}:`, result.error);
+              }
+            } else {
+              if (onSuccess) {
+                onSuccess(result.data);
+              }
+            }
+          } catch (err) {
+            if (onFailure) {
+              onFailure(err);
+            } else {
+              console.error(`[Shim] Network/Shim error for ${prop}:`, err);
+            }
           }
-        } else {
-          if (target._successHandler) {
-            target._successHandler(result.data);
-          }
-        }
-      } catch (err) {
-        if (target._failureHandler) {
-          target._failureHandler(err);
-        } else {
-          console.error(`[Shim] Network/Shim error for ${prop}:`, err);
-        }
-      } finally {
-        // Reset handlers for the next call
-        target._successHandler = null;
-        target._failureHandler = null;
+        };
       }
-    };
+    });
   }
-});
+
+  window.google.script.run = makeRunner(null, null);
+})();

@@ -3661,8 +3661,9 @@
     e.currentTarget.classList.remove('state-drag-target'); 
     let targetRowIndex = parseInt(e.currentTarget.dataset.boardIdx); 
     if (draggedRowIndex === targetRowIndex || draggedRowIndex === null) return; 
-    let movedId = activeBoardRowIds.splice(draggedRowIndex, 1)[0]; 
-    activeBoardRowIds.splice(targetRowIndex, 0, movedId); 
+    let movedId = window.activeBoardRowIds.splice(draggedRowIndex, 1)[0]; 
+    window.activeBoardRowIds.splice(targetRowIndex, 0, movedId); 
+    try { activeBoardRowIds = window.activeBoardRowIds; } catch (e) {}
     renderBoard(); 
   }
 
@@ -3670,7 +3671,7 @@
   // SELECTION & BULK ACTIONS
   // =========================================================
   window.toggleMasterSelection = function (masterCb) {
-    window.globalSelectedFlights = masterCb.checked ? [...activeBoardRowIds] : [];
+    window.globalSelectedFlights = masterCb.checked ? [...window.activeBoardRowIds] : [];
     window.updateSelectionUI();
   };
 
@@ -4002,7 +4003,9 @@
     const esc = window.escapeHtml;
 
     let safeDbFlights = Array.isArray(window.allDbFlights) ? window.allDbFlights : [];
-    let safeBoardIds = Array.isArray(activeBoardRowIds) ? activeBoardRowIds : [];
+    // Single source of truth: window.activeBoardRowIds (var snapshot removed — diverged after Console reset)
+    if (!Array.isArray(window.activeBoardRowIds)) window.activeBoardRowIds = [];
+    let safeBoardIds = window.activeBoardRowIds;
     let unboarded = safeDbFlights.filter(f => f && !safeBoardIds.includes(f.rowIdx));
 
     if (unboarded.length === 0) {
@@ -4040,10 +4043,13 @@
     const checked = document.querySelectorAll('.modal-db-cb:checked');
     if (checked.length === 0) return alert("Please select at least one flight.");
 
+    if (!Array.isArray(window.activeBoardRowIds)) window.activeBoardRowIds = [];
     checked.forEach(cb => {
       const id = parseInt(cb.value);
-      if (!activeBoardRowIds.includes(id)) activeBoardRowIds.push(id);
+      if (!window.activeBoardRowIds.includes(id)) window.activeBoardRowIds.push(id);
     });
+    // Keep legacy closure alias in sync (it snapshots window ref only once at load)
+    try { activeBoardRowIds = window.activeBoardRowIds; } catch (e) {}
     renderBoard();
     window.uiCloseAddFlightModal();
   };
@@ -4088,7 +4094,9 @@
         window.allDbFlights = Array.isArray(updatedDb.flights) ? updatedDb.flights : [];
         window.acList = normalizeAcList(updatedDb.acList);
         if (window.allDbFlights.length > 0) {
-          activeBoardRowIds.push(window.allDbFlights[window.allDbFlights.length - 1].rowIdx);
+          if (!Array.isArray(window.activeBoardRowIds)) window.activeBoardRowIds = [];
+          window.activeBoardRowIds.push(window.allDbFlights[window.allDbFlights.length - 1].rowIdx);
+          try { activeBoardRowIds = window.activeBoardRowIds; } catch (e) {}
         }
         if (btn) { btn.innerText = "COMMIT TO DATABASE"; btn.disabled = false; }
         const form = document.getElementById('modal-content-new');
