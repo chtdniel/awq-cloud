@@ -32,7 +32,19 @@ export async function onRequestPost(context) {
         
       case 'analyzeNotams':
         return await handleAnalyzeNotams(context, args);
+
+      case 'analyzeFlightNotams':
+        return await handleAnalyzeFlightNotams(context, args);
+
+      case 'analyzeFlightList':
+        return await handleAnalyzeFlightList(context, args);
         
+      case 'firGetNotamEditorData':
+        return await handleFirGetNotamEditorData(context);
+
+      case 'firGetNotamResults':
+        return await handleFirGetNotamResults(context);
+
       case 'saveNotamData':
         return await handleSaveNotamData(context, args);
         
@@ -66,6 +78,15 @@ export async function onRequestPost(context) {
 
       case 'latlongGetEditorData':
         return await handleLatlongGetEditorData(context);
+
+      case 'getWxRules':
+        return Response.json({ data: { rules: [], source: 'default', useRules: true } });
+
+      case 'getWxManualExcerpt':
+        return Response.json({ data: { sections: [], source: 'default' } });
+
+      case 'wxAiGetCatalog':
+        return Response.json({ data: { ok: true, enabled: true, catalog: [{ provider: 'gemini', model: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', enabled: true }] } });
 
       case 'getSettingsAccessInfo':
       case 'getOperationalReadiness':
@@ -764,9 +785,12 @@ async function handleGetActiveFlightDataForWarning(context) {
 
         // 3. Combine
         const flights = flightRows.map(row => {
+            const flightNo = String(row.callsign || row.flight || "").trim();
             const depApt = String(row.dep || "").trim().toUpperCase();
-            const arrApt = String(row.arr || "").trim().toUpperCase();
+            const arrApt = String(row.dest || row.arr || "").trim().toUpperCase();
             const altApt = String(row.alt || "").trim().toUpperCase();
+            const std = String(row.etd || row.std || "").trim();
+            const sta = String(row.eta || row.sta || "").trim();
             
             const getTaf = (icao) => tafMap[icao] || { raw: "No TAF data in database", time: "---" };
             const d = getTaf(depApt);
@@ -775,11 +799,11 @@ async function handleGetActiveFlightDataForWarning(context) {
 
             return {
                 rowIdx: row.id,
-                flightNo: row.flight,
+                flightNo: flightNo,
                 depApt: depApt,
                 arrApt: arrApt,
-                std: row.std,
-                sta: row.sta,
+                std: std,
+                sta: sta,
                 altApt: altApt,
                 tafDep: d.raw,
                 tafDepTime: d.time,
@@ -1074,4 +1098,251 @@ async function handleLatlongGetEditorData(context) {
         return Response.json({ error: e.message }, { status: 500 });
     }
 }
+
+async function handleAnalyzeFlightNotams(context, args) {
+    try {
+        const [rowId] = args || [];
+        if (!rowId) return Response.json({ error: 'rowId is required' }, { status: 400 });
+
+        const flight = await context.env.DB.prepare('SELECT * FROM flights WHERE id = ?').bind(rowId).first();
+        if (!flight) return Response.json({ error: `Flight row ${rowId} not found` }, { status: 404 });
+
+        const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
+        const { results: notams } = await context.env.DB.prepare('SELECT * FROM notams').all();
+
+        const result = analyzeSingleFlight(flight, notams, routes);
+        return Response.json({ data: result });
+    } catch (e) {
+        console.error('Analyze Flight NOTAMs Error:', e);
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleAnalyzeFlightList(context, args) {
+    try {
+        const [rowIds] = args || [];
+        const ids = Array.isArray(rowIds) ? rowIds.map(Number).filter(n => !isNaN(n)) : [];
+        if (ids.length === 0) return Response.json({ data: [] });
+
+        const flightsQuery = `SELECT * FROM flights WHERE id IN (${ids.map(() => '?').join(',')})`;
+        const { results: flights } = await context.env.DB.prepare(flightsQuery).bind(...ids).all();
+        const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
+        const { results: notams } = await context.env.DB.prepare('SELECT * FROM notams').all();
+
+        const results = flights.map(f => analyzeSingleFlight(f, notams, routes));
+        return Response.json({ data: results });
+    } catch (e) {
+        console.error('Analyze Flight List Error:', e);
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+function analyzeSingleFlight(flight, notamRows, routeRows) {
+    const flightId = flight.id;
+    const dep = String(flight.dep || '').trim().toUpperCase();
+    const dest = String(flight.dest || '').trim().toUpperCase();
+    const alt = String(flight.alt || '').trim().toUpperCase();
+    const enr1 = String(flight.enr1 || '').trim().toUpperCase();
+    const enr2 = String(flight.enr2 || '').trim().toUpperCase();
+    const enr3 = String(flight.enr3 || '').trim().toUpperCase();
+    const activeRouteId = String(flight.active_route_id || '').trim().toUpperCase();
+
+    const airportFirMap = {
+        'WADD': ['WAAF'],
+        'WIII': ['WIIF'],
+        'YPPH': ['YMMM'],
+        'WATO': ['WAAF'],
+        'VTSP': ['VTBB'],
+        'WARR': ['WAAF'],
+        'WALL': ['WAAF'],
+        'WIBB': ['WIIF'],
+        'WIPP': ['WIIF'],
+        'WMKK': ['WMFC'],
+        'WSSS': ['WSJC'],
+        'RPLL': ['RPHI']
+    };
+
+    const candidateLocs = new Set();
+    [dep, dest, alt, enr1, enr2, enr3].forEach(c => {
+        if (c && /^[A-Z]{4}$/.test(c)) {
+            candidateLocs.add(c);
+            if (airportFirMap[c]) {
+                airportFirMap[c].forEach(fir => candidateLocs.add(fir));
+            }
+        }
+    });
+
+    let route = null;
+    if (activeRouteId) {
+        route = routeRows.find(r => String(r.id || '').trim().toUpperCase() === activeRouteId);
+    }
+    if (!route) {
+        route = routeRows.find(r => String(r.dep_airport || '').trim().toUpperCase() === dep && String(r.arr_airport || '').trim().toUpperCase() === dest);
+    }
+
+    const routeTokens = [];
+    if (route) {
+        const seqStr = String(route.waypoint_seq || route.route_string || '');
+        const rawTokens = seqStr.split(/[\s,;]+/).map(t => t.trim().toUpperCase()).filter(t => t.length > 2);
+        rawTokens.forEach(tok => {
+            routeTokens.push({
+                word: tok,
+                regex: new RegExp(`(?:^|[^A-Z0-9])${tok}(?:$|[^A-Z0-9])`, 'i')
+            });
+        });
+    }
+
+    let yr = 2026, mo = 8, dy = 13;
+    const dofStr = String(flight.dof || '').replace(/[^0-9]/g, '');
+    if (dofStr.length === 8) {
+        yr = parseInt(dofStr.substring(0, 4), 10);
+        mo = parseInt(dofStr.substring(4, 6), 10) - 1;
+        dy = parseInt(dofStr.substring(6, 8), 10);
+    } else {
+        const parsedD = new Date(flight.dof);
+        if (!isNaN(parsedD.getTime())) {
+            yr = parsedD.getUTCFullYear();
+            mo = parsedD.getUTCMonth();
+            dy = parsedD.getUTCDate();
+        }
+    }
+
+    const parseTime = (tStr) => {
+        if (!tStr) return null;
+        const clean = String(tStr).replace(/[^0-9]/g, '');
+        if (clean.length >= 4) return { h: parseInt(clean.substring(0, 2), 10), m: parseInt(clean.substring(2, 4), 10) };
+        if (clean.length === 3) return { h: parseInt(clean.substring(0, 1), 10), m: parseInt(clean.substring(1, 3), 10) };
+        return null;
+    };
+
+    const std = parseTime(flight.etd);
+    const sta = parseTime(flight.eta);
+    const stdDate = std ? new Date(Date.UTC(yr, mo, dy, std.h, std.m)) : new Date();
+    let staDate = sta ? new Date(Date.UTC(yr, mo, dy, sta.h, sta.m)) : new Date(stdDate.getTime() + 2 * 3600000);
+    if (staDate < stdDate) staDate.setUTCDate(staDate.getUTCDate() + 1);
+
+    const winStart = new Date(stdDate.getTime() - 3 * 3600000);
+    const winEnd = new Date(staDate.getTime() + 3 * 3600000);
+    const now = new Date();
+
+    const analysis = [];
+    notamRows.forEach(row => {
+        const location = String(row.location || '').trim().toUpperCase();
+        if (!candidateLocs.has(location)) return;
+
+        const parsed = parseNotamRow(row);
+        if (!parsed) return;
+
+        const isTimeOverlap = (parsed.effTo >= winStart && parsed.effFrom <= winEnd);
+        const isScheduleOverlap = checkScheduleDOverlap(parsed.schedule, winStart, winEnd);
+        const timeMatch = isTimeOverlap && isScheduleOverlap;
+
+        const isAerodrome = (location === dep || location === dest || location === alt);
+        let routeHit = isAerodrome;
+        if (!isAerodrome && routeTokens.length > 0) {
+            const matchRes = checkRouteMatch(parsed.rawText, routeTokens);
+            if (matchRes.impacted) routeHit = true;
+        }
+
+        const isDirectImpact = timeMatch && (isAerodrome || routeHit);
+        const isExpired = parsed.effTo < now;
+        const isFuture = parsed.effFrom > now;
+        const status = isExpired ? 'EXPIRED' : (isFuture ? 'FUTURE' : 'ACTIVE');
+
+        analysis.push({
+            id: row.id,
+            location: location,
+            number: row.id,
+            text: row.message,
+            risk: isDirectImpact ? parsed.priority : 'LOW',
+            isDirectImpact,
+            isIndirectImpact: timeMatch && !isDirectImpact,
+            status,
+            matchReason: `Time: ${timeMatch ? 'YES' : 'NO'}, Route/AD: ${routeHit ? 'YES' : 'NO'}`
+        });
+    });
+
+    let finalRisk = 'Clear';
+    if (analysis.some(n => n.risk === 'HIGH' && n.isDirectImpact)) finalRisk = 'HIGH';
+    else if (analysis.some(n => n.risk === 'MEDIUM' && n.isDirectImpact)) finalRisk = 'MEDIUM';
+    else if (analysis.some(n => n.isDirectImpact)) finalRisk = 'LOW';
+
+    return {
+        _rowId: flightId,
+        id: flightId,
+        QZ: flight.callsign,
+        DOF: flight.dof,
+        DEP: dep,
+        DES: dest,
+        ARR: dest,
+        STD: flight.etd,
+        STA: flight.eta,
+        REG: flight.ac_type,
+        analysis,
+        riskLevel: finalRisk,
+        flags: {
+            firMapped: candidateLocs.size > 0,
+            routeMapped: routeTokens.length > 0,
+            altKnown: !!flight.alt,
+            geometryChecked: true,
+            dofInvalid: false
+        }
+    };
+}
+
+async function handleFirGetNotamEditorData(context) {
+    try {
+        const { results } = await context.env.DB.prepare('SELECT * FROM notams').all();
+        const notams = results.map(row => {
+            const eff = row.valid_from ? row.valid_from.replace('T', ' ').substring(0, 16) : '';
+            const exp = row.valid_to ? row.valid_to.replace('T', ' ').substring(0, 16) : '';
+            return {
+                rowId: row.id,
+                Location: row.location,
+                'NOTAM #': row.id,
+                Class: row.notam_code || '',
+                'Issue Date': eff,
+                'Effective Date': eff,
+                'Expiration Date': exp,
+                'NOTAM Text': row.message
+            };
+        });
+        return Response.json({ data: { ok: true, notams, count: notams.length, skipped: 0 } });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleFirGetNotamResults(context) {
+    try {
+        const { results: dbNotams } = await context.env.DB.prepare('SELECT * FROM notams').all();
+        const now = new Date();
+        const results = dbNotams.map(row => {
+            const parsed = parseNotamRow(row);
+            const eff = row.valid_from ? row.valid_from.replace('T', ' ').substring(0, 16) : '';
+            const exp = row.valid_to ? row.valid_to.replace('T', ' ').substring(0, 16) : 'PERM';
+            let status = 'ACTIVE';
+            if (parsed && parsed.effTo && parsed.effTo < now) status = 'EXPIRED';
+            const risk = parsed ? parsed.priority : 'LOW';
+            return {
+                rowId: row.id,
+                Location: row.location,
+                'NOTAM #': row.id,
+                Class: row.notam_code || '',
+                'Issue Date': eff,
+                'Effective Date': eff,
+                'Expiration Date': exp,
+                'NOTAM Text': row.message,
+                status,
+                risk,
+                type: 'NEW'
+            };
+        });
+        return Response.json({ data: { ok: true, results } });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+
 

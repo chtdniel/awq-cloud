@@ -1,0 +1,11 @@
+name = "awq-cron"
+main = "index.js"
+compatibility_date = "2024-03-20"
+
+[triggers]
+crons = ["*/30 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "awq-db"
+database_id = "470bf61d-b694-4d4d-a716-0b74f56a5a8a"
