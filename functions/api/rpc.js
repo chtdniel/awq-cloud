@@ -101,8 +101,10 @@ export async function onRequestPost(context) {
           ]
         });
 
-      case 'getSettingsAccessInfo':
       case 'getNotamData':
+        return await handleGetNotamData(context);
+
+      case 'getSettingsAccessInfo':
       case 'getAirportNotes':
         // Dummy stubs to prevent 404s for functions that aren't fully migrated yet
         return Response.json({ data: {} });
@@ -656,6 +658,29 @@ async function handleSaveNotamData(context, args) {
     } catch (e) {
         console.error("NOTAM Save Error:", e);
         return Response.json({ data: { status: 'error', message: e.message }});
+    }
+}
+
+async function handleGetNotamData(context) {
+    try {
+        const { results } = await context.env.DB.prepare(
+            'SELECT icao, notam_number, type, valid_from, valid_to, schedule, raw_text FROM notams LIMIT 300'
+        ).all();
+
+        const headers = ['LOCATION', 'NOTAM #', 'TYPE', 'VALID FROM', 'VALID TO', 'SCHEDULE', 'TEXT'];
+        const rows = (results || []).map(r => [
+            r.icao || '',
+            r.notam_number || '',
+            r.type || '',
+            r.valid_from || '',
+            r.valid_to || '',
+            r.schedule || '',
+            r.raw_text || ''
+        ]);
+
+        return Response.json({ data: [headers, ...rows] });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
     }
 }
 
