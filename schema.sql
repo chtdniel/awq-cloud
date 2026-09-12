@@ -45,25 +45,62 @@ CREATE TABLE IF NOT EXISTS airport_firs (
     PRIMARY KEY (airport_icao, fir_code)
 );
 
--- Seed minimal: FIR Indonesia (id dipakai sebagai kode FIR/region oleh UI).
+-- Seed FIR: kode FIR ICAO real (WIIF/WAAF/dst, dipakai kolom FIR flights.csv
+-- dan badge risk FIR_Ui) + id gaya kode bandara (kompat handler lama).
+-- Risk: WIIF/WAAF MEDIUM (tersibuk + abu vulkanik); transit LOW.
 INSERT OR IGNORE INTO firs (id, name, risk_level) VALUES
+    ('WIIF', 'Jakarta FIR', 'MEDIUM'),
+    ('WAAF', 'Ujung Pandang FIR', 'MEDIUM'),
+    ('WMFC', 'Kuala Lumpur FIR', 'LOW'),
+    ('WSJC', 'Singapore FIR', 'LOW'),
+    ('VTBB', 'Bangkok FIR', 'LOW'),
+    ('VVTS', 'Ho Chi Minh FIR', 'LOW'),
+    ('YBBB', 'Brisbane FIR', 'LOW'),
+    ('YMMM', 'Melbourne FIR', 'LOW'),
     ('WIII', 'Jakarta FIR', 'LOW'),
-    ('WIIF', 'Jakarta FIR (ICAO FIR code)', 'LOW'),
     ('WAAA', 'Makassar FIR', 'LOW'),
     ('WADD', 'Bali FIR', 'LOW'),
     ('WARR', 'Surabaya FIR', 'LOW'),
     ('WITT', 'Banda Aceh FIR', 'LOW'),
     ('WMSA', 'Subang FIR', 'LOW');
+UPDATE firs SET risk_level = 'MEDIUM' WHERE id = 'WIIF';
+UPDATE firs SET risk_level = 'MEDIUM' WHERE id = 'WAAF';
 
--- Mapping bandara -> FIR (1-1) + contoh multi-FIR: WIII -> [WIII, WIIF].
+-- Mapping bandara -> FIR real (sumber: kolom FIR 1-5 archive/flights.csv
+-- + geografi FIR; WKKK asumsi WAAF — verifikasi manual bila perlu).
 INSERT OR IGNORE INTO airport_firs (airport_icao, fir_code) VALUES
     ('WIII', 'WIII'),
     ('WIII', 'WIIF'),
+    ('WILL', 'WIIF'),
+    ('WIMM', 'WIIF'),
+    ('WIPP', 'WIIF'),
+    ('WARR', 'WIIF'),
     ('WAAA', 'WAAA'),
+    ('WAAA', 'WAAF'),
     ('WADD', 'WADD'),
-    ('WARR', 'WARR'),
+    ('WADD', 'WAAF'),
+    ('WADL', 'WAAF'),
+    ('WATO', 'WAAF'),
+    ('WKKK', 'WAAF'),
     ('WITT', 'WITT'),
-    ('WMSA', 'WMSA');
+    ('WITT', 'WIIF'),
+    ('WMSA', 'WMSA'),
+    ('WMSA', 'WMFC'),
+    ('WMKK', 'WMFC'),
+    ('WMKP', 'WMFC'),
+    ('WMKJ', 'WMFC'),
+    ('WSSS', 'WSJC'),
+    ('VTSP', 'VTBB'),
+    ('VVDN', 'VVTS'),
+    ('VVTS', 'VVTS'),
+    ('YPPH', 'YMMM'),
+    ('YPPD', 'YMMM'),
+    ('YPKG', 'YMMM'),
+    ('YMML', 'YMMM'),
+    ('YPAD', 'YMMM'),
+    ('YPDN', 'YBBB'),
+    ('YSSY', 'YBBB'),
+    ('YSCB', 'YBBB');
 
 CREATE TABLE IF NOT EXISTS routes (
     id TEXT PRIMARY KEY,

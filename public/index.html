@@ -5649,6 +5649,12 @@
       #view-report .btn-execute-cbr { width: 100%; min-height: 44px; }
       #view-report .terminal-window { min-width: max-content; }
     }
+    @media print {
+      #view-report .report-control-bar, #view-report .report-sidebar { display: none !important; }
+      #view-report .report-split-container { display: block; }
+      #view-report .terminal-window { background: #fff !important; color: #000 !important; border: 1px solid #000; }
+      #view-report .terminal-window * { color: #000 !important; background: transparent !important; }
+    }
   </style>
 
   <script>
