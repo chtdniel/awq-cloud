@@ -57,9 +57,20 @@ export async function onRequestPost(context) {
       case 'getActiveNotams':
         return await handleGetActiveNotams(context);
         
+      case 'getSelectedFlightsData':
+        return await handleGetSelectedFlightsData(context, args);
+
+      case 'getActiveFlightList':
+      case 'getFlightSummary':
+        return await handleGetActiveFlightList(context);
+
+      case 'latlongGetEditorData':
+        return await handleLatlongGetEditorData(context);
+
       case 'getSettingsAccessInfo':
       case 'getOperationalReadiness':
       case 'getNotamData':
+      case 'getNotamUpdateHistory':
       case 'getAirportNotes':
         // Dummy stubs to prevent 404s for functions that aren't fully migrated yet
         return Response.json({ data: {} });
@@ -946,3 +957,121 @@ async function handleGetActiveNotams(context) {
         return Response.json({ error: e.message }, { status: 500 });
     }
 }
+
+async function handleGetSelectedFlightsData(context, args) {
+    try {
+        const [rowIds] = args || [];
+        const ids = Array.isArray(rowIds) ? rowIds.map(Number).filter(n => !isNaN(n)) : [];
+        
+        let flightsQuery = 'SELECT * FROM flights';
+        let flightsParams = [];
+        if (ids.length > 0) {
+            flightsQuery += ` WHERE id IN (${ids.map(() => '?').join(',')})`;
+            flightsParams = ids;
+        }
+        
+        const { results: rawFlights } = flightsParams.length > 0
+            ? await context.env.DB.prepare(flightsQuery).bind(...flightsParams).all()
+            : await context.env.DB.prepare(flightsQuery).all();
+
+        const { results: rawRoutes } = await context.env.DB.prepare('SELECT * FROM routes').all();
+        const { results: rawLatlong } = await context.env.DB.prepare('SELECT * FROM latlong ORDER BY id ASC').all();
+
+        const flights = rawFlights.map(row => ({
+            _rowId: row.id,
+            id: row.id,
+            QZ: row.callsign,
+            DOF: row.dof,
+            DEP: row.dep,
+            DES: row.dest,
+            ARR: row.dest,
+            STD: row.etd,
+            STA: row.eta,
+            REG: row.ac_type,
+            ALT: row.alt,
+            TAF_DEP: row.taf_dep,
+            TAF_ARR: row.taf_arr,
+            ENR1: row.enr1,
+            ENR2: row.enr2,
+            ENR3: row.enr3,
+            CGO: row.cgo,
+            ATC: row.atc,
+            REMARK: row.remarks,
+            ROUTE_ID: row.active_route_id,
+            ACTIVE_ROUTE_ID: row.active_route_id
+        }));
+
+        const routes = rawRoutes.map(r => ({
+            ID: r.id,
+            DEP_AIRPORT: r.dep_airport,
+            ARR_AIRPORT: r.arr_airport,
+            DEP_RWY: r.dep_rwy,
+            SID: r.sid,
+            WAYPOINT_SEQ: r.waypoint_seq,
+            STAR: r.star,
+            ARR_RWY: r.arr_rwy,
+            ROUTE_STRING: r.route_string
+        }));
+
+        const latlong = rawLatlong.map(l => ({
+            ID: l.route_id,
+            Waypoint: l.waypoint,
+            Latitude: l.latitude,
+            Longitude: l.longitude
+        }));
+
+        return Response.json({
+            data: {
+                flights,
+                routes,
+                latlong
+            }
+        });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleGetActiveFlightList(context) {
+    try {
+        const { results: rawFlights } = await context.env.DB.prepare('SELECT * FROM flights ORDER BY id ASC').all();
+        const flights = rawFlights.map(f => ({
+            _rowId: f.id,
+            QZ: f.callsign,
+            DOF: f.dof,
+            DEP: f.dep,
+            DES: f.dest,
+            STD: f.etd,
+            STA: f.eta,
+            REG: f.ac_type
+        }));
+        return Response.json({ data: { flights } });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleLatlongGetEditorData(context) {
+    try {
+        const { results: rows } = await context.env.DB.prepare('SELECT * FROM latlong ORDER BY id ASC').all();
+        const formatted = rows.map(r => ({
+            rowId: r.id,
+            ID: r.route_id,
+            Waypoint: r.waypoint,
+            Latitude: r.latitude,
+            Longitude: r.longitude
+        }));
+        return Response.json({
+            data: {
+                ok: true,
+                header: ['ID', 'Waypoint', 'Latitude', 'Longitude'],
+                rows: formatted,
+                count: formatted.length,
+                colMap: { idIdx: 0, wptIdx: 1, latIdx: 2, lonIdx: 3, headerRow: 0 }
+            }
+        });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+

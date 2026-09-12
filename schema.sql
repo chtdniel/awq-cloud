@@ -73,4 +73,13 @@ CREATE TABLE IF NOT EXISTS tafs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS latlong (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    route_id TEXT,
+    waypoint TEXT,
+    latitude TEXT,
+    longitude TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_latlong_route ON latlong(route_id);
+
 -- Note: Schema ini bisa disesuaikan lagi mengikuti kebutuhan data spesifik dari Apps Script sebelumnya.
