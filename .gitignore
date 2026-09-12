@@ -1,0 +1,12 @@
+# Cloudflare & Wrangler
+.wrangler/
+.mf/
+
+# Dependencies
+node_modules/
+
+# Agent & IDE caches
+.claude-flow/
+.omo/
+.DS_Store
+Thumbs.db
