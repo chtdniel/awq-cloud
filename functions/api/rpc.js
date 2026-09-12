@@ -97,6 +97,9 @@ export async function onRequestPost(context) {
       case 'getBriefingForm':
         return await handleGetBriefingForm(context, args);
 
+      case 'getBriefingFormHistory':
+        return await handleGetBriefingFormHistory(context, args);
+
       case 'getOperationalReadiness':
         return await handleGetOperationalReadiness(context);
 
@@ -1633,16 +1636,18 @@ async function handleSaveBriefingForm(context, args) {
         const contentJson = JSON.stringify(payload).slice(0, 200000);
         const flightsStr = flights && typeof flights === 'string' ? flights : '';
         
-        await context.env.DB.prepare(
-            `INSERT OR REPLACE INTO briefing_reports (flights_key, flights, content_json, updated_at)
+        const result = await context.env.DB.prepare(
+            `INSERT INTO briefing_reports (flights_key, flights, content_json, updated_at)
              VALUES (?, ?, ?, datetime('now'))`
         ).bind(flightsKey.toUpperCase(), flightsStr, contentJson).run();
+        const version = result && result.meta ? result.meta.last_row_id : null;
         
         return Response.json({ 
             data: { 
                 status: 'success', 
                 message: 'Briefing form saved',
-                flightsKey: flightsKey.toUpperCase()
+                flightsKey: flightsKey.toUpperCase(),
+                version: version
             } 
         });
     } catch (e) {
@@ -1678,6 +1683,35 @@ async function handleGetBriefingForm(context, args) {
         }
     } catch (e) {
         console.error("Get Briefing Form Error:", e);
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleGetBriefingFormHistory(context, args) {
+    try {
+        const [flightsKey, limitArg] = args || [];
+        
+        if (!flightsKey || typeof flightsKey !== 'string') {
+            return Response.json({ data: { found: false, versions: [] } });
+        }
+        
+        const limit = Math.min(Math.max(parseInt(limitArg, 10) || 20, 1), 50);
+        
+        const { results } = await context.env.DB.prepare(
+            `SELECT id, flights, updated_at FROM briefing_reports
+             WHERE flights_key = ?
+             ORDER BY id DESC LIMIT ?`
+        ).bind(flightsKey.toUpperCase(), limit).all();
+        
+        const versions = (results || []).map(r => ({
+            version: r.id,
+            flights: r.flights,
+            updated_at: r.updated_at
+        }));
+        
+        return Response.json({ data: { found: versions.length > 0, versions } });
+    } catch (e) {
+        console.error("Get Briefing Form History Error:", e);
         return Response.json({ error: e.message }, { status: 500 });
     }
 }

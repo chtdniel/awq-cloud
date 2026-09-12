@@ -148,6 +148,9 @@ CREATE TABLE IF NOT EXISTS briefing_reports (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_briefing_reports_flights_key ON briefing_reports(flights_key);
+-- Versioned: tiap save menambah baris baru; latest = ORDER BY id DESC LIMIT 1.
+-- Migrasi dari skema lama ber-UNIQUE INDEX: drop dulu (no-op di DB baru).
+DROP INDEX IF EXISTS idx_briefing_reports_flights_key;
+CREATE INDEX IF NOT EXISTS idx_briefing_reports_flights_key ON briefing_reports(flights_key);
 
 -- Note: Schema ini bisa disesuaikan lagi mengikuti kebutuhan data spesifik dari Apps Script sebelumnya.
