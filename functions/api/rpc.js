@@ -56,6 +56,13 @@ export async function onRequestPost(context) {
         
       case 'getActiveNotams':
         return await handleGetActiveNotams(context);
+        
+      case 'getSettingsAccessInfo':
+      case 'getOperationalReadiness':
+      case 'getNotamData':
+      case 'getAirportNotes':
+        // Dummy stubs to prevent 404s for functions that aren't fully migrated yet
+        return Response.json({ data: {} });
       
       default:
         console.warn(`[RPC] Method tidak ditemukan: ${method}`);
