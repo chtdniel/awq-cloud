@@ -46,6 +46,9 @@ export async function onRequest(context) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OFBP - ${flights.map(f => f.callsign).join('_')} - ${nowUtc}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="alternate icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <style>
         :root {
             --primary: #0f172a;

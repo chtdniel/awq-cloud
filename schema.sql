@@ -45,6 +45,26 @@ CREATE TABLE IF NOT EXISTS airport_firs (
     PRIMARY KEY (airport_icao, fir_code)
 );
 
+-- Seed minimal: FIR Indonesia (id dipakai sebagai kode FIR/region oleh UI).
+INSERT OR IGNORE INTO firs (id, name, risk_level) VALUES
+    ('WIII', 'Jakarta FIR', 'LOW'),
+    ('WIIF', 'Jakarta FIR (ICAO FIR code)', 'LOW'),
+    ('WAAA', 'Makassar FIR', 'LOW'),
+    ('WADD', 'Bali FIR', 'LOW'),
+    ('WARR', 'Surabaya FIR', 'LOW'),
+    ('WITT', 'Banda Aceh FIR', 'LOW'),
+    ('WMSA', 'Subang FIR', 'LOW');
+
+-- Mapping bandara -> FIR (1-1) + contoh multi-FIR: WIII -> [WIII, WIIF].
+INSERT OR IGNORE INTO airport_firs (airport_icao, fir_code) VALUES
+    ('WIII', 'WIII'),
+    ('WIII', 'WIIF'),
+    ('WAAA', 'WAAA'),
+    ('WADD', 'WADD'),
+    ('WARR', 'WARR'),
+    ('WITT', 'WITT'),
+    ('WMSA', 'WMSA');
+
 CREATE TABLE IF NOT EXISTS routes (
     id TEXT PRIMARY KEY,
     dep_airport TEXT,
@@ -82,5 +102,15 @@ CREATE TABLE IF NOT EXISTS latlong (
     longitude TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_latlong_route ON latlong(route_id);
+
+CREATE TABLE IF NOT EXISTS briefing_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    flights_key TEXT NOT NULL,
+    flights TEXT,
+    content_json TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_briefing_reports_flights_key ON briefing_reports(flights_key);
 
 -- Note: Schema ini bisa disesuaikan lagi mengikuti kebutuhan data spesifik dari Apps Script sebelumnya.

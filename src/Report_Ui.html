@@ -11,6 +11,9 @@
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.compileFinalCbr()" id="btn-exec-cbr">
         <svg class="ic ic-sm"><use href="#i-bolt"/></svg> CREATE REPORT
       </button>
+      <button class="btn-execute-cbr btn-solid-primary" onclick="window.openBriefingForm()" id="btn-open-form">
+        <svg class="ic ic-sm"><use href="#i-bolt"/></svg> OPEN EDITABLE FORM
+      </button>
     </div>
   </div>
   
@@ -226,6 +229,7 @@
     window.renderReportPreview = function() {
        const statusDiv = document.getElementById('report-status');
        const btn = document.getElementById('btn-exec-cbr');
+       const btnOpenForm = document.getElementById('btn-open-form');
        const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
        resetNoSigOnFlightChange(selectedFlights);
        
@@ -294,15 +298,17 @@
        statusDiv.style.display = 'block';
        statusDiv.innerHTML = '<div class="terminal-header">AWQ :: BRIEFING ENGINE :: CORE_STABLE_v2.4</div>';
        
-       if (selectedFlights.length === 0) {
-           btn.disabled = true;
-           btn.innerHTML = `WAITING FOR CONTEXT`;
-           printTerminalLine("CRITICAL: NO FLIGHT DATA DETECTED IN ACTIVE CACHE.", "error");
-           printTerminalLine("INSTRUCTION: SELECT AT LEAST ONE FLIGHT FROM MONITORING BOARD.", "warn");
-       } else {
-           btn.disabled = false;
-           btn.innerHTML = `<svg class="ic ic-sm"><use href="#i-bolt"/></svg> CREATE REPORT`;
-           printTerminalLine(`SYSTEM READY: ${selectedFlights.length} FLIGHTS DETECTED.`, "success");
+        if (selectedFlights.length === 0) {
+            btn.disabled = true;
+            btn.innerHTML = `WAITING FOR CONTEXT`;
+            if (btnOpenForm) btnOpenForm.disabled = true;
+            printTerminalLine("CRITICAL: NO FLIGHT DATA DETECTED IN ACTIVE CACHE.", "error");
+            printTerminalLine("INSTRUCTION: SELECT AT LEAST ONE FLIGHT FROM MONITORING BOARD.", "warn");
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = `<svg class="ic ic-sm"><use href="#i-bolt"/></svg> CREATE REPORT`;
+            if (btnOpenForm) btnOpenForm.disabled = false;
+            printTerminalLine(`SYSTEM READY: ${selectedFlights.length} FLIGHTS DETECTED.`, "success");
            if (noSigCount>0) printTerminalLine(`NO SIG: ${noSigCount} STATION(S) MARKED NO SIGNIFICANT NOTAM.`, "info");
            if (notamCount > 0) {
              printTerminalLine(`NOTAM SYNC: ${notamCount} ANALYSIS SELECTIONS IMPORTED.`, "success");
@@ -345,38 +351,58 @@
        statusDiv.scrollTop = statusDiv.scrollHeight;
     };
 
+    // Helper: accept absolute http/https OR same-origin relative /briefing or /briefing-form URLs
+    window.isValidReportUrl = function(u) {
+      if (!u || typeof u !== 'string') return false;
+      u = u.trim();
+      if (/^https?:\/\/[^\/]+/i.test(u)) return true;
+      if (/^(\/(briefing|briefing-form)[?\/][^\s"'<>]*$)/.test(u)) return true;
+      return false;
+    };
+
+    window.openBriefingForm = function() {
+      const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+      if (selectedFlights.length === 0) return;
+      const callSigns = selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean);
+      if (callSigns.length === 0) return;
+      const formUrl = '/briefing-form?flights=' + encodeURIComponent(callSigns.join(','));
+      window.open(formUrl, '_blank', 'noopener,noreferrer');
+    };
+
     window.compileFinalCbr = function() {
-       const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
-       if (selectedFlights.length === 0) return;
-       
+        const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+        if (selectedFlights.length === 0) return;
+        
         const btn = document.getElementById('btn-exec-cbr');
+        const btnOpenForm = document.getElementById('btn-open-form');
         const statusDiv = document.getElementById('report-status');
         
         window.reportState.isBusy = true;
         btn.disabled = true;
+        if (btnOpenForm) btnOpenForm.disabled = true;
         btn.innerHTML = `<svg class="ic ic-sm"><use href="#i-bolt"/></svg> GENERATING...`;
        
-       statusDiv.innerHTML = '<div class="terminal-header">AWQ :: BRIEFING ENGINE :: CORE_STABLE_v2.4</div>';
-       printTerminalLine("PROCESS START: INITIALIZING DYNAMIC COMPILATION...", "info");
-       
-       const uxSteps = [
-         "ESTABLISHING SECURE HANDSHAKE WITH MISSION_DB...",
-         "VALIDATING ROUTE PROFILES AND EQUIPMENT REGISTRY...",
-         "PREPPING DYNAMIC BRIEFING TEMPLATES...",
-         "FETCHING LIVE WEATHER DATA FROM GLOBAL ENDPOINTS...",
-         "CORRELATING NOTAM ANALYTICS WITH FLIGHT WINDOWS...",
-         "INJECTING STRUCTURED DATA INTO BRIEFING CONTEXT..."
-       ];
-       
-       let stepIndex = 0;
-       const statusCycle = setInterval(() => {
-           if (stepIndex < uxSteps.length) {
-               printTerminalLine(uxSteps[stepIndex++], "info");
-           } else {
-               clearInterval(statusCycle);
-               printTerminalLine("WAIT: FINALIZING PACKAGE AND GENERATING ACCESS URL...", "warn");
-           }
-       }, 1200);
+        statusDiv.innerHTML = '<div class="terminal-header">AWQ :: BRIEFING ENGINE :: CORE_STABLE_v2.4</div>';
+        printTerminalLine("PROCESS START: INITIALIZING DYNAMIC COMPILATION...", "info");
+        
+        const uxSteps = [
+          "ESTABLISHING SECURE HANDSHAKE WITH MISSION_DB...",
+          "VALIDATING ROUTE PROFILES AND EQUIPMENT REGISTRY...",
+          "PREPPING DYNAMIC BRIEFING TEMPLATES...",
+          "FETCHING LIVE WEATHER DATA FROM GLOBAL ENDPOINTS...",
+          "CORRELATING NOTAM ANALYTICS WITH FLIGHT WINDOWS...",
+          "INJECTING STRUCTURED DATA INTO BRIEFING CONTEXT..."
+        ];
+        
+        let stepIndex = 0;
+        const statusCycle = setInterval(() => {
+            if (stepIndex < uxSteps.length) {
+                printTerminalLine(uxSteps[stepIndex++], "info");
+            } else {
+                clearInterval(statusCycle);
+                printTerminalLine("WAIT: FINALIZING PACKAGE AND GENERATING ACCESS URL...", "warn");
+            }
+        }, 1200);
 
         let savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
         let noSigStationMap = getNoSigStationMap();
@@ -396,33 +422,44 @@
         }catch(e){}
        
 
-       google.script.run
-         .withSuccessHandler(res => {
-             clearInterval(statusCycle);
-              if (res.status === "SUCCESS") {
-                  printTerminalLine(`SUCCESS: ${res.message}`, "success");
-                  const rawUrl = String(res.url || '').trim();
-                  // Only render a link for a well-formed https URL (href injection guard).
-                  if (/^https:\/\/[^\s"'<>]+$/i.test(rawUrl)) {
-                      printTerminalLine(`<a href="${esc(rawUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">[ CLICK HERE TO OPEN GENERATED BRIEFING PACKAGE ]</a>`, "success", { allowRawHtml: true });
-                  } else {
-                      printTerminalLine("PACKAGE GENERATED BUT NO VALID HTTPS URL WAS RETURNED.", "warn");
-                  }
-                  btn.innerHTML = `GENERATE COMPLETE`;
-              } else {
-                  printTerminalLine(`EXCEPTION: ${res.message}`, "error");
-                  btn.disabled = false;
-                  btn.innerHTML = `RETRY GENERATION`;
-              }
-              window.reportState.isBusy = false;
-          })
+        google.script.run
+          .withSuccessHandler(res => {
+              clearInterval(statusCycle);
+               if (res.status === "SUCCESS") {
+                   printTerminalLine(`SUCCESS: ${res.message}`, "success");
+                   const rawUrl = String(res.url || '').trim();
+                   
+                   // Render ORIGINAL /briefing link (backward compat)
+                   if (isValidReportUrl(rawUrl)) {
+                       printTerminalLine(`<a href="${esc(rawUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">[ CLICK HERE TO OPEN GENERATED BRIEFING PACKAGE ]</a>`, "success", { allowRawHtml: true });
+                   } else {
+                       printTerminalLine("PACKAGE GENERATED BUT NO VALID HTTPS URL WAS RETURNED.", "warn");
+                   }
+                   
+                   // Build form URL from flights param
+                   const callSigns = selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean);
+                   if (callSigns.length > 0) {
+                       const formUrl = '/briefing-form?flights=' + encodeURIComponent(callSigns.join(','));
+                       printTerminalLine(`<a href="${esc(formUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">[ OPEN EDITABLE BRIEFING FORM ]</a>`, "success", { allowRawHtml: true });
+                   }
+                   
+                   btn.innerHTML = `GENERATE COMPLETE`;
+               } else {
+                   printTerminalLine(`EXCEPTION: ${res.message}`, "error");
+                   btn.disabled = false;
+                   btn.innerHTML = `RETRY GENERATION`;
+               }
+               if (btnOpenForm && selectedFlights.length > 0) btnOpenForm.disabled = false;
+               window.reportState.isBusy = false;
+           })
           .withFailureHandler(err => { 
               clearInterval(statusCycle);
               printTerminalLine(`FATAL ERROR: ${err.message}`, "error");
               btn.disabled = false;
               btn.innerHTML = `RETRY GENERATION`;
+              if (btnOpenForm && selectedFlights.length > 0) btnOpenForm.disabled = false;
               window.reportState.isBusy = false;
-          })
+           })
           .generateBriefingPackage(selectedFlights, savedNotamAnalysis, noSigStationMap);
     };
   </script>

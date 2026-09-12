@@ -64,7 +64,7 @@ export async function onRequestPost(context) {
         return await handleAnalyzeWxWithManual(context, args);
         
       case 'getFirData':
-        return await handleGetFirData(context);
+        return await handleGetFirData(context, args);
         
       case 'getActiveNotams':
         return await handleGetActiveNotams(context);
@@ -90,6 +90,12 @@ export async function onRequestPost(context) {
 
       case 'generateBriefingPackage':
         return await handleGenerateBriefingPackage(context, args);
+
+      case 'saveBriefingForm':
+        return await handleSaveBriefingForm(context, args);
+
+      case 'getBriefingForm':
+        return await handleGetBriefingForm(context, args);
 
       case 'getOperationalReadiness':
         return await handleGetOperationalReadiness(context);
@@ -1121,12 +1127,67 @@ async function handleGetOperationalReadiness(context) {
     }
 }
 
-async function handleGetFirData(context) {
+async function handleGetFirData(context, args) {
     try {
-        // Return dummy or empty data until we have a FIR table in D1
-        // (FIR mapping from airport to FIR code)
-        return Response.json({ data: { firs: [] } });
+        // Port of legacy firGetAirportFirMap_ (archive/FIR_Parity_Backend.gs):
+        // AIRPORT_FIR sheet was 2 columns (ICAO + FIR list split by
+        // whitespace / comma / semicolon). In D1 that list is normalized
+        // into the airport_firs table (one row per ICAO/FIR pair), but we
+        // keep the same split + /^[A-Z]{4}$/ validation for safety in case
+        // a fir_code column ever holds a delimited list.
+        const splitFirList = (raw) => String(raw || '')
+            .split(/[\s,;]+/)
+            .map(s => s.trim().toUpperCase())
+            .filter(x => /^[A-Z]{4}$/.test(x));
+
+        const { results: firRows } = await context.env.DB.prepare(
+            'SELECT id, name, risk_level FROM firs ORDER BY id ASC'
+        ).all();
+
+        // Optional args[0] = ICAO airport filter (e.g. "WIII").
+        // If present, only that airport's mapping is returned in `map`
+        // (legacy firGetAirportFirMap_ / getFlightFirRegions style).
+        let icaoFilter = '';
+        if (args && args.length > 0 && args[0] !== null && args[0] !== undefined) {
+            icaoFilter = String(args[0]).trim().toUpperCase();
+        }
+        if (icaoFilter && !/^[A-Z]{4}$/.test(icaoFilter)) {
+            return Response.json({ data: { firs: [], map: {}, empty: true, hint: "invalid ICAO filter" } });
+        }
+
+        const { results: mapRows } = icaoFilter
+            ? await context.env.DB.prepare('SELECT airport_icao, fir_code FROM airport_firs WHERE airport_icao = ?')
+                .bind(icaoFilter)
+                .all()
+            : await context.env.DB.prepare('SELECT airport_icao, fir_code FROM airport_firs').all();
+
+        const firs = (firRows || []).map(r => ({
+            id: String(r.id || '').trim().toUpperCase(),
+            name: r.name || '',
+            risk_level: r.risk_level || 'LOW'
+        }));
+
+        const map = {};
+        (mapRows || []).forEach(r => {
+            const icao = String(r.airport_icao || '').trim().toUpperCase();
+            const firCodes = splitFirList(r.fir_code);
+            if (!/^[A-Z]{4}$/.test(icao) || firCodes.length === 0) return;
+            if (!map[icao]) map[icao] = [];
+            firCodes.forEach(code => {
+                if (map[icao].indexOf(code) === -1) map[icao].push(code);
+            });
+        });
+
+        // Backward-compat + empty tables: never throw, caller gets a hint.
+        if (firs.length === 0) {
+            return Response.json({
+                data: { firs: [], map: {}, empty: true, hint: "seed firs/airport_firs" }
+            });
+        }
+
+        return Response.json({ data: { firs: firs, map: map } });
     } catch (e) {
+        console.error('FIR Data Error:', e);
         return Response.json({ error: e.message }, { status: 500 });
     }
 }
@@ -1551,5 +1612,73 @@ async function handleFirGetNotamResults(context) {
     }
 }
 
+async function handleSaveBriefingForm(context, args) {
+    try {
+        const [params] = args;
+        
+        if (!params || typeof params !== 'object') {
+            return Response.json({ data: { status: 'error', message: 'Invalid arguments: expected object.' } });
+        }
+        
+        const { flightsKey, flights, payload } = params;
+        
+        if (!flightsKey || typeof flightsKey !== 'string') {
+            return Response.json({ data: { status: 'error', message: 'Missing or invalid flightsKey.' } });
+        }
+        
+        if (!payload || typeof payload !== 'object') {
+            return Response.json({ data: { status: 'error', message: 'Missing or invalid payload.' } });
+        }
+        
+        const contentJson = JSON.stringify(payload).slice(0, 200000);
+        const flightsStr = flights && typeof flights === 'string' ? flights : '';
+        
+        await context.env.DB.prepare(
+            `INSERT OR REPLACE INTO briefing_reports (flights_key, flights, content_json, updated_at)
+             VALUES (?, ?, ?, datetime('now'))`
+        ).bind(flightsKey.toUpperCase(), flightsStr, contentJson).run();
+        
+        return Response.json({ 
+            data: { 
+                status: 'success', 
+                message: 'Briefing form saved',
+                flightsKey: flightsKey.toUpperCase()
+            } 
+        });
+    } catch (e) {
+        console.error("Save Briefing Form Error:", e);
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
 
+async function handleGetBriefingForm(context, args) {
+    try {
+        const [flightsKey] = args;
+        
+        if (!flightsKey || typeof flightsKey !== 'string') {
+            return Response.json({ data: { found: false, payload: null } });
+        }
+        
+        const { results } = await context.env.DB.prepare(
+            `SELECT content_json FROM briefing_reports 
+             WHERE flights_key = ? 
+             ORDER BY id DESC LIMIT 1`
+        ).bind(flightsKey.toUpperCase()).all();
+        
+        if (!results || results.length === 0) {
+            return Response.json({ data: { found: false, payload: null } });
+        }
+        
+        try {
+            const parsedPayload = JSON.parse(results[0].content_json);
+            return Response.json({ data: { found: true, payload: parsedPayload } });
+        } catch (parseErr) {
+            console.error("Failed to parse stored content_json:", parseErr);
+            return Response.json({ data: { found: true, payload: null } });
+        }
+    } catch (e) {
+        console.error("Get Briefing Form Error:", e);
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
 
