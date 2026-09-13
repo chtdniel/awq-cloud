@@ -993,6 +993,15 @@
   }
   window.parseToDbDate = parseToDbDate;
 
+  // Normalisasi tampilan waktu ke HH:MM ('1230' atau '12:30' → '12:30');
+  // ponytail: DB lama menyimpan HHMM polos (4 digit), input baru pakai handleTimeInput
+  // yang sudah menambah colon — fungsi ini toleransi dua format agar mixed rows tetap rapi.
+  function displayTime(v) {
+    const d = String(v || '').replace(/[^0-9]/g, '').padStart(4, '0');
+    if (d === '0000') return '00:00';
+    if (!/^\d{4}$/.test(d)) return String(v || '');
+    return d.substring(0, 2) + ':' + d.substring(2, 4);
+  }
   function timeToMins(tStr) {
     if (!tStr) return 0;
     let s = String(tStr).replace(/[^0-9]/g, '').padStart(4, '0');
@@ -1920,8 +1929,8 @@
               <span class="route-icon ${hasAltClass}" data-row-idx="${f.rowIdx}" data-tooltip="${tooltipHtml.replace(/"/g, '&quot;')}">${iconStr}</span>
             </div>
             <div class="cell-schedule">
-              <div class="time-col"><span class="time-label">STD</span><input class="edit-input data-utc-time" type="text" maxlength="5" aria-label="Scheduled departure time" value="${esc(f.STD)}" placeholder="00:00" onchange="window.handleTimeInput(event, ${f.rowIdx}, 4)" style="width:48px;padding:2px 4px;font-size:13px;"></div>
-              <div class="time-col"><span class="time-label">STA</span><input class="edit-input data-utc-time" type="text" maxlength="5" aria-label="Scheduled arrival time" value="${esc(f.STA)}" placeholder="00:00" onchange="window.handleTimeInput(event, ${f.rowIdx}, 5)" style="width:48px;padding:2px 4px;font-size:13px;"></div>
+              <div class="time-col"><span class="time-label">STD</span><input class="edit-input data-utc-time" type="text" maxlength="5" aria-label="Scheduled departure time" value="${esc(displayTime(f.STD))}" placeholder="00:00" onchange="window.handleTimeInput(event, ${f.rowIdx}, 4)" style="width:48px;padding:2px 4px;font-size:13px;"></div>
+              <div class="time-col"><span class="time-label">STA</span><input class="edit-input data-utc-time" type="text" maxlength="5" aria-label="Scheduled arrival time" value="${esc(displayTime(f.STA))}" placeholder="00:00" onchange="window.handleTimeInput(event, ${f.rowIdx}, 5)" style="width:48px;padding:2px 4px;font-size:13px;"></div>
             </div>
             <div class="cell-ac"><select class="data-reg-code" aria-label="Aircraft registration" onchange="window.saveData(${f.rowIdx}, 6, this, 'text')"><option value="">NIL</option>${acOptions}</select></div>
             <div class="cell-alt col-altn"><input class="edit-input" type="text" aria-label="Alternate airport" value="${esc(f.ALT)}" onchange="window.saveData(${f.rowIdx}, 7, this, 'text')" style="font-size:11px;padding:2px 4px;"></div>
