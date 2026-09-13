@@ -443,6 +443,16 @@
     'YBBB':[133.0,-22.0],'YMMM':[144.8,-37.7],'YSSY':[151.2,-33.9],'YBBN':[153.0,-27.5],'YPAD':[138.5,-34.9],
     'WIII':[106.66,-6.12],'WADD':[115.17,-8.75],'WARR':[112.79,-7.38]
   };
+  // Hydrate koordinat pusat FIR dari DB (getFirGeometry) — DB wins, dict jadi offline fallback.
+  // ponytail: sama dengan FIR_Ui — dict ditarik setelah migrasi Workers penuh.
+  (function hydrateFirnCoordsFromDb() {
+    fetch('/api/rpc', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ method:'getFirGeometry', args: [] }) })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){ var firs = j && j.data && j.data.firs; if (!Array.isArray(firs)) return;
+        firs.forEach(function(f){ if (typeof f.lat === 'number' && typeof f.lon === 'number') firnFallbackCoords[f.id] = [f.lon, f.lat]; });
+      })
+      .catch(function(){});
+  })();
   function firnParseCoordFromText(text) {
     try {
       if (!text || typeof text !== 'string') return null;
@@ -1077,6 +1087,8 @@
 
   function clearForm() {
     state.editingRowId = null;
+    state.editingUpdatedAt = '';
+    state.editingSnapshot = null;
     $('firn-location').value = '';
     $('firn-number').value = '';
     $('firn-class').value = '';
@@ -1100,6 +1112,8 @@
     var n = state.notams.find(function (x) { return x.rowId === rowId; });
     if (!n) return;
     state.editingRowId = rowId;
+    state.editingUpdatedAt = n.updatedAt || '';
+    state.editingSnapshot = n;
     $('firn-location').value = String(n.Location || '').toUpperCase();
     $('firn-number').value = String(n['NOTAM #'] || '').toUpperCase();
     $('firn-class').value = String(n.Class || '').toUpperCase();
@@ -1125,6 +1139,7 @@
   function collectPayload() {
     return {
       rowId: state.editingRowId,
+      updatedAt: state.editingUpdatedAt || '',
       Location: $('firn-location').value,
       'NOTAM #': $('firn-number').value,
       Class: $('firn-class').value,
@@ -1172,7 +1187,7 @@
   async function remove() {
     if (!state.editingRowId) return;
     if (!confirm('Delete NOTAM row ' + state.editingRowId + '? This cannot be undone.')) return;
-    var res = await run('firDeleteNotam', state.editingRowId);
+    var res = await run('firDeleteNotam', { rowId: state.editingRowId, updatedAt: state.editingUpdatedAt || '' });
     if (res && res.ok) {
       addToast(res.message || 'Deleted.');
       await load(true);

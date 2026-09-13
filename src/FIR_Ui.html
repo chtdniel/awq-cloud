@@ -912,6 +912,18 @@
     'KZAK':[-170.0,55.0],'KZNY':[-72.0,41.0],'KZWY':[-30.0,30.0],'SANFR':[22.0,-5.0],'WMKK':[101.7,2.7]
   };
   window.firFallbackCoords = firFallbackCoords;
+  // Hydrate koordinat pusat FIR dari DB (getFirGeometry) — DB wins, dict jadi offline fallback.
+  // ponytail: dict tetap ada karena halaman ini masih dideploy via GAS di mana /api/rpc tidak tersedia;
+  // setelah penuh migrasi Workers, hapus dict dan jadikan fetch wajib.
+  function hydrateFirCoordsFromDb() {
+    fetch('/api/rpc', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ method:'getFirGeometry', args: [] }) })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { const firs = j && j.data && j.data.firs; if (!Array.isArray(firs)) return;
+        firs.forEach(f => { if (typeof f.lat === 'number' && typeof f.lon === 'number') firFallbackCoords[f.id] = [f.lon, f.lat]; });
+      })
+      .catch(() => {});
+  }
+  hydrateFirCoordsFromDb();
   function parseNotamCoordFromText(text) {
     try {
       if (!text || typeof text !== 'string') return null;

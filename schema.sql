@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS notams (
 CREATE TABLE IF NOT EXISTS firs (
     id TEXT PRIMARY KEY,
     name TEXT,
-    risk_level TEXT -- e.g., 'HIGH', 'MED', 'LOW'
+    risk_level TEXT, -- e.g., 'HIGH', 'MED', 'LOW'
+    lat REAL,
+    lon REAL,        -- FIR centre point (single source of truth for FIR map)
+    geometry TEXT    -- ponytail: polygon GeoJSON for the far future; NULL = titik pusat saja
 );
 
 CREATE TABLE IF NOT EXISTS airport_firs (
@@ -65,6 +68,22 @@ INSERT OR IGNORE INTO firs (id, name, risk_level) VALUES
     ('WMSA', 'Subang FIR', 'LOW');
 UPDATE firs SET risk_level = 'MEDIUM' WHERE id = 'WIIF';
 UPDATE firs SET risk_level = 'MEDIUM' WHERE id = 'WAAF';
+
+-- Seed koordinat pusat FIR (perkiraan pusat wilayah; sumber pengganti firFallbackCoords frontend)
+UPDATE firs SET lat = -4,    lon = 108    WHERE id = 'WIIF';
+UPDATE firs SET lat = -3,    lon = 124    WHERE id = 'WAAF';
+UPDATE firs SET lat = 4,     lon = 103    WHERE id = 'WMFC';
+UPDATE firs SET lat = 1.5,   lon = 104    WHERE id = 'WSJC';
+UPDATE firs SET lat = 13,    lon = 101    WHERE id = 'VTBB';
+UPDATE firs SET lat = 10,    lon = 108    WHERE id = 'VVTS';
+UPDATE firs SET lat = -27,   lon = 153    WHERE id = 'YBBB';
+UPDATE firs SET lat = -35,   lon = 144    WHERE id = 'YMMM';
+UPDATE firs SET lat = -4,    lon = 108    WHERE id = 'WIII';
+UPDATE firs SET lat = -5,    lon = 119    WHERE id = 'WAAA';
+UPDATE firs SET lat = -8.5,  lon = 115    WHERE id = 'WADD';
+UPDATE firs SET lat = -7,    lon = 112    WHERE id = 'WARR';
+UPDATE firs SET lat = 5,     lon = 95     WHERE id = 'WITT';
+UPDATE firs SET lat = 3,     lon = 101.5  WHERE id = 'WMSA';
 
 -- Mapping bandara -> FIR real (sumber: kolom FIR 1-5 archive/flights.csv
 -- + geografi FIR; WKKK asumsi WAAF — verifikasi manual bila perlu).

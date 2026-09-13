@@ -6,15 +6,22 @@
 export function duParseIcaoDateCode(s) {
     if (!s || s.length < 6) return null;
     const code = s.length >= 10 ? s.slice(0, 10) : s.slice(0, 6);
+    // Guard "991332" dan semacamnya: bulan/hari/jam di luar jangkauan → null, bukan Invalid Date.
     const year = 2000 + parseInt(code.slice(0, 2), 10);
     const month = parseInt(code.slice(2, 4), 10) - 1;
     const day = parseInt(code.slice(4, 6), 10);
+    if (month < 0 || month > 11 || day < 1 || day > 31) return null;
+    let hours = 0, minutes = 0;
     if (s.length >= 10) {
-      const hours = parseInt(code.slice(6, 8), 10);
-      const minutes = parseInt(code.slice(8, 10), 10);
-      return new Date(Date.UTC(year, month, day, hours, minutes));
+      hours = parseInt(code.slice(6, 8), 10);
+      minutes = parseInt(code.slice(8, 10), 10);
+      if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 23 || minutes > 59) return null;
     }
-    return new Date(Date.UTC(year, month, day));
+    const date = new Date(Date.UTC(year, month, day, hours, minutes));
+    if (isNaN(date.getTime())) return null;
+    // Round-trip check: "260231" (31 Feb) harus ditolak, bukan dilempar sebagai 3 Mar.
+    if (hours === 0 && minutes === 0 && (date.getUTCMonth() !== month || date.getUTCDate() !== day)) return null;
+    return date;
 }
   
 export function duFormatDateTimeUTC(d) {

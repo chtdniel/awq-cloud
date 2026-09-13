@@ -41,7 +41,8 @@ function firGetNotamEditorData() {
         'Issue Date': eff, // Mapped effective as issue as a fallback if issue date isn't kept separately
         'Effective Date': eff,
         'Expiration Date': exp,
-        'NOTAM Text': row.message
+        'NOTAM Text': row.message,
+        updatedAt: row.updated_at || ''
       });
     }
     
@@ -76,8 +77,8 @@ function firSaveNotam(payload) {
     
     const query = `
       INSERT INTO notams 
-      (id, location, notam_code, message, valid_from, valid_to, risk_level, is_active) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (id, location, notam_code, message, valid_from, valid_to, risk_level, is_active, updated_at) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `;
     
     const params = [
@@ -114,28 +115,44 @@ function firUpdateNotam(payload) {
     const clean = firNotamValidate(payload);
     if (clean.error) return clean;
     
-    const dup = firNotamDuplicateCheck(clean.Location, clean['NOTAM #'], rowId);
-    if (dup) return { ok: false, error: 'NOTAM ' + clean['NOTAM #'] + ' already exists. Edit the existing row instead.' };
-    
-    const query = `
-      UPDATE notams 
-      SET location = ?, notam_code = ?, message = ?, valid_from = ?, valid_to = ?
-      WHERE id = ?
-    `;
-    
-    const params = [
-      clean.Location,
-      clean.Class,
-      clean['NOTAM Text'],
-      clean['Effective Date'],
-      clean['Expiration Date'],
-      rowId
-    ];
-    
-    D1Helper.run(query, params);
+    // Optimistic check + short lock: 2 tab bisa lolos check bersamaan kalau tanpa lock (TOCTOU).
+    // ponytail: 5s lock cukup; full row-versioning penalti besar tidak dibutuhkan untuk beban ini.
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(5000)) return { ok: false, error: 'Another user is saving right now. Try again.' };
+    try {
+      const current = D1Helper.select("SELECT updated_at FROM notams WHERE id = ? LIMIT 1", [rowId]);
+      if (!current || !current.length) return { ok: false, error: 'Row ' + rowId + ' no longer exists (deleted elsewhere?). Reload.' };
+      const dbUpdatedAt = String(current[0].updated_at || '');
+      const clientUpdatedAt = String(payload.updatedAt || '');
+      if (dbUpdatedAt && clientUpdatedAt && dbUpdatedAt !== clientUpdatedAt) {
+        return { ok: false, error: 'Row changed by another user since you opened it. Reload the list (stale editor), then re-view.' };
+      }
+
+      const dup = firNotamDuplicateCheck(clean.Location, clean['NOTAM #'], rowId);
+      if (dup) return { ok: false, error: 'NOTAM ' + clean['NOTAM #'] + ' already exists. Edit the existing row instead.' };
+      
+      const query = `
+        UPDATE notams 
+        SET location = ?, notam_code = ?, message = ?, valid_from = ?, valid_to = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `;
+      
+      const params = [
+        clean.Location,
+        clean.Class,
+        clean['NOTAM Text'],
+        clean['Effective Date'],
+        clean['Expiration Date'],
+        rowId
+      ];
+      
+      D1Helper.run(query, params);
+    } finally {
+      lock.releaseLock();
+    }
     
     firClearNotamCache();
-    return { ok: true, message: 'NOTAM ' + clean['NOTAM #'] + ' updated.' };
+    return { ok: true, message: 'NOTAM ' + clean['NOTAM #'] + ' updated.', updatedAt: new Date().toISOString() };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -143,12 +160,23 @@ function firUpdateNotam(payload) {
 
 /**
  * Delete a FIR NOTAM row by its ID.
+ * rowId: string OR { rowId, updatedAt } — updatedAt enables stale-delete protection.
  * @expose
  */
-function firDeleteNotam(rowId) {
+function firDeleteNotam(rowIdArg) {
   try {
     requireAuthorized();
+    const payload = (rowIdArg && typeof rowIdArg === 'object') ? rowIdArg : { rowId: rowIdArg };
+    const rowId = payload.rowId;
     if (!rowId) return { ok: false, error: 'Invalid rowId.' };
+    
+    const current = D1Helper.select("SELECT updated_at FROM notams WHERE id = ? LIMIT 1", [rowId]);
+    if (!current || !current.length) return { ok: false, error: 'Row ' + rowId + ' no longer exists. Reload.' };
+    const dbUpdatedAt = String(current[0].updated_at || '');
+    const clientUpdatedAt = String(payload.updatedAt || '');
+    if (dbUpdatedAt && clientUpdatedAt && dbUpdatedAt !== clientUpdatedAt) {
+      return { ok: false, error: 'Row changed by another user. Reload the list first.' };
+    }
     
     D1Helper.run("DELETE FROM notams WHERE id = ?", [rowId]);
     

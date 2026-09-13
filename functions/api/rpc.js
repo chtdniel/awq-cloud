@@ -1,12 +1,39 @@
 import { parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch } from './notamUtils.js';
 
+function rpcGuard(context) {
+  // Saat Cloudflare Access on, JWT header selalu ada.
+  if (context.request.headers.get('Cf-Access-Jwt-Assertion')) return null;
+
+  // Fallback: browser same-origin check — bot/curl tanpa Origin diblok.
+  // ponytail: bukan proof-of-work; setelah Access aktif diha, jalur ini bisa dilepas
+  const origin = context.request.headers.get('Origin');
+  const host = context.request.headers.get('Host') || '';
+  if (!origin || !host) return 'Missing Origin/Host';
+  try {
+    if (new URL(origin).host !== host) return 'Cross-origin request';
+  } catch { return 'Bad Origin header'; }
+
+  // E-mail pengguna dari Access (kalau Access on, front end kirim via header alt)
+  const accessEmail = context.request.headers.get('CF-Access-Authenticated-User-Email');
+  if (accessEmail && !accessEmail.endsWith('@' + (context.env.RPC_ALLOWED_EMAIL_DOMAIN || ''))) {
+    // ponytail: domain whitelist opsional; tanpa env, semua email Access lolos
+    if (context.env.RPC_ALLOWED_EMAIL_DOMAIN) return 'Email not allowed';
+  }
+
+  return null;
+}
+
 export async function onRequestPost(context) {
   try {
+    const guardError = rpcGuard(context);
+    if (guardError) {
+      console.warn('[RPC] Guard rejected request:', guardError);
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const requestData = await context.request.json();
     const { method, args } = requestData;
 
     console.log(`[RPC] Memanggil method: ${method}`);
-
     // TODO: Implementasi logika untuk masing-masing fungsi backend (.gs) di sini
     switch (method) {
       case 'getFlightDashboardData':
@@ -65,6 +92,9 @@ export async function onRequestPost(context) {
         
       case 'getFirData':
         return await handleGetFirData(context, args);
+
+      case 'getFirGeometry':
+        return await handleGetFirGeometry(context);
         
       case 'getActiveNotams':
         return await handleGetActiveNotams(context);
@@ -646,10 +676,11 @@ async function handleSaveNotamData(context, args) {
         
         // First, clear the existing NOTAM table completely
         // In SQLite/D1, to do a full overwrite we DELETE all rows.
-        await context.env.DB.prepare('DELETE FROM notams').run();
+        // D1 batch = atomic (single transaction) — DELETE gagal di tengah tidak menyisakan tabel kosong.
+        const deleteAllStmt = context.env.DB.prepare('DELETE FROM notams');
         
         // Prepare batch inserts
-        const stmts = [];
+        const stmts = [deleteAllStmt];
         let rowsInserted = 0;
         
         for (const row of dataRows) {
@@ -1011,11 +1042,54 @@ async function handleAnalyzeWxWithManual(context, args) {
             }
         };
 
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-            method: 'POST',
-            headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
+        const res = await (async () => {
+            // Lapis 1: response cache (Cache API native Workers, tanpa KV) — prompt sama = 1x panggil Gemini.
+            // ponytail: TTL 30 menit cukup untuk window TAF aktif; cache miss jatuh ke limiter Lapis 2.
+            const cacheKey = 'https://wx-cache.internal/gemini?' + model + '_' + userText.length + '_' + (userText.split('TAF ')[1] || '').slice(0, 120);
+            const cacheReq = new Request(cacheKey);
+            const cached = await caches.default.match(cacheReq);
+            if (cached) return cached;
+            // Lapis 2: limit harian dari D1; habis kuota → caller lanjut ke fallback heuristik, bukan error.
+            const rateLimit = Number(context.env.GEMINI_DAILY_LIMIT || 500);
+            const countKey = 'gemini_daily_' + new Date().toISOString().slice(0, 10);
+            const used = await context.env.DB.prepare('SELECT CAST(value AS INTEGER) AS n FROM meta WHERE key = ?').bind(countKey).first();
+            if (used && used.n >= rateLimit) {
+                console.warn('[WX] Gemini daily limit reached:', used.n);
+                return null;
+            }
+            const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+                method: 'POST',
+                headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (r.ok) {
+                // increment tidak atomik lintas-isolate: drift kecil diterima — ini pembatas biaya, bukan pembukuan audit.
+                if (context.env.DB) {
+                    try {
+                        if (used) {
+                            await context.env.DB.prepare('UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = ?').bind(countKey).run();
+                } else {
+                            await context.env.DB.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, 1)').bind(countKey).run();
+                        }
+                    } catch (dbErr) { console.warn('[WX] rate counter write failed:', dbErr.message); }
+                }
+                // cache response 30 menit — request identik berikutnya tidak lulus limiter (hit tidak dihitung).
+                const resC = new Response(r.body, r);
+                resC.headers.append('Cache-Control', 'public, max-age=1800');
+                context.waitUntil(caches.default.put(cacheReq, resC.clone()));
+                return resC;
+            }
+            return r;
+        })();
+        if (!res) {
+            return Response.json({ data: {
+                dep: evaluateTafLegRuleBased(p.tafDep, 'DEP'),
+                arr: evaluateTafLegRuleBased(p.tafArr, 'ARR'),
+                alt: evaluateTafLegRuleBased(p.tafAlt, 'ALT'),
+                source: 'heuristic-rules-fallback',
+                model: 'rule-engine-v2'
+            }});
+        }
 
         if (!res.ok) {
             // Graceful fallback to rule-based engine on API error
@@ -1159,6 +1233,27 @@ async function handleGetOperationalReadiness(context) {
                 error: e.message
             }
         });
+    }
+}
+
+// Titik pusat FIR dari tabel firs (single source untuk peta frontend).
+// return: { firs: [{id, name, riskLevel, lat, lon}] }
+async function handleGetFirGeometry(context) {
+    try {
+        const { results } = await context.env.DB.prepare(
+            'SELECT id, name, risk_level, lat, lon FROM firs WHERE lat IS NOT NULL AND lon IS NOT NULL'
+        ).all();
+        const firs = (results || []).map(r => ({
+            id: r.id,
+            name: r.name,
+            riskLevel: r.risk_level,
+            lat: r.lat,
+            lon: r.lon
+        }));
+        return Response.json({ data: { firs } });
+    } catch (e) {
+        console.error('[RPC] getFirGeometry Error:', e);
+        return Response.json({ error: e.message }, { status: 500 });
     }
 }
 
@@ -1411,6 +1506,10 @@ async function handleAnalyzeFlightNotams(context, args) {
         if (!flight) return Response.json({ error: `Flight row ${rowId} not found` }, { status: 404 });
 
         const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
+        // ponytail: full read notams disengaja — analyzeSingleFlight match location dari
+        // banyak sumber (dep/dest/alt/enr1-3/FIR map); prefilter WHERE location IN berisiko
+        // melewatkan NOTAM valid (flight safety). Upgrade prefilter setelah matcher
+        // dinormalisasi — index migration 004 membantu query lain sementara ini.
         const { results: notams } = await context.env.DB.prepare('SELECT * FROM notams').all();
 
         const result = analyzeSingleFlight(flight, notams, routes);
@@ -1828,15 +1927,38 @@ async function handleAnalyzeFlightBoardNotams(context, args) {
     }
 }
 
+// Validasi data flight dari frontend di trust boundary (pintu masuk DB) — OWASP A03/A01.
+const callsignRe = /^[A-Z0-9]{2,10}$/;
+const icaoRe = /^[A-Z]{4}$/;
+const dofRe = /^\d{8}$/;
+const timeRe = /^\d{2,4}$/; // HHMM atau HH:MM
+
+function validateFlightForm(fd) {
+    if (!fd || typeof fd !== 'object') return 'formData invalid';
+    const cs = String(fd.FLT_NO || '').trim().toUpperCase();
+    if (!callsignRe.test(cs)) return 'FLT_NO invalid (2-10 alfanumerik)';
+    if (!dofRe.test(String(fd.DOF || '').trim())) return 'DOF invalid (format YYYYMMDD)';
+    if (!icaoRe.test(String(fd.DEP || '').trim().toUpperCase())) return 'DEP invalid (kode ICAO 4 huruf)';
+    if (!icaoRe.test(String(fd.ARR || '').trim().toUpperCase())) return 'ARR invalid (kode ICAO 4 huruf)';
+    if (String(fd.STD || '').trim() && !timeRe.test(String(fd.STD).trim())) return 'STD invalid (HHMM)';
+    if (String(fd.STA || '').trim() && !timeRe.test(String(fd.STA).trim())) return 'STA invalid (HHMM)';
+    return null;
+}
+
 async function handleAddNewFlightToDb(context, args) {
     try {
         const [formData] = args;
+        const err = validateFlightForm(formData);
+        if (err) return Response.json({ error: err }, { status: 400 });
         const query = `INSERT INTO flights (callsign, dof, dep, dest, etd, eta, ac_type, alt, atc, taf_dep, taf_arr, cgo, remarks)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
         await context.env.DB.prepare(query).bind(
-            formData.FLT_NO, formData.DOF, formData.DEP, formData.ARR, formData.STD, formData.STA,
-            formData.REG, formData.ALT, formData.ATC, formData.TAF_DEP, formData.TAF_ARR,
-            formData.CGO, formData.REMARK
+            String(formData.FLT_NO).trim().toUpperCase(), String(formData.DOF).trim(),
+            String(formData.DEP).trim().toUpperCase(), String(formData.ARR).trim().toUpperCase(),
+            formData.STD || '', formData.STA || '',
+            String(formData.REG || '').trim(), String(formData.ALT || '').trim().toUpperCase(), String(formData.ATC || '').trim(),
+            String(formData.TAF_DEP || '').trim(), String(formData.TAF_ARR || '').trim(),
+            String(formData.CGO || '').trim(), String(formData.REMARK || '').trim()
         ).run();
         return await handleGetFlightDashboardData(context);
     } catch (e) {
@@ -1847,9 +1969,11 @@ async function handleAddNewFlightToDb(context, args) {
 async function handleBulkUpdateFlightDof(context, args) {
     try {
         const [rowIds, newDof] = args;
-        if (!Array.isArray(rowIds) || rowIds.length === 0) return await handleGetFlightDashboardData(context);
-        const query = `UPDATE flights SET dof = ? WHERE id IN (${rowIds.map(() => '?').join(',')})`;
-        await context.env.DB.prepare(query).bind(newDof, ...rowIds).run();
+        const ids = Array.isArray(rowIds) ? rowIds.map(Number).filter(n => !isNaN(n)) : [];
+        if (!dofRe.test(String(newDof || '').trim())) return Response.json({ error: 'DOF invalid (YYYYMMDD)' }, { status: 400 });
+        if (ids.length === 0) return await handleGetFlightDashboardData(context);
+        const query = `UPDATE flights SET dof = ? WHERE id IN (${ids.map(() => '?').join(',')})`;
+        await context.env.DB.prepare(query).bind(String(newDof).trim(), ...ids).run();
         return await handleGetFlightDashboardData(context);
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
