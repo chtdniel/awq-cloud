@@ -7243,7 +7243,7 @@
           '<div class="taf-card-footer">' +
             '<div style="display: flex; flex-direction: column; gap: 2px;">' +
               '<span>LATEST SYNC (Z)</span>' +
-              '<span style="color:var(--text-primary); font-weight:700;">' + esc(item.TIMESTAMP) + '</span>' +
+              '<span style="color:var(--text-primary); font-weight:700;">' + esc(window.occShortUtcLabel_(item.TIMESTAMP)) + '</span>' +
             '</div>' +
             '<span class="freshness-badge ' + freshnessClass + '">' + freshnessText + '</span>' +
           '</div>';
@@ -7264,6 +7264,19 @@
   window.occFormatUtcTimestamp_ = function(d) {
     var dd = d instanceof Date ? d : new Date();
     return dd.toISOString().slice(0, 19).replace('T', ' ') + 'Z';
+  };
+  // LATEST SYNC: TAF.timestamp mentah bisa ISO panjang ("2026-09-11T17:00:00.000Z") —
+  // normalkan ke "HH:MM" bila hari ini, "DD HH:MM" bila beda hari.
+  window.occShortUtcLabel_ = function(ts) {
+    if (!ts) return '—';
+    var raw = String(ts).trim().replace(' ', 'T').replace(/\//g, '-');
+    if (raw && raw.slice(-1) !== 'Z' && raw.indexOf('+') === -1 && /T\d{2}:\d{2}/.test(raw)) raw += 'Z';
+    var d = new Date(raw);
+    if (isNaN(d.getTime())) return String(ts);
+    var hm = String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+    var now = new Date();
+    if (d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() === now.getUTCMonth() && d.getUTCDate() === now.getUTCDate()) return hm;
+    return String(d.getUTCDate()).padStart(2, '0') + ' ' + hm;
   };
   window.updateLocalTaf = function(index, field, value, el) {
     if (!localTafData[index]) return;
