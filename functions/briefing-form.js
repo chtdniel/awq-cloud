@@ -635,6 +635,7 @@ export async function onRequest(context) {
         <span class="toolbar-title">Crew Briefing Report Form &middot; ${escapeHtml(flightList.join(' / '))}</span>
         <button type="button" class="btn" id="saveBtn">SAVE</button>
         <button type="button" class="btn secondary" id="printBtn">PRINT</button>
+        <button type="button" class="btn secondary" id="xlsBtn">DOWNLOAD XLS</button>
         <span id="saveStatus"></span>
     </div>
 
@@ -902,6 +903,61 @@ export async function onRequest(context) {
             });
         }
 
+        // Export tampilan sekarang ke tabel HTML agar bisa di-download sebagai .xls
+        // (koordinasi: fungsi ini membaca dari field DOM — hasil download = tampilan saat ini, bukan data awal).
+        function downloadBriefingXls() {
+            var form = collectForm();
+            var esc2 = function (v) {
+                return String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+            };
+            var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" '
+                + 'xmlns:x="urn:schemas-microsoft-com:office:excel"><head>'
+                + '<meta charset="UTF-8"></head><body>';
+            html += '<table border="1">';
+            html += '<tr><th colspan="10">Crew Briefing Report Form</th></tr>';
+            html += '<tr><td colspan="7">Rec. No.: ' + esc2(form.fields.recNo) + '</td>'
+                + '<td colspan="3">Date: ' + esc2(form.fields.formDate) + ' · Page: ' + esc2(form.fields.pageOf) + '</td></tr>';
+            html += '<tr><th>LEG</th><th>FLIGHT NO.</th><th>DATE</th><th>A/C REG</th><th>POD</th>'
+                + '<th>STD / ETD</th><th>POA</th><th>STA / ETA</th><th>ALTN</th><th>OFP REF NO.</th></tr>';
+            for (var i = 0; i < form.legs.length; i++) {
+                var lg = form.legs[i];
+                html += '<tr><td>' + lg.leg + '</td><td>' + esc2(lg.flightNo) + '</td><td>' + esc2(lg.date)
+                    + '</td><td>' + esc2(lg.reg) + '</td><td>' + esc2(lg.pod) + '</td><td>' + esc2(lg.std)
+                    + '</td><td>' + esc2(lg.poa) + '</td><td>' + esc2(lg.sta) + '</td><td>' + esc2(lg.alt)
+                    + '</td><td>' + esc2(lg.ofpRef) + '</td></tr>';
+            }
+            html += '<tr><th colspan="5">TAF — STATION / TIME / FORECAST (KIRI)</th>'
+                + '<th colspan="5">TAF — STATION / TIME / FORECAST (KANAN)</th></tr>';
+            for (var j = 0; j < form.tafs.length; j += 2) {
+                var t1 = form.tafs[j], t2 = form.tafs[j + 1];
+                html += '<tr>'
+                    + '<td colspan="2">' + esc2(t1 ? t1.stationEntered || t1.station : '') + '</td>'
+                    + '<td>' + esc2(t1 ? t1.time : '') + '</td>'
+                    + '<td colspan="2">' + esc2(t1 ? t1.forecast : '') + '</td>'
+                    + '<td colspan="2">' + esc2(t2 ? t2.stationEntered || t2.station : '') + '</td>'
+                    + '<td>' + esc2(t2 ? t2.time : '') + '</td>'
+                    + '<td colspan="2">' + esc2(t2 ? t2.forecast : '') + '</td></tr>';
+            }
+            html += '<tr><th colspan="2">STATION</th><th colspan="8">SIGNIFICANT NOTAM\'S</th></tr>';
+            for (var k = 0; k < form.notams.length; k++) {
+                var nt = form.notams[k];
+                html += '<tr><td colspan="2">' + esc2(nt.stationEntered || nt.station) + '</td>'
+                    + '<td colspan="8">' + esc2(nt.text) + '</td></tr>';
+            }
+            html += '<tr><td colspan="5">DXR ON DUTY<br>NAME / SIGN<br>' + esc2(form.signatures.dxrName) + '</td>'
+                + '<td colspan="5">PIC<br>NAME / SIGN<br>' + esc2(form.signatures.picName) + '</td></tr>';
+            html += '<tr><td colspan="10">IAA/OCC/F/001 Rev.03 · Dec 2025</td></tr>';
+            html += '</table></body></html>';
+            var blob = new Blob(['\\ufeff', html], { type: 'application/vnd.ms-excel' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'Crew-Briefing-' + (FLIGHTS_KEY || 'report').replace(/[^A-Za-z0-9,-]+/g, '_') + '.xls';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        }
+
         document.addEventListener('input', function (e) {
             var t = e.target;
             if (t && t.getAttribute && t.getAttribute('data-field')) dirty = true;
@@ -912,6 +968,8 @@ export async function onRequest(context) {
             if (saveBtn) saveBtn.addEventListener('click', saveBriefingForm);
             var printBtn = document.getElementById('printBtn');
             if (printBtn) printBtn.addEventListener('click', function () { window.print(); });
+            var xlsBtn = document.getElementById('xlsBtn');
+            if (xlsBtn) xlsBtn.addEventListener('click', downloadBriefingXls);
 
             // Date auto-fills from the server clock; refresh only if left blank.
             var dateEl = byField('formDate');
