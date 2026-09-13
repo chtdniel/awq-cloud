@@ -7884,7 +7884,13 @@
   </div>
 
   <script>
-    (function() {
+  (function() {
+  // Normalisasi waktu HHMM polos (DB legacy) maupun HH:MM → jam 2 digit + label HH:MM.
+  // ponytail: split(':')[0] lama PECAH di '1230' → staH='1230' → parseInt%24=6, alt window ngaco.
+  function wxHourParts(v) {
+    const d = String(v || '').replace(/[^0-9]/g, '').padStart(4, '0');
+    return { hh: d.slice(0, 2), label: d.slice(0, 2) + ':' + d.slice(2, 4) };
+  }
       window.weatherDataCache = null;
       window.weatherLastUpdate = null;
       window.wxRules = null;   // {rules,useRules,source} from getWxRules()
@@ -8189,8 +8195,8 @@
         const orig = btn ? btn.innerText : '';
         if (btn) { btn.disabled = true; btn.innerText = 'ANALYZING...'; }
         if (box) { box.style.display = 'grid'; box.innerHTML = '<div style="font-size:12px;opacity:.65;">ANALYZING... (you may switch tabs, result will be saved)</div>'; }
-        const stdH = f.std ? String(f.std).split(':')[0] : '0';
-        const staH = f.sta ? String(f.sta).split(':')[0] : '0';
+        const stdH = wxHourParts(f.std).hh;
+        const staH = wxHourParts(f.sta).hh;
         const altH = String((parseInt(staH, 10) + 1) % 24);
         const clearWxTimer = () => {
           try { if (window.wxAiTimers && window.wxAiTimers[rowIdx]) { clearTimeout(window.wxAiTimers[rowIdx]); delete window.wxAiTimers[rowIdx]; } } catch (e) {}
@@ -8430,8 +8436,8 @@
         let kpiDanger = 0, kpiWarn = 0, kpiClear = 0, kpiNoData = 0;
 
         container.innerHTML = activeFlights.map((f, idx) => {
-          const stdH = f.std ? f.std.split(':')[0] : 0;
-          const staH = f.sta ? f.sta.split(':')[0] : 0;
+          const stdH = wxHourParts(f.std).hh;
+          const staH = wxHourParts(f.sta).hh;
           const altWindowStart = (parseInt(staH) + 1) % 24;
           const altWindowEnd = (parseInt(staH) + 3) % 24;
 
@@ -8477,7 +8483,7 @@
               <div class="weather-card-main">
                 <div class="weather-point ${getStatusClass(depStatus)}">
                   <div class="point-label">DEPARTURE · ${esc(f.depApt)}</div>
-                  <div class="point-val">${esc(f.std) || '--:--'}</div>
+                  <div class="point-val">${esc(wxHourParts(f.std).label) || '--:--'}</div>
                   <div class="point-status">${getStatusLabel(depStatus)}</div>
                   ${depTrig ? '<div class="wx-trigger">' + depTrig + '</div>' : ''}
                   ${wxRefChips(depRefs)}
@@ -8485,7 +8491,7 @@
 
                 <div class="weather-point ${getStatusClass(arrStatus)}">
                   <div class="point-label">ARRIVAL · ${esc(f.arrApt)}</div>
-                  <div class="point-val">${esc(f.sta) || '--:--'}</div>
+                  <div class="point-val">${esc(wxHourParts(f.sta).label) || '--:--'}</div>
                   <div class="point-status">${getStatusLabel(arrStatus)}</div>
                   ${arrTrig ? '<div class="wx-trigger">' + arrTrig + '</div>' : ''}
                   ${wxRefChips(arrRefs)}
