@@ -44,11 +44,11 @@ function compactTime(value) {
     const pad = (n) => (String(n).length < 2 ? '0' + n : String(n));
     // A colon-delimited clock time is unambiguous: take the first HH:MM.
     const withColon = s.match(/(\d{1,2}):(\d{2})/);
-    if (withColon) return pad(withColon[1]) + withColon[2];
+    if (withColon) return pad(withColon[1]) + ':' + withColon[2];
     const digits = s.replace(/[^0-9]/g, '');
-    if (digits.length === 4) return digits;              // HHMM
-    if (digits.length === 6) return digits.slice(2);     // DDHHMM
-    if (digits.length >= 8) return digits.slice(8, 12);  // YYYYMMDDHHMM[SS]
+    if (digits.length === 4) return digits.slice(0, 2) + ':' + digits.slice(2);              // HHMM
+    if (digits.length === 6) return digits.slice(2, 4) + ':' + digits.slice(4);     // DDHHMM
+    if (digits.length >= 8) return digits.slice(8, 10) + ':' + digits.slice(10, 12);  // YYYYMMDDHHMM[SS]
     return s;
 }
 
@@ -296,8 +296,8 @@ export async function onRequest(context) {
             const alt = f ? stationCode(f.alt) : '';
             const dof = f ? String(f.dof || '') : '';
             const reg = f ? String(f.ac_type || '') : '';
-            const etd = f ? String(f.etd || '') : '';
-            const eta = f ? String(f.eta || '') : '';
+            const etd = f ? compactTime(f.etd) : '';
+            const eta = f ? compactTime(f.eta) : '';
             const unused = !f;
 
             const cell = (field, value, extraClass, maxLen) =>

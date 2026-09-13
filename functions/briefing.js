@@ -38,6 +38,21 @@ export async function onRequest(context) {
         });
 
         const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 16) + 'Z';
+        
+        // Helper to format time as HH:MM
+        function compactTime(value) {
+            if (value === null || value === undefined) return '';
+            const s = String(value).trim();
+            if (!s) return '';
+            const pad = (n) => (String(n).length < 2 ? '0' + n : String(n));
+            const withColon = s.match(/(\d{1,2}):(\d{2})/);
+            if (withColon) return pad(withColon[1]) + ':' + withColon[2];
+            const digits = s.replace(/[^0-9]/g, '');
+            if (digits.length === 4) return digits.slice(0, 2) + ':' + digits.slice(2);
+            if (digits.length === 6) return digits.slice(2, 4) + ':' + digits.slice(4);
+            if (digits.length >= 8) return digits.slice(8, 10) + ':' + digits.slice(10, 12);
+            return s;
+        }
 
         // Render HTML Document
         const html = `<!DOCTYPE html>
@@ -236,8 +251,8 @@ export async function onRequest(context) {
                             <td><strong>${f.callsign}</strong></td>
                             <td>${f.dof || '-'}</td>
                             <td>${f.ac_type || '-'}</td>
-                            <td><strong>${fDep}</strong> / ${f.etd || '-'}Z</td>
-                            <td><strong>${fDest}</strong> / ${f.eta || '-'}Z</td>
+                            <td><strong>${fDep}</strong> / ${compactTime(f.etd) || '-'}Z</td>
+                            <td><strong>${fDest}</strong> / ${compactTime(f.eta) || '-'}Z</td>
                             <td><strong>${fAlt || '-'}</strong></td>
                             <td>${f.alt || 'FL340'}</td>
                         </tr>
