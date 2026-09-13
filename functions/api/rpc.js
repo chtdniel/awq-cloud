@@ -1756,6 +1756,9 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
 
 // Port fungsional dari archive/FIR_Notam_Backend.gs firParseBulkNotamText (TSV DINS / Raw ICAO).
 // Baris keluar: [location, notamNum, text]; tanggal valid di-derive per-notam lewat parseNotamRow.
+// isValidNum dipakai firParseBulkNotamText (TSV tanpa nomor valid dilewati) dan
+// firBulkValidateRows — harus di scope modul, bukan di dalam satu fungsi.
+const isValidNum = /^[A-Z]\d{4}\/\d{2}$/i;
 function firParseBulkNotamText(rawText) {
     if (!rawText || !String(rawText).trim()) return { ok: false, error: 'No text provided.' };
     const text = String(rawText);
@@ -1779,8 +1782,6 @@ function firParseBulkNotamText(rawText) {
         }
         return out;
     };
-
-    const isValidNum = /^[A-Z]\d{4}\/\d{2}$/i;
 
     if (text.indexOf('\t') !== -1) {
         const data = parseTsv(text);
@@ -1855,7 +1856,10 @@ async function handleFirBulkPreviewNotams(context, args) {
         const parsed = firParseBulkNotamText(rawText);
         if (!parsed.ok) return Response.json({ data: parsed });
         const v = await firBulkValidateRows(context, parsed.rows, false);
-        return Response.json({ data: { ok: true, total: parsed.rows.length, valid: v.valid, invalid: v.invalid, duplicates: v.duplicates, preview: v.preview, isTSV: parsed.isTSV } });
+        // Angka mode-overwrite: dedup lawan DB dilewati (overwrite hapus FIR dulu),
+        // jadi tombol OVERWRITE harus ikut angka ini, bukan angka append.
+        const vo = await firBulkValidateRows(context, parsed.rows, true);
+        return Response.json({ data: { ok: true, total: parsed.rows.length, valid: v.valid, invalid: v.invalid, duplicates: v.duplicates, preview: v.preview, isTSV: parsed.isTSV, validOverwrite: vo.valid, invalidOverwrite: vo.invalid } });
     } catch (e) {
         console.error('[RPC] firBulkPreview Error:', e);
         return Response.json({ data: { ok: false, error: e.message } });

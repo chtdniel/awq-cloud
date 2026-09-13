@@ -144,8 +144,11 @@
     }
     bulkState.lastPreview=data;
     var total=data.total||0, valid=data.valid||0, invalid=data.invalid||0, dup=data.duplicates||0;
+    // OVERWRITE hapus FIR dulu lalu isi ulang, jadi ikut angka mode-overwrite
+    // (validOverwrite): NOTAM lama yang mau di-refresh bukan penghalang.
+    var validOver = (data.validOverwrite==null) ? valid : data.validOverwrite;
     var note = data.truncated ? ' • '+ (data.note||'truncated') : '';
-    if(st) st.textContent = (data.isTSV?'TSV':'Raw')+' • total '+total+' • valid '+valid+' • invalid '+invalid+' • dup '+dup + note;
+    if(st) st.textContent = (data.isTSV?'TSV':'Raw')+' • total '+total+' • valid '+valid+' • invalid '+invalid+' • dup '+dup+' • overwrite-valid '+validOver + note;
     if(tb){
       tb.innerHTML = (data.preview||[]).map(function(r){
         var badge = r.ok ? '<span style="color:var(--status-safe); font-weight:800;">✔ OK</span>' : '<span style="color:var(--status-critical);">'+esc(r.error||'invalid')+'</span>';
@@ -161,7 +164,7 @@
     }
     if(box) box.style.display = total ? '' : 'none';
     if(imp) imp.disabled = valid===0;
-    if(over) over.disabled = valid===0;
+    if(over) over.disabled = validOver===0;
   }
   async function doBulkPreview(){
     var raw=$('firn-bulk-raw') ? $('firn-bulk-raw').value : '';
