@@ -10867,6 +10867,14 @@
     if (r==='MEDIUM' || r==='MED') return '#fb923c';
     return '#34d399';
   }
+  // Delegated handler for the map-popup Edit button (registered once: this IIFE
+  // runs a single time thanks to the window.firNotamUiInited guard above).
+  document.addEventListener('click', function(e){
+    var t = (e.target && e.target.closest) ? e.target.closest('.firn-map-edit') : null;
+    if (!t) return;
+    var id = t.getAttribute('data-rowid');
+    if (window.firnEditFromMap) window.firnEditFromMap(id);
+  });
   function firnBuildPopup(n){
     var risk = n.risk || 'LOW';
     var color = firnRiskColor(risk, n.status);
@@ -10878,7 +10886,7 @@
     var _g=firnParseNotamGeometry(n['NOTAM Text']||''); if(_g && _g.radiusNm) h+='<div style="color:var(--text-muted);font-size:10px;">◯ Radius '+esc(_g.radiusNm)+' NM</div>'; if(_g && _g.polygon && _g.polygon.length>=3) h+='<div style="color:var(--text-muted);font-size:10px;">△ Polygon '+_g.polygon.length+' points</div>';
     h+='<div style="white-space:pre-wrap;margin-top:6px;color:var(--text-secondary);font-size:11px;">'+esc(n['NOTAM Text']||'')+'</div>';
     h+='<div style="margin-top:8px;display:flex;gap:6px;">';
-    h+='<button onclick="(function(){var id='+n.rowId+'; if(window.firnEditFromMap) window.firnEditFromMap(id);})()" style="padding:4px 8px;font-size:10px;font-weight:800;border:1px solid var(--status-warning);color:var(--status-warning);background:#fff;border-radius:4px;cursor:pointer;">✏ Edit</button>';
+    h+='<button type="button" data-rowid="'+esc(n.rowId)+'" class="firn-map-edit" style="padding:4px 8px;font-size:10px;font-weight:800;border:1px solid var(--status-warning);color:var(--status-warning);background:#fff;border-radius:4px;cursor:pointer;">✏ Edit</button>';
     h+='</div></div>';
     return h;
   }

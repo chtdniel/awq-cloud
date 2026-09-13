@@ -73,6 +73,15 @@ export async function onRequestPost(context) {
       case 'firGetNotamResults':
         return await handleFirGetNotamResults(context);
 
+      case 'firSaveNotam':
+        return await handleFirSaveNotam(context, args);
+
+      case 'firUpdateNotam':
+        return await handleFirUpdateNotam(context, args);
+
+      case 'firDeleteNotam':
+        return await handleFirDeleteNotam(context, args);
+
       case 'firBulkPreviewNotams':
         return await handleFirBulkPreviewNotams(context, args);
 
@@ -1362,12 +1371,31 @@ async function handleGetActiveNotams(context) {
         
         for (const row of notamRows) {
             const parsed = parseNotamRow(row);
-            if (!parsed) continue;
+            const isUnverified = !parsed;
             
-            const effTime = parsed.effFrom ? parsed.effFrom.getTime() : 0;
-            const expTime = parsed.effTo ? parsed.effTo.getTime() : 8640000000000000;
+            // Unparseable rows (no Q/B match: SNOWTAM, ASHTAM, short DINS rows) stay
+            // reviewable as UNVERIFIED instead of being silently dropped (port of the
+            // archive firAnalyzeFlight fail-closed branch). Dates fall back to the D1
+            // valid_from/valid_to columns; active is computed normally; risk is
+            // conservative: HIGH on military keyword, MEDIUM otherwise.
+            const unverifiedRisk = /(MILITARY|DANGER|RESTRIC|ROCKET|LAUNCH|MISSILE|HAZARDOUS|RE-ENTRY|SPLASHDOWN|EXPLOSI|FIRING|BOMBING)/i
+                .test(String(row.message || '')) ? 'HIGH' : 'MEDIUM';
+            const rowTime = (raw) => {
+                if (!raw) return null;
+                const d = new Date(raw);
+                return isNaN(d.getTime()) ? null : d.getTime();
+            };
+
+            const effTime = parsed
+                ? (parsed.effFrom ? parsed.effFrom.getTime() : 0)
+                : (rowTime(row.valid_from) !== null ? rowTime(row.valid_from) : 0);
+            const expTime = parsed
+                ? (parsed.effTo ? parsed.effTo.getTime() : 8640000000000000)
+                : (rowTime(row.valid_to) !== null ? rowTime(row.valid_to) : 8640000000000000);
             const active = !(now.getTime() < effTime || now.getTime() > expTime);
-            const status = now.getTime() < effTime ? 'FUTURE' : (now.getTime() > expTime ? 'EXPIRED' : 'ACTIVE');
+            const status = isUnverified
+                ? 'UNVERIFIED'
+                : (now.getTime() < effTime ? 'FUTURE' : (now.getTime() > expTime ? 'EXPIRED' : 'ACTIVE'));
             
             // Basic coordinate extraction for mapping
             let lat = null, lon = null;
@@ -1390,12 +1418,12 @@ async function handleGetActiveNotams(context) {
             activeNotams.push({
                 location: row.location,
                 number: row.id,
-                cls: 'N/A', // basic default
-                effectiveDate: parsed.effFrom ? parsed.effFrom.toISOString() : null,
-                expirationDate: parsed.isContinuous ? 'PERM' : (parsed.effTo ? parsed.effTo.toISOString() : null),
+                cls: firResolveNotamClass(row),
+                effectiveDate: parsed ? (parsed.effFrom ? parsed.effFrom.toISOString() : null) : (row.valid_from || null),
+                expirationDate: parsed ? (parsed.isContinuous ? 'PERM' : (parsed.effTo ? parsed.effTo.toISOString() : null)) : (row.valid_to || null),
                 text: row.message.slice(0, 400), // Trucate for map marker performance
                 qCode: '',
-                risk: parsed.priority,
+                risk: isUnverified ? unverifiedRisk : parsed.priority,
                 lat: lat,
                 lon: lon,
                 center: lat !== null ? [lon, lat] : null,
@@ -1872,11 +1900,12 @@ async function handleFirGetNotamEditorData(context) {
                 rowId: row.id,
                 Location: row.location,
                 'NOTAM #': row.id,
-                Class: row.notam_code || '',
+                Class: firResolveNotamClass(row),
                 'Issue Date': eff,
                 'Effective Date': eff,
                 'Expiration Date': exp,
-                'NOTAM Text': row.message
+                'NOTAM Text': row.message,
+                updatedAt: row.updated_at || ''
             };
         });
         return Response.json({ data: { ok: true, notams, count: notams.length, skipped: 0 } });
@@ -1885,10 +1914,69 @@ async function handleFirGetNotamEditorData(context) {
     }
 }
 
+// Port of archive/FIR_Parity_Backend.gs firParseNotamRef.
+// Extract a NOTAMR/NOTAMC reference number from NOTAM text.
+// Returns 'A1234/26'-style string or null.
+function parseNotamRef(text, kind) {
+    try {
+        const m = String(text || '').match(new RegExp('NOTAM' + kind + '\\s+([A-Z]\\d{4}\\/\\d{2})', 'i'));
+        return m ? m[1].toUpperCase() : null;
+    } catch (e) { return null; }
+}
+
+// Port of archive/FIR_Parity_Backend.gs firParseNotamLifecycleMap.
+// Resolve NOTAM lifecycle (N/R/C) across a NOTAM array.
+// Returns map: 'A1234/26' -> 'ACTIVE' | 'REPLACED' | 'CANCELLED' | 'CANCEL_MARKER'.
+// A NOTAM is REPLACED/CANCELLED only when the referencing NOTAMR/C is present
+// in the same array (dangling reference = original is gone, still active).
+function parseNotamLifecycleMap(notams) {
+    const status = {};
+    const present = {};
+    (notams || []).forEach(n => {
+        const num = String((n && n['NOTAM #']) || '').trim().toUpperCase();
+        if (num && /^[A-Z]\d{4}\/\d{2}$/.test(num)) present[num] = true;
+    });
+    (notams || []).forEach(n => {
+        const num = String((n && n['NOTAM #']) || '').trim().toUpperCase();
+        if (!num || !/^[A-Z]\d{4}\/\d{2}$/.test(num) || status[num]) return;
+        const replaces = parseNotamRef(n['NOTAM Text'], 'R');
+        const cancels = parseNotamRef(n['NOTAM Text'], 'C');
+        if (replaces && present[replaces]) status[replaces] = 'REPLACED';
+        if (cancels && present[cancels]) status[cancels] = 'CANCELLED';
+        status[num] = cancels ? 'CANCEL_MARKER' : 'ACTIVE';
+    });
+    return status;
+}
+
+// Port firInferNotamClass (archive/FIR_Parity_Backend.gs :632-640): kelas = huruf awal nomor NOTAM.
+// Sumber kanonik kelas NOTAM; Q-line penuh ('RPHI/QWELW') tidak meng-encode kelas.
+function firInferNotamClass(text) {
+    try {
+        if (!text || typeof text !== 'string') return 'N/A';
+        const m = text.match(/([A-Z])\d{4}\/\d{2}/i);
+        return m ? m[1].toUpperCase() : 'N/A';
+    } catch (e) {
+        return 'N/A';
+    }
+}
+
+// Kelas NOTAM untuk response (Class/cls): q_code kalau berisi kelas 1 huruf (editor
+// firSaveNotam/firUpdateNotam menulis clean.Class ke q_code); selain itu infer dari nomor
+// NOTAM — live D1 hari ini q_code kosong di semua baris (bulk import tidak menulisnya).
+function firResolveNotamClass(row) {
+    const stored = String((row && row.q_code) || '').trim().toUpperCase();
+    if (/^[A-Z]$/.test(stored)) return stored;
+    return firInferNotamClass(String((row && row.id) || (row && row.message) || ''));
+}
+
 async function handleFirGetNotamResults(context) {
     try {
         const { results: dbNotams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
         const now = new Date();
+        const lifecycleMap = parseNotamLifecycleMap(dbNotams.map(row => ({
+            'NOTAM #': row.id,
+            'NOTAM Text': row.message
+        })));
         const results = dbNotams.map(row => {
             const parsed = parseNotamRow(row);
             const eff = row.valid_from ? row.valid_from.replace('T', ' ').substring(0, 16) : '';
@@ -1896,23 +1984,223 @@ async function handleFirGetNotamResults(context) {
             let status = 'ACTIVE';
             if (parsed && parsed.effTo && parsed.effTo < now) status = 'EXPIRED';
             const risk = parsed ? parsed.priority : 'LOW';
+            const lifecycle = lifecycleMap[String(row.id || '').trim().toUpperCase()] || 'ACTIVE';
+            // Superseded info supersedes ACTIVE, but never masks EXPIRED.
+            if ((lifecycle === 'REPLACED' || lifecycle === 'CANCELLED') && status === 'ACTIVE') {
+                status = lifecycle;
+            }
             return {
                 rowId: row.id,
                 Location: row.location,
                 'NOTAM #': row.id,
-                Class: row.notam_code || '',
+                Class: firResolveNotamClass(row),
                 'Issue Date': eff,
                 'Effective Date': eff,
                 'Expiration Date': exp,
                 'NOTAM Text': row.message,
                 status,
                 risk,
-                type: 'NEW'
+                type: 'NEW',
+                lifecycle
             };
         });
-        return Response.json({ data: { ok: true, results } });
+        return Response.json({ data: { ok: true, results, count: results.length } });
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+/* ---------- FIR NOTAM editor: write path (port dari archive/FIR_Notam_Backend.gs) ---------- */
+// Auth: sama dengan semua method lain — rpcGuard di onRequestPost (JWT Cloudflare Access /
+// origin check) sudah mengeksekusi sebelum dispatcher. Tidak ada gate tambahan per-method
+// di handleFirBulkImportNotams; jalur tulis ini ikut gate yang sama. Tidak ada downgrade.
+
+// Port firNotamDateToText / duParseNotamDate untuk string 'YYYY-MM-DD HH:MM' (UTC).
+// Return Date UTC valid atau null; round-trip cek menolak tanggal imajiner (31 Feb).
+function firParseUiDate(s) {
+    const m = String(s || '').trim().match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
+    if (!m) return null;
+    const y = parseInt(m[1], 10), mo = parseInt(m[2], 10) - 1, d = parseInt(m[3], 10);
+    const hh = parseInt(m[4], 10), mm = parseInt(m[5], 10);
+    if (mo < 0 || mo > 11 || hh > 23 || mm > 59) return null;
+    const dt = new Date(Date.UTC(y, mo, d, hh, mm));
+    if (isNaN(dt.getTime())) return null;
+    if (dt.getUTCMonth() !== mo || dt.getUTCDate() !== d) return null;
+    return dt;
+}
+
+// Port firNotamValidate (archive :444-495). Return { ok:true, ...normalized } atau { ok:false, error }.
+function firValidateNotamPayload(payload) {
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'No payload.' };
+    const location = String(payload.Location || '').trim().toUpperCase();
+    const rawNumber = String(payload['NOTAM #'] || '').trim().toUpperCase();
+    const normNumber = rawNumber.replace(/\u2215|\u2044|\uFF0F/g, '/').replace(/\s+/g, '');
+    const nm = normNumber.match(/([A-Z]\d{4}\/\d{2})/);
+    const number = nm ? nm[1] : normNumber;
+    const cls = String(payload.Class || '').trim().toUpperCase();
+    const issue = String(payload['Issue Date'] || '').trim();
+    const effective = String(payload['Effective Date'] || '').trim();
+    const expiration = String(payload['Expiration Date'] || '').trim();
+    const text = String(payload['NOTAM Text'] || '').trim();
+    if (!/^[A-Z]{4}$/.test(location)) return { ok: false, error: 'Location must be a 4-letter ICAO code (e.g. WIII).' };
+    if (!/^[A-Z]\d{4}\/\d{2}$/i.test(number)) return { ok: false, error: 'NOTAM # must match format like A1234/26.' };
+    if (!cls) return { ok: false, error: 'Class is required (e.g. A, B, C, D, E).' };
+    if (!text) return { ok: false, error: 'NOTAM Text is required.' };
+    if (/NOTAMs for Location search|Query ran at UTC|NOTAM Condition\/LTA subject|Filter\(s\) used:/i.test(text)) {
+        return { ok: false, error: 'NOTAM Text contains a DINS query header — paste a single ICAO NOTAM only. Use the UPDATE NOTAM page / table TSV path.' };
+    }
+    if ((text.match(/^Q\)/gm) || []).length > 1 && text.length > 3000) {
+        return { ok: false, error: 'NOTAM Text looks like a table dump (multiple Q) lines). Paste one NOTAM at a time.' };
+    }
+    const checkDate = (s) => firParseUiDate(s) !== null;
+    if (issue && !checkDate(issue)) return { ok: false, error: 'Issue Date must be YYYY-MM-DD HH:MM (UTC) or blank.' };
+    if (effective && !checkDate(effective)) return { ok: false, error: 'Effective Date must be YYYY-MM-DD HH:MM (UTC) or blank.' };
+    if (expiration && expiration.toUpperCase() !== 'PERM' && !checkDate(expiration)) {
+        return { ok: false, error: 'Expiration Date must be YYYY-MM-DD HH:MM (UTC), PERM, or blank.' };
+    }
+    if (effective && expiration && expiration.toUpperCase() !== 'PERM') {
+        const effD = firParseUiDate(effective);
+        const expD = firParseUiDate(expiration);
+        if (effD && expD && effD.getTime() > expD.getTime()) {
+            return { ok: false, error: 'Effective Date cannot be after Expiration Date.' };
+        }
+    }
+    return {
+        ok: true,
+        Location: location,
+        'NOTAM #': number,
+        Class: cls,
+        'Issue Date': issue,
+        'Effective Date': effective,
+        'Expiration Date': expiration,
+        'NOTAM Text': text
+    };
+}
+
+// Port firNotamDuplicateCheck (archive :267-284): duplikat = nomor NOTAM yang sama
+// (id PK) sudah ada untuk kind='FIR'; excludeRowId meloloskan baris yang sedang diedit.
+// Catatan: skema live memakai kolom q_code (bukan notam_code seperti archive).
+async function firNotamDuplicateCheck(context, number, excludeRowId) {
+    const num = String(number || '').trim().toUpperCase();
+    if (!num) return null;
+    try {
+        const existing = await context.env.DB.prepare("SELECT id FROM notams WHERE id = ? AND kind = 'FIR'").bind(num).first();
+        if (existing) {
+            if (excludeRowId && String(existing.id) === String(excludeRowId)) return null;
+            return 'D1 Database';
+        }
+    } catch (e) {
+        console.warn('[RPC] firNotamDuplicateCheck error: ' + e.message);
+    }
+    return null;
+}
+
+// Staleness check ala archive (dbUpdatedAt vs clientUpdatedAt, keduanya harus ada).
+function firNotamStaleError(rowId, dbUpdatedAt, clientUpdatedAt) {
+    const dbU = String(dbUpdatedAt || '');
+    const cliU = String(clientUpdatedAt || '');
+    if (dbU && cliU && dbU !== cliU) {
+        return 'Row changed by another user since you opened it. Reload the list (stale editor), then re-view.';
+    }
+    return null;
+}
+
+// Archive firSaveNotam (:69-102). INSERT id=NOTAM#, q_code=Class, kind='FIR', updated_at.
+async function handleFirSaveNotam(context, args) {
+    try {
+        const [payload] = args || [];
+        const clean = firValidateNotamPayload(payload);
+        if (clean.error) return Response.json({ data: clean });
+
+        const dup = await firNotamDuplicateCheck(context, clean['NOTAM #'], null);
+        if (dup) return Response.json({ data: { ok: false, error: 'NOTAM ' + clean['NOTAM #'] + ' already exists. Edit the existing row instead.' } });
+
+        const toIso = (s) => { const d = firParseUiDate(s); return d ? d.toISOString() : null; };
+        await context.env.DB.prepare(
+            'INSERT INTO notams (id, location, q_code, message, valid_from, valid_to, kind, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'
+        ).bind(
+            clean['NOTAM #'],
+            clean.Location,
+            clean.Class,
+            clean['NOTAM Text'],
+            toIso(clean['Effective Date']),
+            clean['Expiration Date'].toUpperCase() === 'PERM' ? null : toIso(clean['Expiration Date']),
+            'FIR'
+        ).run();
+
+        return Response.json({ data: { ok: true, message: 'NOTAM ' + clean['NOTAM #'] + ' added.' } });
+    } catch (e) {
+        console.error('[RPC] firSaveNotam Error:', e);
+        return Response.json({ data: { ok: false, error: e.message } });
+    }
+}
+
+// Archive firUpdateNotam (:109-159). LockService 5s → downgrade: satu SELECT updated_at
+// lalu UPDATE (tanpa lock lintas-isolate); dilaporkan jujur via `lockDowngraded`.
+async function handleFirUpdateNotam(context, args) {
+    try {
+        const [payload] = args || [];
+        const rowId = payload && payload.rowId;
+        if (!rowId) return Response.json({ data: { ok: false, error: 'Invalid rowId.' } });
+
+        const clean = firValidateNotamPayload(payload);
+        if (clean.error) return Response.json({ data: clean });
+
+        const current = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(rowId).first();
+        if (!current) return Response.json({ data: { ok: false, error: 'Row ' + rowId + ' no longer exists (deleted elsewhere?). Reload.' } });
+        const staleErr = firNotamStaleError(rowId, current.updated_at, payload.updatedAt);
+        if (staleErr) return Response.json({ data: { ok: false, error: staleErr } });
+
+        const dup = await firNotamDuplicateCheck(context, clean['NOTAM #'], rowId);
+        if (dup) return Response.json({ data: { ok: false, error: 'NOTAM ' + clean['NOTAM #'] + ' already exists. Edit the existing row instead.' } });
+
+        const toIso = (s) => { const d = firParseUiDate(s); return d ? d.toISOString() : null; };
+        await context.env.DB.prepare(
+            'UPDATE notams SET location = ?, q_code = ?, message = ?, valid_from = ?, valid_to = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+        ).bind(
+            clean.Location,
+            clean.Class,
+            clean['NOTAM Text'],
+            toIso(clean['Effective Date']),
+            clean['Expiration Date'].toUpperCase() === 'PERM' ? null : toIso(clean['Expiration Date']),
+            rowId
+        ).run();
+
+        const fresh = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(rowId).first();
+        return Response.json({
+            data: {
+                ok: true,
+                message: 'NOTAM ' + clean['NOTAM #'] + ' updated.',
+                updatedAt: fresh ? String(fresh.updated_at || '') : '',
+                lockDowngraded: true,
+                lockNote: 'GAS LockService 5s tidak tersedia di Workers; diganti staleness check SELECT+UPDATE (race jendela kecil antara SELECT dan UPDATE tetap mungkin pada dua tab yang bersamaan persis).'
+            }
+        });
+    } catch (e) {
+        console.error('[RPC] firUpdateNotam Error:', e);
+        return Response.json({ data: { ok: false, error: e.message } });
+    }
+}
+
+// Archive firDeleteNotam (:166-188). Argumen: rowId (string) ATAU { rowId, updatedAt }
+// (UI kirim objek). Stale-delete protection via updatedAt, lalu DELETE.
+async function handleFirDeleteNotam(context, args) {
+    try {
+        const [rowIdArg] = args || [];
+        const payload = (rowIdArg && typeof rowIdArg === 'object') ? rowIdArg : { rowId: rowIdArg };
+        const rowId = payload.rowId;
+        if (!rowId) return Response.json({ data: { ok: false, error: 'Invalid rowId.' } });
+
+        const current = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(rowId).first();
+        if (!current) return Response.json({ data: { ok: false, error: 'Row ' + rowId + ' no longer exists. Reload.' } });
+        const staleErr = firNotamStaleError(rowId, current.updated_at, payload.updatedAt);
+        if (staleErr) return Response.json({ data: { ok: false, error: 'Row changed by another user. Reload the list first.' } });
+
+        await context.env.DB.prepare('DELETE FROM notams WHERE id = ?').bind(rowId).run();
+        return Response.json({ data: { ok: true, message: 'NOTAM row deleted.' } });
+    } catch (e) {
+        console.error('[RPC] firDeleteNotam Error:', e);
+        return Response.json({ data: { ok: false, error: e.message } });
     }
 }
 
