@@ -1,4 +1,5 @@
 import { parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch } from './notamUtils.js';
+import { handleGenerateBriefingXlsx } from './briefing-xlsx.js';
 
 function rpcGuard(context) {
   // Saat Cloudflare Access on, JWT header selalu ada.
@@ -127,10 +128,13 @@ export async function onRequestPost(context) {
       case 'generateBriefingPackage':
         return await handleGenerateBriefingPackage(context, args);
 
-      case 'saveBriefingForm':
-        return await handleSaveBriefingForm(context, args);
+       case 'saveBriefingForm':
+         return await handleSaveBriefingForm(context, args);
 
-      case 'getBriefingForm':
+       case 'generateBriefingXlsx':
+         return await handleGenerateBriefingXlsx(context, args);
+
+       case 'getBriefingForm':
         return await handleGetBriefingForm(context, args);
 
       case 'getBriefingFormHistory':

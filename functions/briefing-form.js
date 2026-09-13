@@ -636,6 +636,7 @@ export async function onRequest(context) {
         <button type="button" class="btn" id="saveBtn">SAVE</button>
         <button type="button" class="btn secondary" id="printBtn">PRINT</button>
         <button type="button" class="btn secondary" id="xlsBtn">DOWNLOAD XLS</button>
+        <button type="button" class="btn secondary" id="xlsxBtn">DOWNLOAD XLSX</button>
         <span id="saveStatus"></span>
     </div>
 
@@ -958,6 +959,39 @@ export async function onRequest(context) {
             setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
         }
 
+        // Download native .xlsx via server-side template editing
+        function downloadBriefingXlsx() {
+            var form = collectForm();
+            
+            fetch(RPC_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    method: 'generateBriefingXlsx',
+                    args: [form]
+                })
+            })
+            .then(function (res) {
+                if (!res.ok) {
+                    return res.text().then(function (text) {
+                        throw new Error(text || ('HTTP ' + res.status));
+                    });
+                }
+                return res.blob();
+            })
+            .then(function (blob) {
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'Crew-Briefing-' + FLIGHTS_KEY.replace(/[^A-Za-z0-9,-]+/g, '_') + '.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+            })
+            .catch(function (err) {
+                alert('Failed to download XLSX: ' + err.message);
+            });
+        }
+
         document.addEventListener('input', function (e) {
             var t = e.target;
             if (t && t.getAttribute && t.getAttribute('data-field')) dirty = true;
@@ -970,6 +1004,9 @@ export async function onRequest(context) {
             if (printBtn) printBtn.addEventListener('click', function () { window.print(); });
             var xlsBtn = document.getElementById('xlsBtn');
             if (xlsBtn) xlsBtn.addEventListener('click', downloadBriefingXls);
+            
+            var xlsxBtn = document.getElementById('xlsxBtn');
+            if (xlsxBtn) xlsxBtn.addEventListener('click', downloadBriefingXlsx);
 
             // Date auto-fills from the server clock; refresh only if left blank.
             var dateEl = byField('formDate');
