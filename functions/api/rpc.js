@@ -72,6 +72,12 @@ export async function onRequestPost(context) {
       case 'firGetNotamResults':
         return await handleFirGetNotamResults(context);
 
+      case 'firBulkPreviewNotams':
+        return await handleFirBulkPreviewNotams(context, args);
+
+      case 'firBulkImportNotams':
+        return await handleFirBulkImportNotams(context, args);
+
       case 'saveNotamData':
         return await handleSaveNotamData(context, args);
         
@@ -1692,6 +1698,140 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
             dofInvalid: false
         }
     };
+}
+
+// Port fungsional dari archive/FIR_Notam_Backend.gs firParseBulkNotamText (TSV DINS / Raw ICAO).
+// Baris keluar: [location, notamNum, text]; tanggal valid di-derive per-notam lewat parseNotamRow.
+function firParseBulkNotamText(rawText) {
+    if (!rawText || !String(rawText).trim()) return { ok: false, error: 'No text provided.' };
+    const text = String(rawText);
+    const rows = [];
+
+    const parseTsv = (str) => {
+        const out = [];
+        const lines = str.split(/\r?\n/);
+        for (const line of lines) {
+            if (line === '') { out.push([]); continue; }
+            const cols = [];
+            let cur = '', inQ = false;
+            for (let i = 0; i < line.length; i++) {
+                const c = line[i];
+                if (c === '"') { if (inQ && line[i + 1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
+                else if (c === '\t' && !inQ) { cols.push(cur); cur = ''; }
+                else cur += c;
+            }
+            cols.push(cur);
+            out.push(cols);
+        }
+        return out;
+    };
+
+    const isValidNum = /^[A-Z]\d{4}\/\d{2}$/i;
+
+    if (text.indexOf('\t') !== -1) {
+        const data = parseTsv(text);
+        if (data.length === 0) return { ok: false, error: 'Empty table.' };
+        const header = data[0].map(h => String(h || '').trim().toLowerCase());
+        const hasHeader = header.some(h => h.includes('location') || h.includes('notam') || h.includes('condition'));
+        let textIdx = header.findIndex(h => h.includes('condition') || h.includes('subject') || h.includes('text'));
+        const locIdx = header.findIndex(h => h.includes('location'));
+        if (textIdx === -1) {
+            for (const cols of data) {
+                const f = cols.findIndex(c => String(c || '').includes('Q)'));
+                if (f !== -1) { textIdx = f; break; }
+            }
+        }
+        if (textIdx === -1) textIdx = data[0].length - 1;
+        const start = hasHeader ? 1 : 0;
+        for (let i = start; i < data.length; i++) {
+            const cols = data[i];
+            if (!cols || cols.length <= textIdx) continue;
+            const nt = cols[textIdx] ? String(cols[textIdx]).trim() : '';
+            if (!nt || !nt.includes('Q)')) continue;
+            if (/NOTAMs for Location search|Query ran at UTC/i.test(nt)) continue;
+            const loc = (locIdx !== -1 && cols[locIdx]) ? String(cols[locIdx]).trim() : ((nt.match(/Q\)\s*([^ \/]+)/) || [])[1] || 'UNKNOWN');
+            const no = (nt.match(/[A-Z]\d{4}\/\d{2}/i) || [])[0] || 'N/A';
+            rows.push([loc.toUpperCase(), no.toUpperCase(), nt]);
+        }
+    } else {
+        let t = text;
+        const qIdx = t.indexOf('Q)');
+        if (qIdx > 0 && /Location\s+NOTAM #\/LTA #|NOTAMs for Location search/i.test(t.substring(0, qIdx))) t = t.substring(qIdx);
+        const parts = t.split(/(?=Q\))/g).filter(p => p.trim() !== '');
+        for (const nt of parts) {
+            if (!nt || !nt.includes('Q)')) continue;
+            const loc = ((nt.match(/Q\)\s*([^ \/]+)/) || [])[1] || 'UNKNOWN').toUpperCase();
+            const no = ((nt.match(/[A-Z]\d{4}\/\d{2}/i) || [])[0] || 'N/A').toUpperCase();
+            rows.push([loc, no, nt.trim()]);
+        }
+    }
+    return { ok: true, rows, isTSV: text.indexOf('\t') !== -1 };
+}
+
+// Dedupe & validasi baris bulk: { ok, total, valid, invalid, duplicates, preview, keySet }
+async function firBulkValidateRows(context, parsedRows) {
+    const { results: existing } = await context.env.DB.prepare('SELECT id, location FROM notams').all();
+    const keySet = {};
+    (existing || []).forEach(r => { keySet[String(r.location || '').concat('|', String(r.id || '')).toUpperCase()] = true; });
+    let valid = 0, invalid = 0, duplicates = 0;
+    const seenBatch = {};
+    const preview = [];
+    const validRows = [];
+    for (const [loc, no, nt] of parsedRows) {
+        const p = parseNotamRow({ id: no, message: nt });
+        const rowOk = /^[A-Z]{4}$/.test(loc || '') && isValidNum.test(no || '') && nt && p && p.effFrom;
+        let isDup = null;
+        if (rowOk) {
+            const key = (loc + '|' + no).toUpperCase();
+            if (keySet[key] || seenBatch[key]) isDup = 'FIR/NOTAM';
+            else { seenBatch[key] = true; valid++; validRows.push({ loc, no, nt, p }); }
+            if (isDup) duplicates++; else preview.push({ Location: loc, 'NOTAM #': no, ok: true, textPreview: nt.slice(0, 80).replace(/\n/g, ' ') });
+        } else invalid++;
+        if (isDup) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: 'Already exists in FIR/NOTAM' });
+        else if (!rowOk) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: 'Invalid (butuh Location ICAO, NOTAM # A1234/26, dan B)/C) date)' });
+    }
+    return { valid, invalid, duplicates, preview: preview.slice(0, 40), validRows };
+}
+
+async function handleFirBulkPreviewNotams(context, args) {
+    try {
+        const [rawText] = args || [];
+        const parsed = firParseBulkNotamText(rawText);
+        if (!parsed.ok) return Response.json({ data: parsed });
+        const v = await firBulkValidateRows(context, parsed.rows);
+        return Response.json({ data: { ok: true, total: parsed.rows.length, valid: v.valid, invalid: v.invalid, duplicates: v.duplicates, preview: v.preview, isTSV: parsed.isTSV } });
+    } catch (e) {
+        console.error('[RPC] firBulkPreview Error:', e);
+        return Response.json({ data: { ok: false, error: e.message } });
+    }
+}
+
+// Overwrite hanya menimpan baris kind='FIR' (aerodrome insap dari DELETE);
+// kind ditentukan WRITER di sini bukan tebakan content — doktrin setelah migration 005/006.
+async function handleFirBulkImportNotams(context, args) {
+    try {
+        const [rawText, mode] = args || [];
+        const m = mode || 'append';
+        const parsed = firParseBulkNotamText(rawText);
+        if (!parsed.ok) return Response.json({ data: parsed });
+        if (parsed.rows.length === 0) return Response.json({ data: { ok: false, error: 'No valid NOTAMs found. Make sure text contains Q) lines.' } });
+        const v = await firBulkValidateRows(context, parsed.rows);
+        if (v.validRows.length === 0) {
+            return Response.json({ data: { ok: false, total: parsed.rows.length, appended: 0, skippedInvalid: v.invalid, skippedDup: v.duplicates, error: 'Nothing to import (all invalid/duplicates).' } });
+        }
+        const stmts = [];
+        if (m === 'overwrite') stmts.push(context.env.DB.prepare("DELETE FROM notams WHERE kind = 'FIR'"));
+        for (const r of v.validRows) {
+            stmts.push(context.env.DB.prepare(
+                'INSERT INTO notams (id, location, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?)'
+            ).bind(r.no, r.loc, r.nt, r.p.effFrom ? r.p.effFrom.toISOString() : null, r.p.isContinuous ? new Date('2099-01-01T00:00:00Z').toISOString() : (r.p.effTo ? r.p.effTo.toISOString() : null), 'FIR'));
+        }
+        await context.env.DB.batch(stmts);
+        return Response.json({ data: { ok: true, total: parsed.rows.length, appended: v.validRows.length, skippedInvalid: v.invalid, skippedDup: v.duplicates, mode: m, isTSV: parsed.isTSV } });
+    } catch (e) {
+        console.error('[RPC] firBulkImport Error:', e);
+        return Response.json({ data: { ok: false, error: e.message } });
+    }
 }
 
 async function handleFirGetNotamEditorData(context) {
