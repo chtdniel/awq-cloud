@@ -9345,7 +9345,7 @@
     if (!flight) return null;
     const lookup = buildLatLongLookup();
     let route = null;
-    const routeId = flight['ACTIVE ROUTE ID'] || flight['ROUTE ID'];
+    const routeId = flight['ACTIVE_ROUTE_ID'] || flight['ROUTE_ID'] || flight['ACTIVE ROUTE ID'] || flight['ROUTE ID'];
     if (routeId) route = state.routes.find(r => String(r.ID).trim().toUpperCase() === String(routeId).trim().toUpperCase());
     if (!route) route = state.routes.find(r =>
       String(r.DEP_AIRPORT).trim().toUpperCase() === String(flight.DEP).trim().toUpperCase() &&
@@ -10125,7 +10125,7 @@
       data = { flights: data.flights.map(f => ({
         _rowId: f._rowId, QZ: String(f.QZ||f.FLIGHT||''), DOF: String(f.DOF||''),
         DEP: String(f.DEP||''), DES: String(f.DES||f.ARR||''), STD: String(f.STD||''), STA: String(f.STA||''), REG: String(f.REG||''),
-        'ROUTE ID': f['ACTIVE ROUTE ID']||f['ROUTE ID']||'', 'CRZ FL': f['CRZ FL']||f.ALT||'', riskLevel: f.riskLevel||f['RISK LEVEL']||'Clear'
+        'ROUTE ID': f['ACTIVE_ROUTE_ID']||f['ROUTE_ID']||f['ACTIVE ROUTE ID']||f['ROUTE ID']||'', 'CRZ FL': f['CRZ FL']||f.ALT||'', riskLevel: f.riskLevel||f['RISK LEVEL']||'Clear'
       })) };
     }
     if (false) { // keep old getActiveFlightList path dead but visible for reference
