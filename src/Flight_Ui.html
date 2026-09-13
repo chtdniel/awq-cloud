@@ -1221,6 +1221,7 @@
     document.addEventListener('keydown', handleEscape);
     
     const handleClickOutside = (e) => {
+      if (!activeATCPopover) { document.removeEventListener('click', handleClickOutside); return; }
       if (!activeATCPopover.contains(e.target)) {
         closeATCPopover();
         document.removeEventListener('click', handleClickOutside);
