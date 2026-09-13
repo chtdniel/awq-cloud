@@ -115,7 +115,10 @@ function firFlightWindow(flight) {
   if (!flight || typeof flight !== 'object') {
     throw new Error('firFlightWindow requires flight object.');
   }
-  const dof = firDate(flight.DOF) || new Date();
+  const dof = firDate(flight.DOF);
+  if (!dof || isNaN(dof.getTime())) {
+    throw new Error('unparseable DOF ' + JSON.stringify(String(flight.DOF == null ? '' : flight.DOF)) + ' — refusing to analyze without a valid date of flight.');
+  }
   const day = new Date(Date.UTC(dof.getUTCFullYear(), dof.getUTCMonth(), dof.getUTCDate()));
   const minutes = value => {
     const match = String(value || '0000').match(/^(\d{2}):?(\d{2})/);
@@ -131,6 +134,10 @@ function firFlightWindowSelfCheck() {
   const window = firFlightWindow({ DOF: '260821', STD: '2330', STA: '0130' });
   const hours = (window.end.getTime() - window.start.getTime()) / 3600000;
   if (hours !== 2 || window.end.getUTCDate() !== 22) throw new Error('firFlightWindow self-check failed.');
+  // Fail-closed: unparseable DOF must throw, never silently become today.
+  let threw = false;
+  try { firFlightWindow({ DOF: 'BOGUS', STD: '1000', STA: '1200' }); } catch (error) { threw = true; }
+  if (!threw) throw new Error('firFlightWindow unparseable DOF check failed (expected throw).');
   return { ok: true, durationHours: hours };
 }
 
@@ -157,13 +164,16 @@ function firNotamImpact(flight, notam) {
   const window = firFlightWindow(flight);
   const start = firDate(notam.effective || notam.EFFECTIVE || notam.B || notam['Effective Date']);
   const end = firDate(notam.expiration || notam.EXPIRATION || notam.C || notam['Expiration Date']) || new Date(8640000000000000);
-  const timeOverlap = !start || (window.start <= end && window.end >= start);
+  // Fail closed: an unparseable B-line (start null) must never read as an overlap.
+  const startInvalid = !start || isNaN(start.getTime());
+  const timeOverlap = startInvalid ? false : (window.start <= end && window.end >= start);
+  const unverified = startInvalid || undefined;
   const flightLevel = firAltitude(flight['CRZ FL'] || flight.FL || flight.ALT);
   const lower = firAltitude(notam.lower || notam.LOWER || notam.F || notam['Lower Limit']);
   const upper = firAltitude(notam.upper || notam.UPPER || notam.G || notam['Upper Limit']);
   const altitudeOverlap = flightLevel === null || (lower === null && upper === null) ||
     ((lower === null || flightLevel >= lower) && (upper === null || upper === 999 || flightLevel <= upper));
-  return { timeOverlap, altitudeOverlap };
+  return { timeOverlap, altitudeOverlap, unverified };
 }
 
 function firNotamImpactSelfCheck() {
@@ -171,6 +181,10 @@ function firNotamImpactSelfCheck() {
   const notam = { B: '2608210900', C: '2608211100', F: 'FL300', G: 'FL400' };
   const result = firNotamImpact(flight, notam);
   if (!result.timeOverlap || !result.altitudeOverlap) throw new Error('firNotamImpact self-check failed.');
+  // Fail-closed: invalid B-line (start null) must not read as time overlap.
+  const badB = firNotamImpact(flight, { B: 'NOT-A-DATE', C: '2608211100', F: 'FL300', G: 'FL400' });
+  if (badB.timeOverlap !== false) throw new Error('firNotamImpact invalid B-line check failed: timeOverlap must be false.');
+  if (badB.unverified !== true) throw new Error('firNotamImpact invalid B-line check failed: unverified flag missing.');
   return { ok: true, result };
 }
 
@@ -192,6 +206,8 @@ function firRiskSelfCheck() {
   if (firRiskLevel({ 'NOTAM Text': 'Q) WAAF/QDXXX/IV/BO/E/000/999/' }, impact) !== 'HIGH') throw new Error('Q-code D risk check failed.');
   if (firRiskLevel({ 'NOTAM Text': 'Q) WAAF/QRALW/IV/BO/E/000/999/' }, impact) !== 'MEDIUM') throw new Error('Q-code R risk check failed.');
   if (firRiskLevel({ 'NOTAM Text': 'Q) WAAF/QWULW/IV/BO/E/000/999/' }, impact) !== 'MEDIUM') throw new Error('Q-code W risk check failed.');
+  // Fail-closed rollup: unverified NOTAMs (timeOverlap false) must never score above LOW.
+  if (firRiskLevel({ 'NOTAM Text': 'Q) WAAF/QDXXX/IV/BO/E/000/999/' }, { timeOverlap: false, altitudeOverlap: true, unverified: true }) !== 'LOW') throw new Error('Unverified NOTAM risk check failed (must be LOW).');
   return { ok: true };
 }
 /**
@@ -208,7 +224,14 @@ function firAnalyzeFlightByRowId(rowId) {
     return firs.includes(String(notam.Location || notam.FIR || '').trim());
   }).map(notam => {
     const impact = firNotamImpact(flight, notam);
-    return { ...notam, ...impact, risk: firRiskLevel(notam, impact) };
+    // Propagate fail-closed marker so the UI can show manual-review-required
+    // instead of a clean risk verdict for NOTAMs with unparseable dates.
+    const result = { ...notam, ...impact, risk: firRiskLevel(notam, impact) };
+    if (impact.unverified) {
+      result.unverified = true;
+      result.status = 'UNVERIFIED';
+    }
+    return result;
   });
   return { flight, firs, notams };
 }

@@ -191,10 +191,12 @@ function firDeleteNotam(rowIdArg) {
 
 /**
  * Read all FIR NOTAM rows enriched with computed display fields for the
- * "Results" tab: status (ACTIVE/EXPIRED), risk (HIGH/MEDIUM/LOW) and type
- * (NEW/RPL/CNL). Reuses the shared FIR parsing helpers from FIR_Parity_Backend.gs.
+ * "Results" tab: status (ACTIVE/EXPIRED/REPLACED/CANCELLED/CANCEL_MARKER),
+ * risk (HIGH/MEDIUM/LOW) and type (NEW/RPL/CNL). Reuses the shared FIR parsing
+ * helpers from FIR_Parity_Backend.gs.
  * Returns { ok, results:[{rowId, Location, 'NOTAM #', Class, 'Issue Date',
- * 'Effective Date', 'Expiration Date', 'NOTAM Text', status, risk, type}], count }.
+ * 'Effective Date', 'Expiration Date', 'NOTAM Text', status, risk, type,
+ * lifecycle}], count }.
  * @expose
  */
 function firGetNotamResults() {
@@ -202,6 +204,9 @@ function firGetNotamResults() {
     const base = firGetNotamEditorData();
     if (!base || !base.ok) return base || { ok: false, error: 'Failed to load NOTAMs.' };
     const now = new Date();
+    const lifecycleMap = (typeof firParseNotamLifecycleMap === 'function')
+      ? firParseNotamLifecycleMap(base.notams || [])
+      : {};
     const results = (base.notams || []).map(function (n) {
       const text = String(n['NOTAM Text'] || '');
       const parsed = (typeof firParseNotamText === 'function') ? firParseNotamText(text) : null;
@@ -218,6 +223,11 @@ function firGetNotamResults() {
         const expD = duParseNotamDate(expDate);
         if (!isNaN(expD.getTime()) && now > expD) status = 'EXPIRED';
       }
+      const lifecycle = lifecycleMap[String(n['NOTAM #'] || '').trim().toUpperCase()] || 'ACTIVE';
+      // Superseded info supersedes ACTIVE, but never masks EXPIRED.
+      if ((lifecycle === 'REPLACED' || lifecycle === 'CANCELLED') && status === 'ACTIVE') {
+        status = lifecycle;
+      }
       return {
         rowId: n.rowId,
         Location: n.Location,
@@ -229,13 +239,14 @@ function firGetNotamResults() {
         'NOTAM Text': text,
         status: status,
         risk: risk,
-        type: type
+        type: type,
+        lifecycle: lifecycle
       };
     });
-    const rank = { ACTIVE: 0, EXPIRED: 1 };
+    const rank = { ACTIVE: 0, EXPIRED: 1, REPLACED: 2, CANCELLED: 2, CANCEL_MARKER: 2 };
     results.sort(function (a, b) {
-      const ra = rank[a.status] !== undefined ? rank[a.status] : 2;
-      const rb = rank[b.status] !== undefined ? rank[b.status] : 2;
+      const ra = rank[a.status] !== undefined ? rank[a.status] : 3;
+      const rb = rank[b.status] !== undefined ? rank[b.status] : 3;
       if (ra !== rb) return ra - rb;
       const la = String(a.Location || ''), lb = String(b.Location || '');
       if (la !== lb) return la < lb ? -1 : 1;

@@ -782,8 +782,14 @@ function firScheduleDays_(schedule) {
   const idx = d => order.indexOf(d);
   const range = s.match(/(SUN|MON|TUE|WED|THU|FRI|SAT)\s*-\s*(SUN|MON|TUE|WED|THU|FRI|SAT)/);
   if (range) {
+    const startIdx = idx(range[1]);
+    let endIdx = idx(range[2]);
     const days = [];
-    for (let d = idx(range[1]); d <= idx(range[2]); d++) days.push(d);
+    // Wrapping ranges (SAT-SUN, FRI-MON): walk forward modulo 7 until the
+    // end day is reached, so a start day after the end day wraps the week.
+    // Same-day range (MON-MON) = that single day, not the whole week.
+    if (endIdx < startIdx) endIdx += 7;
+    for (let d = startIdx; d <= endIdx; d++) days.push(d % 7);
     return days;
   }
   const list = s.match(/(?:SUN|MON|TUE|WED|THU|FRI|SAT)(?:,\s*(?:SUN|MON|TUE|WED|THU|FRI|SAT))+/);
@@ -838,6 +844,8 @@ function firScheduleSelfCheck() {
     ['MON-FRI 1300-1500', [1,2,3,4,5]],
     ['SAT 1300-1500', [6]],
     ['MON,WED,FRI 0800-1200', [1,3,5]],
+    ['SAT-SUN 1300-1500', [6,0]],
+    ['FRI-MON 0800-1200', [5,6,0,1]],
     ['DAILY 1300-1500', null],
     ['1300-1500', null],
     ['ALL DAY', null]
@@ -985,8 +993,24 @@ function firAnalyzeFlight(flight, notams, routes) {
     .filter(n => flightFirsUpper.indexOf(String(n.Location || '').trim().toUpperCase()) > -1)
     .map(n => {
       const parsed = firParseNotamText(n['NOTAM Text']);
-      if (!parsed) return null;
       const lifeStatus = lifecycle[String(n['NOTAM #'] || '').trim().toUpperCase()] || 'ACTIVE';
+      if (!parsed) {
+        // Fail-closed: unparseable rows (SNOWTAM, ASHTAM, short DINS rows) must
+        // stay reviewable instead of being silently dropped. No direct/indirect
+        // impact, so the finalRisk rollup is unchanged.
+        const unparseableRisk = /(MILITARY|DANGER|RESTRIC|ROCKET|LAUNCH|MISSILE|HAZARDOUS|RE-ENTRY|SPLASHDOWN|EXPLOSI|FIRING|BOMBING)/i.test(String(n['NOTAM Text'] || '')) ? 'HIGH' : 'MEDIUM';
+        return {
+          id: n['NOTAM #'],
+          location: n.Location,
+          number: n['NOTAM #'],
+          text: n['NOTAM Text'],
+          risk: unparseableRisk,
+          isDirectImpact: false,
+          isIndirectImpact: false,
+          status: (lifeStatus === 'REPLACED' || lifeStatus === 'CANCELLED') ? lifeStatus : 'UNVERIFIED',
+          matchReason: (lifeStatus !== 'ACTIVE' ? lifeStatus + ' — ' : '') + 'Unparseable NOTAM text: manual review required'
+        };
+      }
       const timeMatch = firCheckTimeOverlap(flightWindow, parsed.start, parsed.end, parsed.schedule);
       const altMatch = (cruiseFL === null) ? true : (cruiseFL >= parsed.minAlt && cruiseFL <= parsed.maxAlt);
       const routeMatch = firCheckRouteImpact(n['NOTAM Text'], waypoints);
@@ -1011,8 +1035,7 @@ function firAnalyzeFlight(flight, notams, routes) {
         status: lifeStatus,
         matchReason: (lifeStatus !== 'ACTIVE' ? lifeStatus + ' — ' : '') + 'Time: ' + timeMatch + ', Alt: ' + altMatch + ', Route: ' + (routeMatch.impacted ? 'YES' : (waypoints.length === 0 && !hasGeometry ? 'N/A' : 'NO')) + (geomMatch.nearestNm !== null ? ', Geometry: ' + geomMatch.nearestNm + 'nm' + (geomMatch.impacted ? ' (inside ' + geom.radiusNm + 'NM)' : ' (> ' + (geom.radiusNm || '?') + 'NM)') : (hasGeometry && !routePolyline ? ', Geometry: no route polyline to check' : ''))
       };
-    })
-    .filter(n => n !== null);
+    });
   let finalRisk = 'Clear';
   if (analysis.some(n => n.risk === 'HIGH' && n.isDirectImpact)) finalRisk = 'HIGH';
   else if (analysis.some(n => n.risk === 'MEDIUM' && n.isDirectImpact)) finalRisk = 'MEDIUM';
