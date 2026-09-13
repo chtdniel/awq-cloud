@@ -1346,6 +1346,7 @@ async function handleGetActiveNotams(context) {
             const effTime = parsed.effFrom ? parsed.effFrom.getTime() : 0;
             const expTime = parsed.effTo ? parsed.effTo.getTime() : 8640000000000000;
             const active = !(now.getTime() < effTime || now.getTime() > expTime);
+            const status = now.getTime() < effTime ? 'FUTURE' : (now.getTime() > expTime ? 'EXPIRED' : 'ACTIVE');
             
             // Basic coordinate extraction for mapping
             let lat = null, lon = null;
@@ -1379,7 +1380,8 @@ async function handleGetActiveNotams(context) {
                 center: lat !== null ? [lon, lat] : null,
                 radiusNm: null,
                 polygon: [],
-                active: active
+                active: active,
+                status: status
             });
         }
         

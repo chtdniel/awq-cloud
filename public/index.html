@@ -2702,6 +2702,7 @@
     document.addEventListener('keydown', handleEscape);
     
     const handleClickOutside = (e) => {
+      if (!activeATCPopover) { document.removeEventListener('click', handleClickOutside); return; }
       if (!activeATCPopover.contains(e.target)) {
         closeATCPopover();
         document.removeEventListener('click', handleClickOutside);
@@ -9175,6 +9176,7 @@
     hazards: [],
     hzQuery: '',
     hzRisk: '',
+    hzStatus: 'ACTIVE',  // default hanya ACTIVE — pilih 'ALL' untuk tampilkan FUTURE/EXPIRED juga
     flightDataLoaded: false  // Track if flight data has been loaded
   };
   // Exposed for FIR NOTAM UI to filter map by selected FIR tab
@@ -9582,7 +9584,7 @@
       const radiusNm = nfield(n,'radiusNm','Radius NM','RADIUS');
       const polygon = nfield(n,'polygon','Polygon','POLYGON');
       const cls = nfield(n,'cls','Class','CLASS');
-      const active = n.active !== false;
+      const active = n.active !== false && String(n.status || '').toUpperCase() !== 'EXPIRED';
       const radius = !active ? 4 : risk === 'HIGH' ? 9 : risk === 'MEDIUM' ? 7 : 5;
       const color = !active ? '#5a5f66' : risk === 'HIGH' ? '#ef5350' : risk === 'MEDIUM' ? '#fb923c' : '#34d399';
       const props = {
@@ -9841,6 +9843,9 @@
     return (state.hazards || []).filter(n => {
       const risk = String(n.risk || 'LOW').toUpperCase();
       if (state.hzRisk && risk !== state.hzRisk) return false;
+      const st = (n.active === false || String(n.status || '').toUpperCase() === 'EXPIRED') ? 'EXPIRED'
+        : (String(n.status || '').toUpperCase() === 'FUTURE' ? 'FUTURE' : 'ACTIVE');
+      if (state.hzStatus && state.hzStatus !== 'ALL' && st !== state.hzStatus) return false;
       if (q && !(String(n.location||'') + ' ' + String(n.number||'') + ' ' + String(n.text||'')).toLowerCase().includes(q)) return false;
       return true;
     });
@@ -9857,11 +9862,27 @@
       const active = state.hzRisk === o[0];
       h += '<button type="button" class="fir-hz-chip' + (active ? ' active' : '') + '" data-r="' + o[0] + '" aria-pressed="' + active + '">' + o[1] + '<span class="fir-hz-chip-count">' + o[2] + '</span></button>';
     });
+    // Status filter: ALL default menampilkan semua, ACTIVE hanya yang berlaku sekarang
+    h += '<span class="fir-hazard-filter-label" style="margin-left:8px;">Status</span>';
+    const stCount = (s) => all.filter(n => {
+      const st = (n.active === false || String(n.status || '').toUpperCase() === 'EXPIRED') ? 'EXPIRED'
+        : (String(n.status || '').toUpperCase() === 'FUTURE' ? 'FUTURE' : 'ACTIVE');
+      return s === 'ALL' || st === s;
+    }).length;
+    [['ALL', 'ALL', stCount('ALL')], ['ACTIVE', 'ACT', stCount('ACTIVE')], ['FUTURE', 'FUT', stCount('FUTURE')], ['EXPIRED', 'EXP', stCount('EXPIRED')]].forEach(o => {
+      const on = state.hzStatus === o[0];
+      h += '<button type="button" class="fir-hz-chip' + (on ? ' active' : '') + '" data-s="' + o[0] + '" aria-pressed="' + on + '">' + o[1] + '<span class="fir-hz-chip-count">' + o[2] + '</span></button>';
+    });
     box.innerHTML = h;
     const filteredLen = hazardFiltered().length;
     countEl.textContent = filteredLen + ' shown of ' + all.length;
-    box.querySelectorAll('.fir-hz-chip').forEach(el => el.addEventListener('click', () => {
+    box.querySelectorAll('[data-r]').forEach(el => el.addEventListener('click', () => {
       state.hzRisk = el.getAttribute('data-r');
+      renderHazardChips();
+      renderHazardList();
+    }));
+    box.querySelectorAll('[data-s]').forEach(el => el.addEventListener('click', () => {
+      state.hzStatus = el.getAttribute('data-s');
       renderHazardChips();
       renderHazardList();
     }));
@@ -9959,11 +9980,13 @@
   async function loadActiveNotams() {
     const data = await run('getActiveNotams', true);
     if (data && !data.error) {
-      state.notams = (data.notams || []).filter(n => n.active !== false);
+      // Semua status dimuat (ACTIVE/FUTURE/EXPIRED) — status chip di hazard list mengatur tampilan.
+      state.notams = data.notams || [];
     }
     if (!state.notams.length) state.notams = [];
     updateNotamLayer();
-    document.getElementById('fir-notam-status').textContent = 'NOTAM: ' + state.notams.length + ' active';
+    const cnt = state.notams.filter(n => n.active !== false).length;
+    document.getElementById('fir-notam-status').textContent = 'NOTAM: ' + cnt + ' active / ' + state.notams.length;
   }
 
   async function selectFlight(rowId) {
