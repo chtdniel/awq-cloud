@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS notams (
     message TEXT,
     valid_from DATETIME,
     valid_to DATETIME,
+    kind TEXT DEFAULT 'AD', -- 'FIR' = halaman FIR, 'AD' = aerodrome (Update NOTAM)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

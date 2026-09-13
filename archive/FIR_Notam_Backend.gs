@@ -77,8 +77,8 @@ function firSaveNotam(payload) {
     
     const query = `
       INSERT INTO notams 
-      (id, location, notam_code, message, valid_from, valid_to, risk_level, is_active, updated_at) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      (id, location, notam_code, message, valid_from, valid_to, risk_level, is_active, updated_at, kind) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'FIR')
     `;
     
     const params = [

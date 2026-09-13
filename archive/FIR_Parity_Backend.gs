@@ -297,19 +297,20 @@ function firParseFirSheetNotams(values) {
 function firGetAllRawNotams() {
   const out = [];
   const seen = {};
-  const pushUnique = (n) => {
+  const pushUnique = (n, src) => {
     const key = String(n && n.Location || '') + '|' + String(n && n['NOTAM #'] || '');
     if (seen[key]) return;
     seen[key] = true;
+    if (n) n._src = src;
     out.push(n);
   };
   const notamValues = firGetSheetData('NOTAM');
   if (notamValues && notamValues.length > 1) {
-    firProcessNotamSheet(notamValues).forEach(pushUnique);
+    firProcessNotamSheet(notamValues).forEach((n) => pushUnique(n, 'AD'));
   }
   const firValues = firGetSheetData('FIR');
   if (firValues && firValues.length > 0) {
-    firParseFirSheetNotams(firValues).forEach(pushUnique);
+    firParseFirSheetNotams(firValues).forEach((n) => pushUnique(n, 'FIR'));
   }
   return out;
 }
@@ -433,6 +434,9 @@ function getActiveNotams(useCache) {
       const now = new Date();
       const notams = [];
       rawNotams.forEach(n => {
+        // Halaman FIR = peta FIR layer: tampilkan FIR NOTAM saja (_src==='FIR');
+        // aerodrome tetap masuk analisis via ds.notamsByLoc di jalur lain.
+        if (String(n && n._src || '') !== 'FIR') return;
         const text = String(pick(n, 'NOTAM Text', 'NOTAM_TEXT', 'NOTAMTEXT', 'Text', 'NOTAM TEXT') || '');
         const parsed = firParseNotamText(text);
         const norm = (v) => {

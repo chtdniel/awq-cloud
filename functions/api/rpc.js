@@ -706,8 +706,8 @@ async function handleSaveNotamData(context, args) {
             const qCode = ''; // Could extract Q code if needed
             
             const stmt = context.env.DB.prepare(
-                'INSERT INTO notams (id, location, q_code, message, valid_from, valid_to) VALUES (?, ?, ?, ?, ?, ?)'
-            ).bind(notamNum, location, qCode, fullText, validFrom, validTo);
+                'INSERT INTO notams (id, location, q_code, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            ).bind(notamNum, location, qCode, fullText, validFrom, validTo, 'AD');
             
             stmts.push(stmt);
             rowsInserted++;
@@ -1324,7 +1324,9 @@ async function handleGetFirData(context, args) {
 
 async function handleGetActiveNotams(context) {
     try {
-        const { results: notamRows } = await context.env.DB.prepare('SELECT * FROM notams').all();
+        // Halaman FIR menampilkan FIR NOTAM saja (kind='FIR'); aerodrome (kind='AD') tetap
+        // dipakai analyze* untuk risiko DEP/DEST (migration 005).
+        const { results: notamRows } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
         
         const now = new Date();
         const activeNotams = [];
