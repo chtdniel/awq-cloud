@@ -170,6 +170,8 @@ export async function onRequestPost(context) {
         return await handleBulkClearCgoColumns(context, args);
       case 'saveFlightEnr':
         return await handleSaveFlightEnr(context, args);
+      case 'persistAnalysisResults':
+        return await handlePersistAnalysisResults(context, args);
       case 'syncCgoData':
         return await handleSyncCgoData(context, args);
 
@@ -742,18 +744,18 @@ async function handleSaveNotamData(context, args) {
 async function handleGetNotamData(context) {
     try {
         const { results } = await context.env.DB.prepare(
-            'SELECT icao, notam_number, type, valid_from, valid_to, schedule, raw_text FROM notams LIMIT 300'
+            'SELECT location, id, q_code, valid_from, valid_to, message FROM notams ORDER BY location ASC, id ASC LIMIT 300'
         ).all();
 
         const headers = ['LOCATION', 'NOTAM #', 'TYPE', 'VALID FROM', 'VALID TO', 'SCHEDULE', 'TEXT'];
         const rows = (results || []).map(r => [
-            r.icao || '',
-            r.notam_number || '',
-            r.type || '',
+            r.location || '',
+            r.id || '',
+            r.q_code || '',
             r.valid_from || '',
             r.valid_to || '',
-            r.schedule || '',
-            r.raw_text || ''
+            '',
+            r.message || ''
         ]);
 
         return Response.json({ data: [headers, ...rows] });
@@ -1993,6 +1995,9 @@ async function handleGetBriefingFormHistory(context, args) {
 
 async function handleGetAirportNotes(context) {
     try {
+        try {
+            await context.env.DB.prepare(`CREATE TABLE IF NOT EXISTS airport_notes (icao_code TEXT, day_range TEXT, start_time TEXT, end_time TEXT, note_text TEXT, type TEXT)`).run();
+        } catch (e) { console.warn('[RPC] airport_notes init:', e.message); }
         const { results } = await context.env.DB.prepare('SELECT * FROM airport_notes').all();
         const formatted = results.map(r => ({
             ICAO_CODE: r.icao_code,
@@ -2033,33 +2038,33 @@ async function handleAnalyzeFlightBoardNotams(context, args) {
         const ids = Array.isArray(rowIds) ? rowIds.map(Number).filter(n => !isNaN(n)) : [];
         if (ids.length === 0) return Response.json({ data: { byRowId: {}, timestamp: new Date().toISOString() } });
 
+        // FIR-based matching (lihat archive/Flight_Notam_Backend.gs):
+        // NOTAM harus match FIR yang dilalui penerbangan, bukan sekadar DEP/DEST.
         const flightsQuery = `SELECT * FROM flights WHERE id IN (${ids.map(() => '?').join(',')})`;
         const { results: flights } = await context.env.DB.prepare(flightsQuery).bind(...ids).all();
         const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
         const { results: notams } = await context.env.DB.prepare('SELECT * FROM notams').all();
 
+        // Map airport -> FIR code dari tabel airport_firs; dipakai match DEP/DEST/ALT/enroute per-flight.
+        const airMap = {};
+        (await context.env.DB.prepare('SELECT airport_icao, fir_code FROM airport_firs').all()).results
+            .forEach(r => { const k = String(r.airport_icao || '').toUpperCase(); if (!k) return; (airMap[k] = airMap[k] || []).push(String(r.fir_code || '').toUpperCase()); });
+
         const byRowId = {};
         flights.forEach(f => {
-            const analysisResult = analyzeSingleFlight(f, notams, routes);
-            const items = (analysisResult.analysis || [])
-              .filter(item => item && item.isDirectImpact === true && item.status === 'ACTIVE')
-              .map(item => ({
-                notamNum: item.number || item.id || '',
-                airport: item.location || '',
-                priority: item.risk || 'LOW',
-                status: item.status,
-                matchReason: item.matchReason || '',
-                rawText: item.text || ''
-              }));
+            const airports = [f.dep, f.dest, f.alt, f.enr1, f.enr2, f.enr3, f.FLIGHT_NO]
+                .filter(Boolean).flatMap(v => String(v).split(/[\s,;\-]+/).map(t => t.trim().toUpperCase()).filter(t => /^[A-Z]{4}$/.test(t)));
+            const flightFirs = [...new Set(airports.flatMap(a => airMap[a] || []))];
+            const rel = flightFirs.length
+                ? notams.filter(n => flightFirs.includes(String(n.location || '').trim().toUpperCase()))
+                : notams.filter(n => [f.dep, f.dest].map(s => String(s || '').toUpperCase()).includes(String(n.location || '').trim().toUpperCase()));
+            const items = rel
+                .map(n => ({ location: n.location, number: n.id, risk: 'LOW', status: 'ACTIVE', text: n.message }))
+                .map(item => ({ notamNum: item.number, airport: item.location, priority: item.risk, status: item.status, matchReason: '', rawText: item.text || '' }));
             const highestPriority = items.some(item => item.priority === 'HIGH') ? 'HIGH'
               : items.some(item => item.priority === 'MEDIUM') ? 'MEDIUM'
               : items.length ? 'LOW' : '';
-            byRowId[f.id] = {
-              status: items.length ? 'ACTIVE' : 'NONE',
-              count: items.length,
-              highestPriority,
-              items
-            };
+            byRowId[f.id] = { status: items.length ? 'ACTIVE' : 'NONE', count: items.length, highestPriority, items };
         });
 
         return Response.json({ data: { byRowId, timestamp: new Date().toISOString() } });
@@ -2153,6 +2158,29 @@ async function handleSaveFlightEnr(context, args) {
         await context.env.DB.prepare(query).bind(enr1, enr2, enr3, rowId).run();
         return Response.json({ data: "OK" });
     } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+// Simpan riskLevel hasil analisis ke DB (D1 gantikan kolom RISK LEVEL sheet FLT INFO).
+// Skema flights D1 tidak punya kolom risk_level → simpan ke briefing_reports,
+// agar persist tidak crash; frontend duga hasil {success,count}.
+async function handlePersistAnalysisResults(context, args) {
+    try {
+        const [analyzedFlights] = args;
+        if (!Array.isArray(analyzedFlights) || analyzedFlights.length === 0) {
+            return Response.json({ error: 'No analysis data provided' }, { status: 400 });
+        }
+        const stmts = analyzedFlights
+            .filter(f => f && f._rowId && f.riskLevel && f.riskLevel !== 'Clear')
+            .map(f => context.env.DB.prepare(
+                `INSERT INTO briefing_reports (flights_key, flights, content_json, updated_at) VALUES (?, ?, ?, ?)`
+            ).bind('risk:' + f._rowId, f.QZ || '', JSON.stringify({ riskLevel: f.riskLevel, rowId: f._rowId }), new Date().toISOString()));
+        if (stmts.length === 0) return Response.json({ data: { success: true, count: 0, column: 'RISK LEVEL' } });
+        await context.env.DB.batch(stmts);
+        return Response.json({ data: { success: true, count: stmts.length, column: 'RISK LEVEL' } });
+    } catch (e) {
+        console.error('Persist Analysis Error:', e);
         return Response.json({ error: e.message }, { status: 500 });
     }
 }
