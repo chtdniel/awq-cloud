@@ -1795,8 +1795,10 @@ function firParseBulkNotamText(rawText) {
 }
 
 // Dedupe & validasi baris bulk: { ok, total, valid, invalid, duplicates, preview, keySet }
-async function firBulkValidateRows(context, parsedRows) {
-    const { results: existing } = await context.env.DB.prepare('SELECT id, location FROM notams').all();
+// Overwrite hapus FIR dulu lalu isi ulang — dedup lawan DB dilewati agar refill jalan;
+// dedup dalam batch tetap. Jalur FIR hanya lawan kind='FIR'.
+async function firBulkValidateRows(context, parsedRows, skipDbDedup) {
+    const { results: existing } = await context.env.DB.prepare("SELECT id, location FROM notams WHERE kind = 'FIR'").all();
     const keySet = {};
     (existing || []).forEach(r => { keySet[String(r.location || '').concat('|', String(r.id || '')).toUpperCase()] = true; });
     let valid = 0, invalid = 0, duplicates = 0;
@@ -1809,7 +1811,7 @@ async function firBulkValidateRows(context, parsedRows) {
         let isDup = null;
         if (rowOk) {
             const key = (loc + '|' + no).toUpperCase();
-            if (keySet[key] || seenBatch[key]) isDup = 'FIR/NOTAM';
+            if ((!skipDbDedup && keySet[key]) || seenBatch[key]) isDup = 'FIR/NOTAM';
             else { seenBatch[key] = true; valid++; validRows.push({ loc, no, nt, p }); }
             if (isDup) duplicates++; else preview.push({ Location: loc, 'NOTAM #': no, ok: true, textPreview: nt.slice(0, 80).replace(/\n/g, ' ') });
         } else invalid++;
@@ -1824,7 +1826,7 @@ async function handleFirBulkPreviewNotams(context, args) {
         const [rawText] = args || [];
         const parsed = firParseBulkNotamText(rawText);
         if (!parsed.ok) return Response.json({ data: parsed });
-        const v = await firBulkValidateRows(context, parsed.rows);
+        const v = await firBulkValidateRows(context, parsed.rows, false);
         return Response.json({ data: { ok: true, total: parsed.rows.length, valid: v.valid, invalid: v.invalid, duplicates: v.duplicates, preview: v.preview, isTSV: parsed.isTSV } });
     } catch (e) {
         console.error('[RPC] firBulkPreview Error:', e);
@@ -1841,7 +1843,7 @@ async function handleFirBulkImportNotams(context, args) {
         const parsed = firParseBulkNotamText(rawText);
         if (!parsed.ok) return Response.json({ data: parsed });
         if (parsed.rows.length === 0) return Response.json({ data: { ok: false, error: 'No valid NOTAMs found. Make sure text contains Q) lines.' } });
-        const v = await firBulkValidateRows(context, parsed.rows);
+        const v = await firBulkValidateRows(context, parsed.rows, m === 'overwrite');
         if (v.validRows.length === 0) {
             return Response.json({ data: { ok: false, total: parsed.rows.length, appended: 0, skippedInvalid: v.invalid, skippedDup: v.duplicates, error: 'Nothing to import (all invalid/duplicates).' } });
         }
@@ -1849,7 +1851,7 @@ async function handleFirBulkImportNotams(context, args) {
         if (m === 'overwrite') stmts.push(context.env.DB.prepare("DELETE FROM notams WHERE kind = 'FIR'"));
         for (const r of v.validRows) {
             stmts.push(context.env.DB.prepare(
-                'INSERT INTO notams (id, location, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?)'
+                'INSERT INTO notams (id, location, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET location = excluded.location, message = excluded.message, valid_from = excluded.valid_from, valid_to = excluded.valid_to, kind = excluded.kind'
             ).bind(r.no, r.loc, r.nt, r.p.effFrom ? r.p.effFrom.toISOString() : null, r.p.isContinuous ? new Date('2099-01-01T00:00:00Z').toISOString() : (r.p.effTo ? r.p.effTo.toISOString() : null), 'FIR'));
         }
         await context.env.DB.batch(stmts);
