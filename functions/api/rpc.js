@@ -154,7 +154,25 @@ export async function onRequestPost(context) {
         return await handleGetNotamData(context);
 
       case 'getSettingsAccessInfo':
-        return Response.json({ data: {} });
+        return Response.json({ data: getOpenSettingsAccess(context) });
+
+      case 'getSettingsAdminList':
+        return await handleGetSettingsAdminList(context);
+
+      case 'setSettingsAdminEmails':
+        return await handleSetSettingsAdminEmails(context, args);
+
+      case 'getOccSettings':
+        return await handleGetOccSettings(context);
+
+      case 'setOccAllowedEmails':
+        return await handleSetOccAllowedEmails(context, args);
+
+      case 'getOccSystemSettings':
+        return Response.json({ data: getOpenSystemSettings() });
+
+      case 'getSettingsBundle':
+        return await handleGetSettingsBundle(context);
 
       case 'getAirportNotes':
         return await handleGetAirportNotes(context);
@@ -2197,4 +2215,81 @@ async function handleSyncCgoData(context, args) {
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
     }
+}
+
+// Settings: open mode — nav tampil untuk semua. Auth tetap di rpcGuard.
+// ponytail: allowlist email di Cloudflare Access; tambah cek bila perlu.
+function getAccessEmail(context) {
+    return context.request.headers.get('CF-Access-Authenticated-User-Email') || '';
+}
+
+function getOpenSettingsAccess(context) {
+    return { ok: true, user: getAccessEmail(context), canView: true, canEdit: true };
+}
+
+function normalizeEmailList(csv) {
+    const seen = new Set();
+    const out = [];
+    String(csv || '').split(/[,;\n]+/).forEach(s => {
+        const e = String(s || '').trim();
+        const k = e.toLowerCase();
+        if (e && !seen.has(k)) { seen.add(k); out.push(e); }
+    });
+    out.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    return out;
+}
+
+async function metaGet(context, key) {
+    try {
+        const row = await context.env.DB.prepare('SELECT value FROM meta WHERE key = ?').bind(key).first();
+        return row ? String(row.value || '') : '';
+    } catch { return ''; }
+}
+
+async function metaSet(context, key, value) {
+    if (!value) {
+        await context.env.DB.prepare('DELETE FROM meta WHERE key = ?').bind(key).run();
+        return;
+    }
+    await context.env.DB.prepare(
+        'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    ).bind(key, value).run();
+}
+
+async function handleGetSettingsAdminList(context) {
+    const raw = await metaGet(context, 'SETTINGS_ADMIN_EMAILS');
+    return Response.json({ data: { ok: true, raw, admins: normalizeEmailList(raw), currentUser: getAccessEmail(context) } });
+}
+
+async function handleSetSettingsAdminEmails(context, args) {
+    const [csv] = args;
+    const deduped = normalizeEmailList(csv);
+    await metaSet(context, 'SETTINGS_ADMIN_EMAILS', deduped.join(', '));
+    return Response.json({ data: getOpenSettingsAccess(context) });
+}
+
+async function handleGetOccSettings(context) {
+    const raw = await metaGet(context, 'OCC_ALLOWED_EMAILS');
+    const allowed = normalizeEmailList(raw);
+    return Response.json({
+        data: { ok: true, raw, allowed, currentUser: getAccessEmail(context), isAuthorized: true, isOpen: !raw.trim() }
+    });
+}
+
+async function handleSetOccAllowedEmails(context, args) {
+    const [csv] = args;
+    const deduped = normalizeEmailList(csv);
+    await metaSet(context, 'OCC_ALLOWED_EMAILS', deduped.join(', '));
+    return handleGetOccSettings(context);
+}
+
+function getOpenSystemSettings() {
+    return { ok: true, spreadsheetId: '', spreadsheetName: 'D1 (Cloudflare)', timezone: 'Asia/Makassar', occFirLink: '', occFirLinkDeprecated: true };
+}
+
+async function handleGetSettingsBundle(context) {
+    const access = getOpenSettingsAccess(context);
+    const settings = (await handleGetOccSettings(context).then(r => r.json())).data;
+    const adminsRes = await handleGetSettingsAdminList(context).then(r => r.json());
+    return Response.json({ data: { ok: true, access, settings, admins: adminsRes.data, system: getOpenSystemSettings(), wx: { ok: true } } });
 }
