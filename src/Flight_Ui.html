@@ -1509,7 +1509,7 @@
       : `<div style="color:var(--text-disabled); font-size:11px; font-style:italic;">No ENR sectors defined</div>`;
 
     const airportCodes = [flight.DEP, flight.ARR].filter(Boolean).map(code => String(code).toUpperCase());
-    const flightNotes = (window.airportNotes || []).filter(note => airportCodes.includes(String(note.ICAO_CODE || '').toUpperCase()));
+    const flightNotes = (Array.isArray(window.airportNotes) ? window.airportNotes : []).filter(note => airportCodes.includes(String(note.ICAO_CODE || '').toUpperCase()));
     const airportNotesHtml = flightNotes.length
       ? flightNotes.map(note => `<div class="drawer-airport-note"><strong>${esc(note.ICAO_CODE)}</strong><span>${esc(note.DAY_RANGE)} · ${esc(note.START_TIME)}Z–${esc(note.END_TIME)}Z</span><div>${esc(note.NOTE_TEXT)}</div></div>`).join('')
       : `<div style="color:var(--text-disabled); font-size:11px; font-style:italic;">No airport notes for DEP/ARR</div>`;
@@ -2018,7 +2018,7 @@
 
     let timeToCheck = flight ? (isDep ? flight.STD : flight.STA) : null;
     let dofToCheck = flight ? flight.DOF : null;
-    let notes = window.airportNotes.filter(n => n.ICAO_CODE === icao);
+    let notes = (Array.isArray(window.airportNotes) ? window.airportNotes : []).filter(n => n.ICAO_CODE === icao);
 
     const content = document.getElementById('tooltip-apt-content');
     const title = document.getElementById('tooltip-apt-title');
@@ -2989,7 +2989,7 @@
     if (!container) return;
     container.innerHTML = '';
 
-    let notes = window.airportNotes.filter(n => n.ICAO_CODE === currentTooltipIcao);
+    let notes = (Array.isArray(window.airportNotes) ? window.airportNotes : []).filter(n => n.ICAO_CODE === currentTooltipIcao);
     if (notes.length === 0) window.addNoteRow();
     else notes.forEach(n => window.addNoteRow(n));
 

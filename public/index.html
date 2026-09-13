@@ -1497,6 +1497,7 @@
   .cmd-utc { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; }
   .cmd-utc strong { color: var(--text-primary); font-size: 14px; }
   .cmd-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .flight-strip[hidden], .timeline-row[hidden] { display: none !important; }
 
   /* ── TOOLBAR (filters + inline stats + actions) ──── */
   .flt-toolbar {
@@ -1774,7 +1775,7 @@
   .flight-detail-drawer.open { transform: translateX(0); visibility: visible; pointer-events: auto; opacity: 1; transition-delay: 0s; }
   .drawer-backdrop { position: fixed; z-index: var(--z-drawer); /* Layer: Drawer backdrop */ inset: 0; background: rgba(11, 14, 19, 0.32); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
   .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
-  .drawer-head { padding: 12px 16px; border-bottom: 1px solid var(--border-light); background: var(--bg-panel-alt); position: relative; flex-shrink: 0; }
+  .drawer-head { padding: 16px 20px 12px 20px; border-bottom: 1px solid var(--border-light); background: var(--bg-panel-alt); position: relative; flex-shrink: 0; }
   .drawer-kicker { color: var(--accent-primary); font: 700 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 4px; }
   .drawer-title { font-family: var(--font-display); font-weight: 700; font-size: 22px; line-height: 1; letter-spacing: 0.02em; text-transform: uppercase; padding-right: 44px; }
   .drawer-close { position: absolute; top: 12px; right: 12px; border: 1px solid var(--border-light); background: var(--bg-panel); color: var(--text-secondary); border-radius: var(--radius-sm); width: 36px; height: 36px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: .2s; }
@@ -1783,7 +1784,7 @@
   .drawer-route { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-family: var(--font-mono); font-size: 13px; font-weight: 800; }
   .drawer-route .icao-tag { padding: 3px 8px; font-size: 12px; }
 
-  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; scroll-padding-top: 20px; }
+  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 20px 20px; scroll-padding-top: 16px; }
   .drawer-section { margin-bottom: 20px; }
   .drawer-section-title { color: var(--text-muted); font: 700 11px var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
   .drawer-facts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: hidden; background: var(--border-light); }
@@ -1793,6 +1794,7 @@
   .drawer-fact .drawer-edit { font-family: var(--font-mono); font-size: 12px; font-weight: 700; width: 100%; border: 1px solid transparent; background: transparent; color: var(--text-primary); padding: 2px 4px; border-radius: 3px; margin-top: 2px; transition: .2s; }
   .drawer-fact .drawer-edit:focus { outline: none; border-color: var(--accent-primary); background: var(--bg-void); }
   .drawer-fact .drawer-edit:hover:not(:focus) { background: var(--overlay); border-color: var(--border-light); }
+  .drawer-fact .drawer-edit[type="date"] { font-size: 11px; }
 
   .drawer-taf { padding: 12px; border-left: 3px solid var(--status-warning); background: var(--status-warning-bg); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--text-primary); word-break: break-word; margin-bottom: 8px; }
   .drawer-taf.taf-arr { border-left-color: var(--status-safe); background: var(--status-safe-bg); }
@@ -1811,7 +1813,7 @@
   .drawer-airport-note span { color: var(--text-muted); font-size: 10px; }
   .drawer-airport-note div { margin-top: 4px; color: var(--text-primary); }
 
-  .drawer-actions { display: flex; gap: 8px; padding: 16px 24px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-light); background: var(--bg-panel-alt); flex-shrink: 0; }
+  .drawer-actions { display: flex; gap: 8px; padding: 12px 20px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-light); background: var(--bg-panel-alt); flex-shrink: 0; }
   .drawer-actions .control-btn { flex: 1; justify-content: center; height: 40px; display: flex; align-items: center; gap: 6px; }
 
   /* ── BUTTONS ────────────────────────────────────────── */
@@ -1854,10 +1856,10 @@
 
   /* ── MODALS ─────────────────────────────────────────── */
   .modal-overlay { position: fixed; inset: 0; width: 100%; height: 100%; background: rgba(11, 14, 19, 0.45); backdrop-filter: blur(6px); display: flex; justify-content: center; align-items: center; z-index: var(--z-modal); /* Layer: Modal */ animation: fadeIn 0.2s ease-out; }
-  .modal-box { background: var(--bg-panel); border: 1px solid var(--border-light); width: 640px; max-width: 95%; border-radius: var(--radius-lg); box-shadow: var(--shadow-lift), var(--inset-highlight); overflow: hidden; }
-  .modal-header { background: var(--bg-panel-alt); padding: 20px 24px; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; }
+  .modal-box { background: var(--bg-panel); border: 1px solid var(--border-light); width: 640px; max-width: 95%; max-height: calc(100dvh - 120px); margin-top: 120px; border-radius: var(--radius-lg); box-shadow: var(--shadow-lift), var(--inset-highlight); overflow: hidden; display: flex; flex-direction: column; }
+  .modal-header { background: var(--bg-panel-alt); padding: 20px 24px; border-bottom: 1px solid var(--border-light); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
   .modal-header span { font-weight: 800; font-size: 16px; letter-spacing: 0.05em; color: var(--accent-primary); }
-  .modal-tabs { display: flex; gap: 12px; background: transparent; padding: 0; margin: 16px 24px 24px 24px; border-radius: 0; }
+  .modal-tabs { display: flex; gap: 12px; background: transparent; padding: 0; margin: 16px 24px 24px 24px; border-radius: 0; flex-shrink: 0; }
   .modal-tabs button { flex: 1; padding: 10px 16px; background: transparent; border: 1px solid var(--border-light); color: var(--text-muted); font-family: var(--font-ui); font-weight: 700; font-size: 13px; cursor: pointer; border-radius: var(--radius-sm); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
   .modal-tabs button.active { color: #ffffff; background: var(--accent-primary); border-color: var(--accent-primary); box-shadow: var(--accent-glow); }
   .modal-tabs button:hover:not(.active) { background: var(--overlay); border-color: var(--border-medium); color: var(--text-primary); }
@@ -1867,7 +1869,7 @@
   .db-flt-tag { color: var(--accent-primary); font-weight: 800; font-size: 13px; width: 65px; }
   .db-route-tag { display: flex; align-items: center; gap: 8px; font-weight: 700; }
   .db-dof-tag { margin-left: auto; color: var(--text-muted); font-size: 11px; letter-spacing: 0.05em; }
-  .modal-body { padding: 0 24px 24px 24px; max-height: 70vh; overflow-y: auto; }
+  .modal-body { padding: 0 24px 24px 24px; flex: 1; min-height: 0; overflow-y: auto; }
   .form-group { margin-bottom: 16px; }
   .form-group label { display: block; font-size: 11px; font-weight: 800; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -2832,11 +2834,8 @@
     });
   }
 
-  window.setFlightFilter = function (filter) {
-    window.flightFilter = filter;
-    document.querySelectorAll('[data-flight-filter]').forEach(btn => btn.classList.toggle('active', btn.dataset.flightFilter === filter));
-    renderBoard();
-  };
+  // NOTE: window.setFlightFilter didefinisikan sekali di seksi FLIGHT FILTER bawah
+  // (toolbar via .flight-filter-btn + renderBoard).
 
   window.setFlightView = function (view) {
     window.flightView = view === 'timeline' ? 'timeline' : 'board';
@@ -2991,7 +2990,7 @@
       : `<div style="color:var(--text-disabled); font-size:11px; font-style:italic;">No ENR sectors defined</div>`;
 
     const airportCodes = [flight.DEP, flight.ARR].filter(Boolean).map(code => String(code).toUpperCase());
-    const flightNotes = (window.airportNotes || []).filter(note => airportCodes.includes(String(note.ICAO_CODE || '').toUpperCase()));
+    const flightNotes = (Array.isArray(window.airportNotes) ? window.airportNotes : []).filter(note => airportCodes.includes(String(note.ICAO_CODE || '').toUpperCase()));
     const airportNotesHtml = flightNotes.length
       ? flightNotes.map(note => `<div class="drawer-airport-note"><strong>${esc(note.ICAO_CODE)}</strong><span>${esc(note.DAY_RANGE)} · ${esc(note.START_TIME)}Z–${esc(note.END_TIME)}Z</span><div>${esc(note.NOTE_TEXT)}</div></div>`).join('')
       : `<div style="color:var(--text-disabled); font-size:11px; font-style:italic;">No airport notes for DEP/ARR</div>`;
@@ -3058,6 +3057,7 @@
       document.body.appendChild(backdrop);
       document.body.appendChild(drawer);
     }
+    activeDialogCount++;
     document.body.style.overflow = 'hidden';
     drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); backdrop.classList.add('open');
   };
@@ -3074,7 +3074,7 @@
       backdrop.classList.remove('open');
     }
 
-    activeDialogCount--;
+    if (activeDialogCount > 0) activeDialogCount--;
 
     // Kembalikan scroll body hanya jika tidak ada dialog lain yang terbuka.
     if (activeDialogCount <= 0) {
@@ -3093,8 +3093,13 @@
   
   // Global keyboard navigation handler
   document.addEventListener('keydown', function(event) {
-    // Escape closes modal/drawer
+    // Escape closes modal first, then drawer
     if (event.key === 'Escape' && activeDialogCount > 0) {
+      const openModal = _closeAnyOpenModal();
+      if (openModal) {
+        event.preventDefault();
+        return;
+      }
       window.closeFlightDrawer();
       event.preventDefault();
       return;
@@ -3494,7 +3499,7 @@
 
     let timeToCheck = flight ? (isDep ? flight.STD : flight.STA) : null;
     let dofToCheck = flight ? flight.DOF : null;
-    let notes = window.airportNotes.filter(n => n.ICAO_CODE === icao);
+    let notes = (Array.isArray(window.airportNotes) ? window.airportNotes : []).filter(n => n.ICAO_CODE === icao);
 
     const content = document.getElementById('tooltip-apt-content');
     const title = document.getElementById('tooltip-apt-title');
@@ -3605,13 +3610,18 @@
       const header = document.getElementById('cm-header');
       if (header) header.innerText = `${count} FLIGHT${count > 1 ? 'S' : ''} SELECTED`;
 
+      // Teleport keluar stacking context .occ-content-area agar tidak tertimpa header.
+      if (cm.parentElement !== document.body) document.body.appendChild(cm);
+
       cm.style.display = 'block';
       cm.style.left = `${e.clientX}px`;
       cm.style.top = `${e.clientY}px`;
 
       const rect = cm.getBoundingClientRect();
+      const HEADER_SAFE = 132; // nav pill top:12px + status strip top:76px
       if (rect.right > window.innerWidth) cm.style.left = `${window.innerWidth - rect.width - 10}px`;
       if (rect.bottom > window.innerHeight) cm.style.top = `${window.innerHeight - rect.height - 10}px`;
+      if (rect.top < HEADER_SAFE) cm.style.top = `${HEADER_SAFE}px`;
     });
 
     document.addEventListener('click', (e) => {
@@ -3776,12 +3786,12 @@
   };
 
   window.uiOpenBulkDofModal = function () {
+    _openModalOverlay('modal-bulk-dof');
     document.getElementById('context-menu').style.display = 'none';
-    document.getElementById('modal-bulk-dof').style.display = 'flex';
   };
 
   window.uiCloseBulkDofModal = function () {
-    document.getElementById('modal-bulk-dof').style.display = 'none';
+    _closeModalOverlay('modal-bulk-dof');
   };
 
   window.cmHideSelected = function () {
@@ -3964,15 +3974,81 @@
   // =========================================================
   // MODAL MANAGEMENT
   // =========================================================
+  // Modal Teleport Helper - move overlay to body to avoid stacking context trap
+  function _teleportModalToBody(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal || !modal.parentElement) return;
+    
+    // Check if already teleported
+    if (modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+  }
+
+  // Helper: buka overlay modal dengan teleport + dialog counting + scroll lock
+  function _openModalOverlay(modalId) {
+    _teleportModalToBody(modalId);
+    const modal = document.getElementById(modalId);
+    if (modal) {
+      activeDialogCount++;
+      modal.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    }
+  }
+
+  // Helper: tutup overlay modal + dialog counting + scroll unlock
+  function _closeModalOverlay(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return false;
+    const wasOpen = modal.style.display === 'flex';
+    modal.style.display = 'none';
+    if (wasOpen) {
+      activeDialogCount--;
+      if (activeDialogCount <= 0) {
+        activeDialogCount = 0;
+        document.body.style.overflow = '';
+      }
+    }
+    return wasOpen;
+  }
+
+  // Helper: tutup modal manapun yang sedang terbuka (untuk Escape)
+  function _closeAnyOpenModal() {
+    const ids = ['modal-load-flight', 'modal-bulk-dof', 'modal-airport-notes', 'modal-enr', 'modal-route'];
+    for (const id of ids) {
+      const modal = document.getElementById(id);
+      if (modal && modal.style.display === 'flex') {
+        if (id === 'modal-load-flight') { window.uiCloseAddFlightModal(); return true; }
+        if (id === 'modal-bulk-dof') { window.uiCloseBulkDofModal(); return true; }
+        if (id === 'modal-airport-notes') { window.closeAirportNotesModal(); return true; }
+        if (id === 'modal-enr') { window.closeEnrModal(); return true; }
+        if (id === 'modal-route') { window.closeRouteModal(); return true; }
+      }
+    }
+    return false;
+  }
+
+  // Backdrop click = close (hanya saat klik di area gelap, bukan isi modal)
+  document.addEventListener('click', function (e) {
+    const overlay = e.target.closest('.modal-overlay');
+    if (!overlay) return;
+    if (overlay.style.display !== 'flex') return;
+    const box = e.target.closest('.modal-box');
+    if (box && box.parentElement === overlay) return; // klik di dalam box
+    if (overlay.id === 'modal-load-flight') window.uiCloseAddFlightModal();
+    else if (overlay.id === 'modal-bulk-dof') window.uiCloseBulkDofModal();
+    else if (overlay.id === 'modal-airport-notes') window.closeAirportNotesModal();
+    else if (overlay.id === 'modal-enr') window.closeEnrModal();
+    else if (overlay.id === 'modal-route') window.closeRouteModal();
+  });
+
   window.uiOpenAddFlightModal = function () {
-    const modal = document.getElementById('modal-load-flight');
-    if (modal) modal.style.display = 'flex';
+    _openModalOverlay('modal-load-flight');
     window.uiSwitchModalTab('db');
   };
 
   window.uiCloseAddFlightModal = function () {
-    const modal = document.getElementById('modal-load-flight');
-    if (modal) modal.style.display = 'none';
+    _closeModalOverlay('modal-load-flight');
   };
 
   window.uiSwitchModalTab = function (tab) {
@@ -4000,13 +4076,27 @@
     if (tab === 'new') window.populateRegDropdown();
   };
 
+  window.isValidDbFlight = function (f) {
+    if (!f || typeof f !== 'object') return false;
+    const flt = String(f.FLIGHT == null ? '' : f.FLIGHT).trim();
+    const dep = String(f.DEP == null ? '' : f.DEP).trim().toUpperCase();
+    const arr = String(f.ARR == null ? '' : f.ARR).trim().toUpperCase();
+    // Tolak baris hantu hasil parse CSV pecah: FLIGHT hanya quote/kosong,
+    // DEP/ARR wajib kode ICAO 4 huruf (menolak tanggal YYYYMMDD seperti 20260908).
+    if (!flt || /^["'\s]+$/.test(flt)) return false;
+    if (!/^[A-Z0-9]{2,10}$/.test(flt)) return false;
+    if (!/^[A-Z]{4}$/.test(dep)) return false;
+    if (!/^[A-Z]{4}$/.test(arr)) return false;
+    return true;
+  };
+
   window.populateDbModalList = function () {
     const container = document.getElementById('db-list-container');
     if (!container) return;
     container.innerHTML = '';
     const esc = window.escapeHtml;
 
-    let safeDbFlights = Array.isArray(window.allDbFlights) ? window.allDbFlights : [];
+    let safeDbFlights = Array.isArray(window.allDbFlights) ? window.allDbFlights.filter(window.isValidDbFlight) : [];
     // Single source of truth: window.activeBoardRowIds (var snapshot removed — diverged after Console reset)
     if (!Array.isArray(window.activeBoardRowIds)) window.activeBoardRowIds = [];
     let safeBoardIds = window.activeBoardRowIds;
@@ -4128,9 +4218,9 @@
     document.getElementById('enr-1').value = flight.ENR1 || "";
     document.getElementById('enr-2').value = flight.ENR2 || "";
     document.getElementById('enr-3').value = flight.ENR3 || "";
-    document.getElementById('modal-enr').style.display = 'flex';
+    _openModalOverlay('modal-enr');
   };
-  window.closeEnrModal = function () { document.getElementById('modal-enr').style.display = 'none'; };
+  window.closeEnrModal = function () { _closeModalOverlay('modal-enr'); };
   window.submitEnr = function (e) {
     if (e) e.preventDefault();
     const btn = document.getElementById('btn-submit-enr');
@@ -4204,8 +4294,7 @@
       window.handleRouteSelectionChange();
     }, 10);
 
-    const modal = document.getElementById('modal-route');
-    if (modal) modal.style.display = 'flex';
+    _openModalOverlay('modal-route');
   };
 
   window.handleRouteSelectionChange = function () {
@@ -4255,8 +4344,7 @@
   };
   
   window.closeRouteModal = function () { 
-    const modal = document.getElementById('modal-route');
-    if (modal) modal.style.display = 'none'; 
+    _closeModalOverlay('modal-route');
   };
 
   window.submitRoute = function () {
@@ -4382,17 +4470,15 @@
     if (!container) return;
     container.innerHTML = '';
 
-    let notes = window.airportNotes.filter(n => n.ICAO_CODE === currentTooltipIcao);
+    let notes = (Array.isArray(window.airportNotes) ? window.airportNotes : []).filter(n => n.ICAO_CODE === currentTooltipIcao);
     if (notes.length === 0) window.addNoteRow();
     else notes.forEach(n => window.addNoteRow(n));
 
-    const modal = document.getElementById('modal-airport-notes');
-    if (modal) modal.style.display = 'flex';
+    _openModalOverlay('modal-airport-notes');
   };
 
   window.closeAirportNotesModal = function () {
-    const modal = document.getElementById('modal-airport-notes');
-    if (modal) modal.style.display = 'none';
+    _closeModalOverlay('modal-airport-notes');
   };
 
   window.addNoteRow = function (data = { DAY_RANGE: '-', START_TIME: '', END_TIME: '', NOTE_TEXT: '' }) {
@@ -4486,7 +4572,32 @@
   // =========================================================
   window.toggleOverflowMenu = function() {
     const menu = document.getElementById('overflow-menu');
-    if (menu) menu.classList.toggle('visible');
+    const btn = document.getElementById('btn-overflow');
+    if (!menu) return;
+    const willShow = !menu.classList.contains('visible');
+    if (willShow) {
+      // Teleport keluar stacking context .occ-content-area agar tidak tertimpa header.
+      if (menu.parentElement !== document.body) document.body.appendChild(menu);
+      menu.classList.add('visible');
+      // Posisikan via JS: di bawah tombol, clamp ke viewport & di bawah header (nav 12px + status strip top:76px).
+      if (btn) {
+        const br = btn.getBoundingClientRect();
+        const mw = menu.offsetWidth || 220;
+        const mh = menu.offsetHeight || 280;
+        let left = br.right - mw;
+        let top = br.bottom + 8;
+        const HEADER_SAFE = 132; // 12 + 52 nav + 76 strip (approx) — jaga agar tidak tertimpa status strip
+        if (top < HEADER_SAFE) top = HEADER_SAFE;
+        if (left < 10) left = 10;
+        if (left + mw > window.innerWidth - 10) left = window.innerWidth - mw - 10;
+        if (top + mh > window.innerHeight - 10) top = window.innerHeight - mh - 10;
+        if (top < HEADER_SAFE) top = HEADER_SAFE;
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+      }
+    } else {
+      menu.classList.remove('visible');
+    }
   };
   document.addEventListener('click', function(e) {
     const menu = document.getElementById('overflow-menu');

@@ -114,9 +114,29 @@ export async function onRequestPost(context) {
         return await handleGetNotamData(context);
 
       case 'getSettingsAccessInfo':
-      case 'getAirportNotes':
-        // Dummy stubs to prevent 404s for functions that aren't fully migrated yet
         return Response.json({ data: {} });
+
+      case 'getAirportNotes':
+        return await handleGetAirportNotes(context);
+      case 'saveAirportNotes':
+        return await handleSaveAirportNotes(context, args);
+      case 'saveFlightData':
+        return await handleSaveFlightEdit(context, args);
+      case 'analyzeFlightBoardNotams':
+        return await handleAnalyzeFlightBoardNotams(context, args);
+      case 'addNewFlightToDb':
+        return await handleAddNewFlightToDb(context, args);
+      case 'bulkUpdateFlightDof':
+        return await handleBulkUpdateFlightDof(context, args);
+      case 'bulkClearTafColumns':
+        return await handleBulkClearTafColumns(context, args);
+      case 'bulkClearCgoColumns':
+        return await handleBulkClearCgoColumns(context, args);
+      case 'saveFlightEnr':
+        return await handleSaveFlightEnr(context, args);
+      case 'syncCgoData':
+        return await handleSyncCgoData(context, args);
+
       
       default:
         console.warn(`[RPC] Method tidak ditemukan: ${method}`);
@@ -1728,3 +1748,153 @@ async function handleGetBriefingFormHistory(context, args) {
     }
 }
 
+
+
+async function handleGetAirportNotes(context) {
+    try {
+        const { results } = await context.env.DB.prepare('SELECT * FROM airport_notes').all();
+        const formatted = results.map(r => ({
+            ICAO_CODE: r.icao_code,
+            DAY_RANGE: r.day_range,
+            START_TIME: r.start_time,
+            END_TIME: r.end_time,
+            NOTE_TEXT: r.note_text,
+            TYPE: r.type
+        }));
+        return Response.json({ data: formatted });
+    } catch (e) {
+        // Jika tabel belum ada, kembalikan array kosong
+        return Response.json({ data: [] });
+    }
+}
+
+async function handleSaveAirportNotes(context, args) {
+    const [icao, newNotes] = args;
+    try {
+        await context.env.DB.prepare(`CREATE TABLE IF NOT EXISTS airport_notes (icao_code TEXT, day_range TEXT, start_time TEXT, end_time TEXT, note_text TEXT, type TEXT)`).run();
+        await context.env.DB.prepare(`DELETE FROM airport_notes WHERE icao_code = ?`).bind(icao).run();
+        
+        for (const note of newNotes) {
+            await context.env.DB.prepare(
+                `INSERT INTO airport_notes (icao_code, day_range, start_time, end_time, note_text, type) VALUES (?, ?, ?, ?, ?, ?)`
+            ).bind(icao, note.DAY_RANGE || '', note.START_TIME || '', note.END_TIME || '', note.NOTE_TEXT || '', note.TYPE || '').run();
+        }
+        
+        return await handleGetAirportNotes(context);
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleAnalyzeFlightBoardNotams(context, args) {
+    const [rowIds] = args;
+    try {
+        const ids = Array.isArray(rowIds) ? rowIds.map(Number).filter(n => !isNaN(n)) : [];
+        if (ids.length === 0) return Response.json({ data: { byRowId: {}, timestamp: new Date().toISOString() } });
+
+        const flightsQuery = `SELECT * FROM flights WHERE id IN (${ids.map(() => '?').join(',')})`;
+        const { results: flights } = await context.env.DB.prepare(flightsQuery).bind(...ids).all();
+        const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
+        const { results: notams } = await context.env.DB.prepare('SELECT * FROM notams').all();
+
+        const byRowId = {};
+        flights.forEach(f => {
+            const analysisResult = analyzeSingleFlight(f, notams, routes);
+            const items = (analysisResult.analysis || [])
+              .filter(item => item && item.isDirectImpact === true && item.status === 'ACTIVE')
+              .map(item => ({
+                notamNum: item.number || item.id || '',
+                airport: item.location || '',
+                priority: item.risk || 'LOW',
+                status: item.status,
+                matchReason: item.matchReason || '',
+                rawText: item.text || ''
+              }));
+            const highestPriority = items.some(item => item.priority === 'HIGH') ? 'HIGH'
+              : items.some(item => item.priority === 'MEDIUM') ? 'MEDIUM'
+              : items.length ? 'LOW' : '';
+            byRowId[f.id] = {
+              status: items.length ? 'ACTIVE' : 'NONE',
+              count: items.length,
+              highestPriority,
+              items
+            };
+        });
+
+        return Response.json({ data: { byRowId, timestamp: new Date().toISOString() } });
+    } catch (e) {
+        console.error('Analyze Flight Board NOTAMs Error:', e);
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleAddNewFlightToDb(context, args) {
+    try {
+        const [formData] = args;
+        const query = `INSERT INTO flights (callsign, dof, dep, dest, etd, eta, ac_type, alt, atc, taf_dep, taf_arr, cgo, remarks)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+        await context.env.DB.prepare(query).bind(
+            formData.FLT_NO, formData.DOF, formData.DEP, formData.ARR, formData.STD, formData.STA,
+            formData.REG, formData.ALT, formData.ATC, formData.TAF_DEP, formData.TAF_ARR,
+            formData.CGO, formData.REMARK
+        ).run();
+        return await handleGetFlightDashboardData(context);
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleBulkUpdateFlightDof(context, args) {
+    try {
+        const [rowIds, newDof] = args;
+        if (!Array.isArray(rowIds) || rowIds.length === 0) return await handleGetFlightDashboardData(context);
+        const query = `UPDATE flights SET dof = ? WHERE id IN (${rowIds.map(() => '?').join(',')})`;
+        await context.env.DB.prepare(query).bind(newDof, ...rowIds).run();
+        return await handleGetFlightDashboardData(context);
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleBulkClearTafColumns(context, args) {
+    try {
+        const [rowIds] = args;
+        if (!Array.isArray(rowIds) || rowIds.length === 0) return await handleGetFlightDashboardData(context);
+        const query = `UPDATE flights SET taf_dep = '', taf_arr = '' WHERE id IN (${rowIds.map(() => '?').join(',')})`;
+        await context.env.DB.prepare(query).bind(...rowIds).run();
+        return await handleGetFlightDashboardData(context);
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleBulkClearCgoColumns(context, args) {
+    try {
+        const [rowIds] = args;
+        if (!Array.isArray(rowIds) || rowIds.length === 0) return await handleGetFlightDashboardData(context);
+        const query = `UPDATE flights SET cgo = '' WHERE id IN (${rowIds.map(() => '?').join(',')})`;
+        await context.env.DB.prepare(query).bind(...rowIds).run();
+        return await handleGetFlightDashboardData(context);
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleSaveFlightEnr(context, args) {
+    try {
+        const [rowId, enr1, enr2, enr3] = args;
+        const query = `UPDATE flights SET enr1 = ?, enr2 = ?, enr3 = ? WHERE id = ?`;
+        await context.env.DB.prepare(query).bind(enr1, enr2, enr3, rowId).run();
+        return Response.json({ data: "OK" });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleSyncCgoData(context, args) {
+    try {
+        return await handleGetFlightDashboardData(context);
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
