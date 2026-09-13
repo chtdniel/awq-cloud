@@ -154,7 +154,19 @@ async function handleGetFlightDashboardData(context) {
         
         return Response.json({ 
             data: { 
-                flights: flights.map(row => ({
+                flights: flights.filter(row => {
+                    // Drop baris hantu hasil import CSV pecah:
+                    // callsign hanya quote/kosong, dep/dest wajib ICAO 4 huruf
+                    // (menolak DOF YYYYMMDD yang bergeser ke kolom DEP spt 20260908).
+                    const cs = String(row.callsign == null ? '' : row.callsign).trim();
+                    const dep = String(row.dep == null ? '' : row.dep).trim().toUpperCase();
+                    const dest = String(row.dest == null ? '' : row.dest).trim().toUpperCase();
+                    if (!cs || /^["'\s]+$/.test(cs)) return false;
+                    if (!/^[A-Z0-9]{2,10}$/.test(cs)) return false;
+                    if (!/^[A-Z]{4}$/.test(dep)) return false;
+                    if (!/^[A-Z]{4}$/.test(dest)) return false;
+                    return true;
+                }).map(row => ({
                     rowIdx: row.id,
                     FLIGHT: row.callsign, 
                     DEP: row.dep, 
