@@ -2474,18 +2474,22 @@
   }
   window.parseToDbDate = parseToDbDate;
 
-  // Normalisasi tampilan waktu ke HH:MM ('1230' atau '12:30' → '12:30');
-  // ponytail: DB lama menyimpan HHMM polos (4 digit), input baru pakai handleTimeInput
-  // yang sudah menambah colon — fungsi ini toleransi dua format agar mixed rows tetap rapi.
+  // Normalisasi tampilan waktu ke HH:MM — terima ISO penuh ('2026-09-08T03:25:00.000Z'),
+  // 'HHMM' polos DB lama, dan 'HH:MM'. Jam selalu UTC (ops Zulu).
   function displayTime(v) {
-    const d = String(v || '').replace(/[^0-9]/g, '').padStart(4, '0');
+    const s = String(v || '');
+    if (/T/.test(s)) {
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
+    }
+    const d = s.replace(/[^0-9]/g, '').padStart(4, '0');
     if (d === '0000') return '00:00';
-    if (!/^\d{4}$/.test(d)) return String(v || '');
+    if (!/^\d{4}$/.test(d)) return s;
     return d.substring(0, 2) + ':' + d.substring(2, 4);
   }
   function timeToMins(tStr) {
     if (!tStr) return 0;
-    let s = String(tStr).replace(/[^0-9]/g, '').padStart(4, '0');
+    let s = displayTime(tStr).replace(/[^0-9]/g, '').padStart(4, '0');
     return parseInt(s.substring(0, 2)) * 60 + parseInt(s.substring(2, 4));
   }
 
@@ -2874,8 +2878,7 @@
     }
     function fmtTime(hhmm) {
       if (!hhmm) return '--:--';
-      let s = String(hhmm).replace(/[^0-9]/g, '').padStart(4, '0');
-      return s.substring(0, 2) + ':' + s.substring(2, 4);
+      return displayTime(hhmm);
     }
 
     // Summary counters
@@ -3012,8 +3015,8 @@
         <div class="drawer-section-title">Schedule & Load</div>
         <div class="drawer-facts">
           <div class="drawer-fact"><small>FLIGHT NO</small><input class="drawer-edit" aria-label="Flight number" value="${esc(flight.FLIGHT)}" onchange="window.saveData(${rowIdx}, 1, this, 'text')"></div>
-          <div class="drawer-fact"><small>STD</small><input class="drawer-edit" aria-label="Scheduled departure time" value="${esc(flight.STD)}" onchange="window.saveData(${rowIdx}, 4, this, 'text')"></div>
-          <div class="drawer-fact"><small>STA</small><input class="drawer-edit" aria-label="Scheduled arrival time" value="${esc(flight.STA)}" onchange="window.saveData(${rowIdx}, 5, this, 'text')"></div>
+          <div class="drawer-fact"><small>STD</small><input class="drawer-edit" aria-label="Scheduled departure time" value="${esc(displayTime(flight.STD))}" onchange="window.saveData(${rowIdx}, 4, this, 'text')"></div>
+          <div class="drawer-fact"><small>STA</small><input class="drawer-edit" aria-label="Scheduled arrival time" value="${esc(displayTime(flight.STA))}" onchange="window.saveData(${rowIdx}, 5, this, 'text')"></div>
           <div class="drawer-fact"><small>CARGO</small><input class="drawer-edit" aria-label="Cargo weight" value="${esc(flight.CGO)}" onchange="window.saveData(${rowIdx}, 13, this, 'text')"></div>
           <div class="drawer-fact"><small>AIRCRAFT</small><input class="drawer-edit" aria-label="Aircraft registration" value="${esc(flight.REG)}" onchange="window.saveData(${rowIdx}, 6, this, 'text')"></div>
           <div class="drawer-fact"><small>ALTERNATE</small><input class="drawer-edit" aria-label="Alternate airport" value="${esc(flight.ALT)}" onchange="window.saveData(${rowIdx}, 7, this, 'text')"></div>
