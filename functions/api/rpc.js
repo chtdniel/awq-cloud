@@ -1765,10 +1765,11 @@ function firParseBulkNotamText(rawText) {
     const rows = [];
 
     const parseTsv = (str) => {
+        // Tahan quote multiline: sel Condition DINS berisi newline di dalam "...",
+        // jadi baris logis dirakit dulu (ganjil-quote = lanjut), baru dipotong per TAB.
         const out = [];
-        const lines = str.split(/\r?\n/);
-        for (const line of lines) {
-            if (line === '') { out.push([]); continue; }
+        let buf = '', quoteOpen = false;
+        const flush = (line) => {
             const cols = [];
             let cur = '', inQ = false;
             for (let i = 0; i < line.length; i++) {
@@ -1778,8 +1779,15 @@ function firParseBulkNotamText(rawText) {
                 else cur += c;
             }
             cols.push(cur);
-            out.push(cols);
+            out.push(cols.map(c => String(c).replace(/^"|"$/g, '').replace(/""/g, '"')));
+        };
+        for (const rawLine of str.split(/\r?\n/)) {
+            if (rawLine === '' && !quoteOpen) { out.push([]); continue; }
+            buf = quoteOpen ? buf + '\n' + rawLine : rawLine;
+            quoteOpen = (buf.match(/"/g) || []).length % 2 === 1;
+            if (!quoteOpen) { flush(buf); buf = ''; }
         }
+        if (buf) flush(buf);
         return out;
     };
 
@@ -1790,6 +1798,7 @@ function firParseBulkNotamText(rawText) {
         const hasHeader = header.some(h => h.includes('location') || h.includes('notam') || h.includes('condition'));
         let textIdx = header.findIndex(h => h.includes('condition') || h.includes('subject') || h.includes('text'));
         const locIdx = header.findIndex(h => h.includes('location'));
+        const numIdx = header.findIndex(h => h.includes('notam #') || h.includes('lta #'));
         if (textIdx === -1) {
             for (const cols of data) {
                 const f = cols.findIndex(c => String(c || '').includes('Q)'));
@@ -1801,11 +1810,16 @@ function firParseBulkNotamText(rawText) {
         for (let i = start; i < data.length; i++) {
             const cols = data[i];
             if (!cols || cols.length <= textIdx) continue;
+            if (hasHeader && i === start && cols === data[start] && data[start].every(c => !String(c || '').includes('Q)'))) continue;
             const nt = cols[textIdx] ? String(cols[textIdx]).trim() : '';
             if (!nt || !nt.includes('Q)')) continue;
+            // Baris meta DINS ("NOTAMs for Location search ...") bukan NOTAM — buang.
             if (/NOTAMs for Location search|Query ran at UTC/i.test(nt)) continue;
+            if (hasHeader && locIdx !== -1 && cols[locIdx] && /NOTAMs for Location search|Query ran at UTC/i.test(String(cols[locIdx]))) continue;
             const loc = (locIdx !== -1 && cols[locIdx]) ? String(cols[locIdx]).trim() : ((nt.match(/Q\)\s*([^ \/]+)/) || [])[1] || 'UNKNOWN');
-            const no = (nt.match(/[A-Z]\d{4}\/\d{2}/i) || [])[0] || 'N/A';
+            const colNo = (numIdx !== -1 && cols[numIdx]) ? String(cols[numIdx]).trim().toUpperCase().replace(/\s+/g, '') : '';
+            const foundNo = (nt.match(/[A-Z]\d{4}\/\d{2}/i) || [])[0] || '';
+            const no = isValidNum.test(colNo) ? colNo : (foundNo ? foundNo.toUpperCase() : 'N/A');
             rows.push([loc.toUpperCase(), no.toUpperCase(), nt]);
         }
     } else {
@@ -1875,6 +1889,9 @@ async function handleFirBulkImportNotams(context, args) {
         const parsed = firParseBulkNotamText(rawText);
         if (!parsed.ok) return Response.json({ data: parsed });
         if (parsed.rows.length === 0) return Response.json({ data: { ok: false, error: 'No valid NOTAMs found. Make sure text contains Q) lines.' } });
+        // PENTING: validasi ikut mode. Overwrite hapus FIR dulu, jadi dedup lawan
+        // DB harus dilewati DI SINI juga — kalau pakai aturan append, NOTAM lama
+        // yang mau di-refresh dihitung duplikat dan import gagal total.
         const v = await firBulkValidateRows(context, parsed.rows, m === 'overwrite');
         if (v.validRows.length === 0) {
             return Response.json({ data: { ok: false, total: parsed.rows.length, appended: 0, skippedInvalid: v.invalid, skippedDup: v.duplicates, error: 'Nothing to import (all invalid/duplicates).' } });
