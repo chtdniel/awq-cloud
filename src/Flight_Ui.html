@@ -16,97 +16,7 @@
   .cmd-utc { font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; }
   .cmd-utc strong { color: var(--text-primary); font-size: 14px; }
   .cmd-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-  .btn-toggle-left { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border-light); background: var(--bg-panel-raised); color: var(--text-secondary); padding: 0 12px; height: 34px; border-radius: var(--radius-sm); cursor: pointer; font: 700 10px var(--font-ui); letter-spacing: 0.06em; text-transform: uppercase; transition: all 0.2s; white-space: nowrap; }
-  .btn-toggle-left:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
-  .btn-toggle-left:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
-  .btn-toggle-left[aria-expanded="true"] { color: var(--accent-primary); border-color: var(--accent-primary); background: var(--nav-bg-active); }
-  .btn-toggle-left .ic { width: 14px; height: 14px; }
-
-  /* ── LEFT PANEL (OCC style) ───────────────────────── */
-  .flt-layout { display: flex; align-items: stretch; min-width: 0; }
-  .flt-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-  .flt-main .flt-toolbar { border-bottom: 0; }
-  .flt-main #flight-loading { margin-top: 0; }
-  .flt-left-panel {
-    flex: 0 0 252px;
-    width: 252px;
-    min-width: 0;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-panel);
-    border-right: 1px solid var(--border-light);
-    transition: flex-basis 0.25s var(--ease-spring), width 0.25s var(--ease-spring), padding 0.25s var(--ease-spring), opacity 0.2s ease;
-    overflow: hidden;
-  }
   .flight-strip[hidden], .timeline-row[hidden] { display: none !important; }
-  @media (min-width: 1024px) {
-    .flt-left-panel.collapsed {
-      flex-basis: 0; width: 0; border-right-width: 0; opacity: 0; visibility: hidden;
-      transition: flex-basis 0.25s var(--ease-spring), width 0.25s var(--ease-spring), padding 0.25s var(--ease-spring), opacity 0.2s ease, visibility 0s linear 0.25s;
-    }
-  }
-  .flt-left-panel-head {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 12px 14px 10px 14px;
-    border-bottom: 1px solid var(--border-light);
-    font: 700 11px var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
-    flex-shrink: 0;
-  }
-  .flt-left-panel-head strong { color: var(--accent-primary); font-family: var(--font-mono); font-size: 10px; }
-  .flt-panel-close { display: none; border: 1px solid var(--border-light); background: var(--bg-panel-raised); color: var(--text-secondary); border-radius: var(--radius-sm); width: 28px; height: 28px; cursor: pointer; font-size: 12px; line-height: 1; transition: 0.2s; }
-  .flt-panel-close:hover { border-color: var(--status-critical); color: var(--status-critical); }
-  .flt-panel-body { display: flex; flex-direction: column; gap: 14px; padding: 14px; overflow-y: auto; overscroll-behavior: contain; }
-  .flt-panel-section-title { font: 700 10px var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
-  .flt-search-wrap { position: relative; display: flex; align-items: center; }
-  .flt-search-wrap .ic { position: absolute; left: 10px; width: 13px; height: 13px; color: var(--text-muted); pointer-events: none; }
-  .flt-search-wrap input {
-    width: 100%; box-sizing: border-box;
-    padding: 8px 10px 8px 30px;
-    background: var(--bg-panel-sunken); border: 1px solid var(--border-light);
-    color: var(--text-primary); font: 600 11px var(--font-mono); letter-spacing: 0.03em;
-    border-radius: var(--radius-sm); transition: 0.2s;
-  }
-  .flt-search-wrap input:focus { outline: none; border-color: var(--accent-primary); background: var(--bg-panel); box-shadow: 0 0 0 3px rgba(200, 16, 46, 0.14); }
-  .flt-search-wrap input::placeholder { color: var(--text-disabled); text-transform: uppercase; letter-spacing: 0.05em; }
-  .flt-left-filter-stack { display: flex; flex-direction: column; gap: 4px; }
-  .flt-left-filter-stack .flight-filter-btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: var(--radius-sm); text-align: left; width: 100%; }
-  .flt-left-filter-stack .flight-filter-btn .filter-count { margin-left: auto; }
-  .flt-panel-info { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--bg-panel-sunken); border: 1px solid var(--border-light); border-radius: var(--radius-sm); }
-  .flt-panel-info-row { display: flex; align-items: center; gap: 8px; font: 700 10px var(--font-mono); letter-spacing: 0.04em; color: var(--text-secondary); }
-  .flt-panel-info-row .flt-stat-dot { flex-shrink: 0; }
-  .flt-panel-info-row strong { margin-left: auto; color: var(--text-primary); font-size: 11px; }
-  .flt-panel-info-row.sent strong { color: var(--status-safe); }
-  .flt-panel-info-row.unsent strong { color: var(--status-critical); }
-  .flt-panel-actions { display: flex; flex-direction: column; gap: 8px; }
-  .flt-panel-actions .control-btn { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 9px 12px; }
-  .flt-panel-actions .btn-clear-panel { border-color: var(--status-critical); color: var(--status-critical); }
-  .flt-panel-actions .btn-clear-panel:hover { background: var(--status-critical-bg); border-color: var(--status-critical); }
-  .flt-left-backdrop {
-    display: none; position: absolute; inset: 0;
-    background: rgba(11, 14, 19, 0.32);
-    z-index: calc(var(--z-drawer) - 1);
-    opacity: 0; transition: opacity 0.2s ease; pointer-events: none;
-  }
-  .flt-left-backdrop.open { opacity: 1; pointer-events: auto; }
-
-  /* <1024px: left panel becomes overlay drawer (own backdrop, drawer z-layer) */
-  @media (max-width: 1023px) {
-    .flt-layout { display: block; position: relative; }
-    .flt-left-backdrop { display: block; }
-    .flt-left-panel {
-      position: absolute; top: 0; left: 0; bottom: 0;
-      width: min(300px, 86vw); flex-basis: auto;
-      z-index: var(--z-drawer);
-      border-right: 1px solid var(--border-light);
-      box-shadow: var(--shadow-lift);
-      transform: translateX(-105%); visibility: hidden; pointer-events: none; opacity: 0;
-      transition: transform 0.28s var(--ease-spring), opacity 0.28s ease;
-    }
-    .flt-left-panel.collapsed { transform: translateX(-105%); visibility: hidden; pointer-events: none; opacity: 0; }
-    .flt-left-panel.open { transform: translateX(0); visibility: visible; pointer-events: auto; opacity: 1; transition-delay: 0s; }
-    .flt-panel-close { display: inline-flex; align-items: center; justify-content: center; }
-  }
 
   /* ── TOOLBAR (filters + inline stats + actions) ──── */
   .flt-toolbar {
@@ -384,16 +294,16 @@
   .flight-detail-drawer.open { transform: translateX(0); visibility: visible; pointer-events: auto; opacity: 1; transition-delay: 0s; }
   .drawer-backdrop { position: fixed; z-index: var(--z-drawer); /* Layer: Drawer backdrop */ inset: 0; background: rgba(11, 14, 19, 0.32); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
   .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
-  .drawer-head { padding: 76px 16px 12px 16px; border-bottom: 1px solid var(--border-light); background: var(--bg-panel-alt); position: relative; flex-shrink: 0; }
+  .drawer-head { padding: 16px 20px 12px 20px; border-bottom: 1px solid var(--border-light); background: var(--bg-panel-alt); position: relative; flex-shrink: 0; }
   .drawer-kicker { color: var(--accent-primary); font: 700 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 4px; }
   .drawer-title { font-family: var(--font-display); font-weight: 700; font-size: 22px; line-height: 1; letter-spacing: 0.02em; text-transform: uppercase; padding-right: 44px; }
-  .drawer-close { position: absolute; top: 76px; right: 12px; border: 1px solid var(--border-light); background: var(--bg-panel); color: var(--text-secondary); border-radius: var(--radius-sm); width: 36px; height: 36px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: .2s; }
+  .drawer-close { position: absolute; top: 12px; right: 12px; border: 1px solid var(--border-light); background: var(--bg-panel); color: var(--text-secondary); border-radius: var(--radius-sm); width: 36px; height: 36px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: .2s; }
   .drawer-close:hover { border-color: var(--status-critical); color: var(--status-critical); }
   .drawer-close:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
   .drawer-route { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-family: var(--font-mono); font-size: 13px; font-weight: 800; }
   .drawer-route .icao-tag { padding: 3px 8px; font-size: 12px; }
 
-  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; scroll-padding-top: 20px; }
+  .drawer-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 20px 20px; scroll-padding-top: 16px; }
   .drawer-section { margin-bottom: 20px; }
   .drawer-section-title { color: var(--text-muted); font: 700 11px var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
   .drawer-facts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); overflow: hidden; background: var(--border-light); }
@@ -403,6 +313,7 @@
   .drawer-fact .drawer-edit { font-family: var(--font-mono); font-size: 12px; font-weight: 700; width: 100%; border: 1px solid transparent; background: transparent; color: var(--text-primary); padding: 2px 4px; border-radius: 3px; margin-top: 2px; transition: .2s; }
   .drawer-fact .drawer-edit:focus { outline: none; border-color: var(--accent-primary); background: var(--bg-void); }
   .drawer-fact .drawer-edit:hover:not(:focus) { background: var(--overlay); border-color: var(--border-light); }
+  .drawer-fact .drawer-edit[type="date"] { font-size: 11px; }
 
   .drawer-taf { padding: 12px; border-left: 3px solid var(--status-warning); background: var(--status-warning-bg); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-family: var(--font-mono); font-size: 11px; line-height: 1.7; color: var(--text-primary); word-break: break-word; margin-bottom: 8px; }
   .drawer-taf.taf-arr { border-left-color: var(--status-safe); background: var(--status-safe-bg); }
@@ -421,7 +332,7 @@
   .drawer-airport-note span { color: var(--text-muted); font-size: 10px; }
   .drawer-airport-note div { margin-top: 4px; color: var(--text-primary); }
 
-  .drawer-actions { display: flex; gap: 8px; padding: 16px 24px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-light); background: var(--bg-panel-alt); flex-shrink: 0; }
+  .drawer-actions { display: flex; gap: 8px; padding: 12px 20px; padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-light); background: var(--bg-panel-alt); flex-shrink: 0; }
   .drawer-actions .control-btn { flex: 1; justify-content: center; height: 40px; display: flex; align-items: center; gap: 6px; }
 
   /* ── BUTTONS ────────────────────────────────────────── */
@@ -632,9 +543,7 @@
     #global-airport-tooltip,
     #global-route-tooltip,
     .flight-strip,
-    .timeline-row,
-    .flt-left-panel,
-    .flt-left-backdrop {
+    .timeline-row {
       transition: none;
       animation: none;
       transform: none !important;
@@ -678,11 +587,6 @@
 
   <!-- ═══ COMMAND BAR ═══ -->
   <div class="cmd-bar">
-    <button type="button" class="btn-toggle-left" id="btn-toggle-left-panel"
-      onclick="window.toggleLeftPanel()" aria-expanded="true" aria-controls="flight-left-panel"
-      title="Toggle left panel" aria-label="Toggle left panel">
-      <svg class="ic"><use href="#i-layout"/></svg> PANEL
-    </button>
     <div class="cmd-brand"><span class="cmd-dot"></span> FLIGHT BOARD</div>
     <div class="cmd-sep"></div>
     <div class="cmd-utc">UTC <strong id="cmd-utc-clock">--:--Z</strong></div>
@@ -692,51 +596,6 @@
       <button class="btn-icon" onclick="window.toggleFullscreen()" title="Fullscreen" aria-label="Toggle fullscreen"><svg class="ic"><use href="#i-eye"/></svg></button>
     </div>
   </div>
-
-  <!-- ═══ LEFT PANEL + MAIN BOARD LAYOUT ═══ -->
-  <div class="flt-layout" id="flt-layout">
-
-    <aside id="flight-left-panel" class="flt-left-panel" aria-label="Flight board control panel">
-      <div class="flt-left-panel-head">
-        <span>BOARD <strong>CTRL</strong></span>
-        <button type="button" class="flt-panel-close" onclick="window.toggleLeftPanel()" title="Close panel" aria-label="Close left panel">&times;</button>
-      </div>
-      <div class="flt-panel-body">
-        <div class="flt-search-wrap">
-          <svg class="ic"><use href="#i-search"/></svg>
-          <input type="search" id="left-board-search" placeholder="Search board... FLT / DEP / ARR"
-            aria-label="Search active board by flight number, departure or arrival" autocomplete="off"
-            oninput="window.applyLeftBoardSearch()">
-        </div>
-        <div>
-          <div class="flt-panel-section-title">Triage</div>
-          <div class="flt-left-filter-stack" role="group" aria-label="Left panel flight triage filter">
-            <button type="button" class="flight-filter-btn active" data-flight-filter="all" aria-pressed="true" onclick="window.setFlightFilter('all')">ALL <span class="filter-count" id="left-filter-count-all">0</span></button>
-            <button type="button" class="flight-filter-btn" data-flight-filter="ready" aria-pressed="false" onclick="window.setFlightFilter('ready')">READY <span class="filter-count" id="left-filter-count-ready">0</span></button>
-            <button type="button" class="flight-filter-btn" data-flight-filter="monitor" aria-pressed="false" onclick="window.setFlightFilter('monitor')">MONITOR <span class="filter-count" id="left-filter-count-monitor">0</span></button>
-            <button type="button" class="flight-filter-btn" data-flight-filter="attention" aria-pressed="false" onclick="window.setFlightFilter('attention')">ATTN <span class="filter-count" id="left-filter-count-attention">0</span></button>
-          </div>
-        </div>
-        <div>
-          <div class="flt-panel-section-title">Board Info</div>
-          <div class="flt-panel-info">
-            <div class="flt-panel-info-row" id="left-board-subtitle">0 flights on board</div>
-            <div class="flt-panel-info-row sent"><span class="flt-stat-dot"></span>ATC SENT <strong id="left-atc-sent">0</strong></div>
-            <div class="flt-panel-info-row unsent"><span class="flt-stat-dot"></span>ATC UNSENT <strong id="left-atc-unsent">0</strong></div>
-          </div>
-        </div>
-        <div>
-          <div class="flt-panel-section-title">Quick Actions</div>
-          <div class="flt-panel-actions">
-            <button type="button" class="control-btn btn-solid-primary" onclick="window.uiOpenAddFlightModal()"><svg class="ic ic-sm"><use href="#i-plus"/></svg> ADD FLIGHT</button>
-            <button type="button" class="control-btn btn-outline-safe" onclick="window.manualSync()"><svg class="ic ic-sm"><use href="#i-sync"/></svg> REFRESH</button>
-            <button type="button" class="control-btn btn-clear-panel" onclick="window.clearBoard()"><svg class="ic ic-sm"><use href="#i-trash-x"/></svg> CLEAR</button>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <div class="flt-main">
 
   <!-- ═══ TOOLBAR ═══ -->
   <div class="flt-toolbar">
@@ -792,10 +651,6 @@
       </div>
     </div>
   </div>
-
-    </div><!-- /.flt-main -->
-    <div id="flt-left-backdrop" class="flt-left-backdrop" onclick="window.toggleLeftPanel()" role="presentation"></div>
-  </div><!-- /.flt-layout -->
 
    <!-- ═══ INSPECTOR DRAWER (enriched) ═══ -->
    <div id="flight-drawer-backdrop" class="drawer-backdrop" onclick="window.closeFlightDrawer()" role="presentation"></div>
@@ -1496,128 +1351,16 @@
       const el = document.getElementById(`filter-count-${key}`);
       if (el) el.innerText = counts[key];
     });
-    if (window.syncLeftPanel) window.syncLeftPanel();
   }
 
   // NOTE: window.setFlightFilter didefinisikan sekali di seksi FLIGHT FILTER bawah
-  // (mencakup toolbar + panel kiri via .flight-filter-btn + renderBoard).
+  // (toolbar via .flight-filter-btn + renderBoard).
 
   window.setFlightView = function (view) {
     window.flightView = view === 'timeline' ? 'timeline' : 'board';
     document.querySelectorAll('[data-flight-view]').forEach(btn => btn.classList.toggle('active', btn.dataset.flightView === window.flightView));
     renderBoard();
   };
-
-  // =========================================================
-  // LEFT PANEL (collapsible OCC-style control rail)
-  // =========================================================
-  function isMobileViewport() { return window.matchMedia('(max-width: 1023px)').matches; }
-
-  window.toggleLeftPanel = function () {
-    const panel = document.getElementById('flight-left-panel');
-    const backdrop = document.getElementById('flt-left-backdrop');
-    const btn = document.getElementById('btn-toggle-left-panel');
-    if (!panel) return;
-    let open;
-    if (isMobileViewport()) {
-      open = !panel.classList.contains('open');
-      panel.classList.toggle('open', open);
-      if (backdrop) backdrop.classList.toggle('open', open);
-    } else {
-      open = panel.classList.contains('collapsed');
-      panel.classList.toggle('collapsed', !open);
-    }
-    panel.setAttribute('aria-hidden', open ? 'false' : 'true');
-    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    try { localStorage.setItem('occ_left_panel_collapsed', JSON.stringify(!open)); } catch (e) {}
-    if (open) {
-      const search = document.getElementById('left-board-search');
-      if (search) setTimeout(() => search.focus(), 60);
-    }
-  };
-
-  function computeBoardSearchMatches(query) {
-    const q = String(query || '').trim().toUpperCase();
-    const matches = new Set();
-    const safeDbFlights = Array.isArray(window.allDbFlights) ? window.allDbFlights : [];
-    const boardIds = Array.isArray(window.activeBoardRowIds) ? window.activeBoardRowIds : [];
-    boardIds.forEach(id => {
-      const f = safeDbFlights.find(item => item && item.rowIdx === id);
-      if (!f) return;
-      if (!q) { matches.add(id); return; }
-      const hay = `${f.FLIGHT || ''} ${f.DEP || ''} ${f.ARR || ''}`.toUpperCase();
-      if (hay.indexOf(q) !== -1) matches.add(id);
-    });
-    return matches;
-  }
-
-  window.applyLeftBoardSearch = function () {
-    const input = document.getElementById('left-board-search');
-    const tbody = document.getElementById('flight-tbody');
-    if (!input || !tbody) return;
-    const query = input.value;
-    const visible = computeBoardSearchMatches(query);
-    let visibleCount = 0;
-    tbody.querySelectorAll('.flight-strip, .timeline-row').forEach(row => {
-      const id = Number(row.dataset && row.dataset.rowIdx);
-      const show = Number.isFinite(id) && visible.has(id);
-      row.hidden = !show;
-      if (show) visibleCount++;
-    });
-    if (window.flightView !== 'timeline' && query && visibleCount === 0 && !tbody.querySelector('.fs-empty')) {
-      tbody.insertAdjacentHTML('beforeend', '<div class="fs-empty">[ NO FLIGHTS MATCH SEARCH ]</div>');
-    }
-  };
-
-  window.syncLeftPanel = function () {
-    const srcSubtitle = document.getElementById('board-subtitle');
-    const dstSubtitle = document.getElementById('left-board-subtitle');
-    if (srcSubtitle && dstSubtitle) dstSubtitle.textContent = srcSubtitle.textContent;
-    const srcSent = document.getElementById('stat-atc-sent');
-    const dstSent = document.getElementById('left-atc-sent');
-    if (srcSent && dstSent) dstSent.textContent = srcSent.textContent;
-    const srcUnsent = document.getElementById('stat-atc-unsent');
-    const dstUnsent = document.getElementById('left-atc-unsent');
-    if (srcUnsent && dstUnsent) dstUnsent.textContent = srcUnsent.textContent;
-    ['all', 'ready', 'monitor', 'attention'].forEach(key => {
-      const src = document.getElementById(`filter-count-${key}`);
-      const dst = document.getElementById(`left-filter-count-${key}`);
-      if (src && dst) dst.textContent = src.textContent;
-    });
-    const activeFilter = (window.flightFilter || window._activeFlightFilter || 'all');
-    document.querySelectorAll('#flight-left-panel [data-flight-filter]').forEach(btn => {
-      const active = btn.dataset.flightFilter === activeFilter;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-    });
-  };
-
-  (function initLeftPanel() {
-    try {
-      let collapsed = false;
-      const saved = localStorage.getItem('occ_left_panel_collapsed');
-      if (saved) {
-        try { collapsed = JSON.parse(saved) === true; } catch (e) { collapsed = false; }
-      }
-      if (collapsed) {
-        const panel = document.getElementById('flight-left-panel');
-        const btn = document.getElementById('btn-toggle-left-panel');
-        if (panel) {
-          panel.classList.add('collapsed');
-          panel.setAttribute('aria-hidden', 'true');
-        }
-        if (btn) btn.setAttribute('aria-expanded', 'false');
-      }
-    } catch (e) {}
-    window.addEventListener('resize', () => {
-      const panel = document.getElementById('flight-left-panel');
-      const btn = document.getElementById('btn-toggle-left-panel');
-      if (!panel || !btn) return;
-      const open = isMobileViewport() ? panel.classList.contains('open') : !panel.classList.contains('collapsed');
-      panel.setAttribute('aria-hidden', open ? 'false' : 'true');
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
-  })();
 
   function getFilteredBoardFlights(boardFlights) {
     if (window.flightFilter === 'all') return boardFlights;
@@ -2064,7 +1807,6 @@
 
       document.getElementById('board-subtitle').innerText = `${visibleFlights.length} of ${boardFlights.length} flights on board`;
       if (document.getElementById('sys-board-count')) document.getElementById('sys-board-count').innerText = boardFlights.length;
-      if (window.syncLeftPanel) window.syncLeftPanel();
 
       if (boardFlights.length === 0) {
         tbody.innerHTML = `<div class="fs-empty">[ BOARD IS CURRENTLY EMPTY ]<br><br><button class="control-btn btn-solid-primary" onclick="window.uiOpenAddFlightModal()">ADD FLIGHT FROM DATABASE</button></div>`;
@@ -2079,7 +1821,6 @@
         localStorage.setItem('occ_active_board', JSON.stringify(window.activeBoardRowIds));
         try{window.dispatchEvent(new CustomEvent('occ:boardChanged', {detail:{ids: window.activeBoardRowIds.slice()}}));}catch(e){}
         if (window.updateQuickStats) window.updateQuickStats();
-        if (window.applyLeftBoardSearch) window.applyLeftBoardSearch();
         return;
       }
 
@@ -2202,8 +1943,6 @@
         try{window.dispatchEvent(new CustomEvent('occ:boardChanged', {detail:{ids: window.activeBoardRowIds.slice()}}));}catch(e){}
       if (window.updateQuickStats) window.updateQuickStats();
       if (typeof refreshCurrentTabIfNeeded === 'function') refreshCurrentTabIfNeeded();
-      if (window.syncLeftPanel) window.syncLeftPanel();
-      if (window.applyLeftBoardSearch) window.applyLeftBoardSearch();
     } catch (outerErr) { 
       console.error("FATAL UI ERROR: ", outerErr); 
       const safeUiErr = window.escapeHtml ? window.escapeHtml(outerErr && outerErr.message ? outerErr.message : String(outerErr)) : 'Unexpected render failure';
@@ -3398,9 +3137,7 @@
   window.setFlightFilter = function(filter) {
     window.flightFilter = filter;
     window._activeFlightFilter = filter;
-    // Sinkron dua arah toolbar + panel kiri; aria-pressed hanya milik panel kiri.
     document.querySelectorAll('.flight-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.flightFilter === filter));
-    document.querySelectorAll('#flight-left-panel [data-flight-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.flightFilter === filter ? 'true' : 'false'));
     if (window.renderBoard) window.renderBoard();
   };
 
