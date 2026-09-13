@@ -175,7 +175,8 @@ export async function handleGenerateBriefingXlsx(context, args) {
     }
     try {
         const tplUrl = new URL('/briefing-template.xlsx', context.request.url);
-        const tplRes = await fetch(tplUrl);
+        // Use ASSETS binding to fetch the static file directly, bypassing CF Access
+        const tplRes = await context.env.ASSETS.fetch(new Request(tplUrl));
         if (!tplRes.ok) throw new Error('briefing-template.xlsx not reachable (' + tplRes.status + ')');
         const tplBytes = new Uint8Array(await tplRes.arrayBuffer());
         const entries = parseLocalEntries(tplBytes);
