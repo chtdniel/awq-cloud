@@ -704,10 +704,9 @@ async function handleSaveNotamData(context, args) {
         let textIdx = 6; 
         if (textIdx >= headerRow.length) textIdx = headerRow.length - 1;
         
-        // First, clear the existing NOTAM table completely
-        // In SQLite/D1, to do a full overwrite we DELETE all rows.
+        // Aerodrome import ganti kind='AD' saja; FIR milik halaman FIR.
         // D1 batch = atomic (single transaction) — DELETE gagal di tengah tidak menyisakan tabel kosong.
-        const deleteAllStmt = context.env.DB.prepare('DELETE FROM notams');
+        const deleteAllStmt = context.env.DB.prepare("DELETE FROM notams WHERE kind = 'AD'");
         
         // Prepare batch inserts
         const stmts = [deleteAllStmt];
@@ -1544,7 +1543,8 @@ async function handleAnalyzeFlightNotams(context, args) {
         // banyak sumber (dep/dest/alt/enr1-3/FIR map); prefilter WHERE location IN berisiko
         // melewatkan NOTAM valid (flight safety). Upgrade prefilter setelah matcher
         // dinormalisasi — index migration 004 membantu query lain sementara ini.
-        const { results: notams } = await context.env.DB.prepare('SELECT * FROM notams').all();
+        // Halaman FIR: kind='FIR' saja; aerodrome (kind='AD') milik halaman NOTAM/FLIGHT.
+        const { results: notams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
 
         const result = analyzeSingleFlight(flight, notams, routes);
         return Response.json({ data: result });
@@ -1563,7 +1563,7 @@ async function handleAnalyzeFlightList(context, args) {
         const flightsQuery = `SELECT * FROM flights WHERE id IN (${ids.map(() => '?').join(',')})`;
         const { results: flights } = await context.env.DB.prepare(flightsQuery).bind(...ids).all();
         const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
-        const { results: notams } = await context.env.DB.prepare('SELECT * FROM notams').all();
+        const { results: notams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
 
         const results = flights.map(f => analyzeSingleFlight(f, notams, routes));
         return Response.json({ data: results });
@@ -1862,7 +1862,7 @@ async function handleFirBulkImportNotams(context, args) {
 
 async function handleFirGetNotamEditorData(context) {
     try {
-        const { results } = await context.env.DB.prepare('SELECT * FROM notams').all();
+        const { results } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
         const notams = results.map(row => {
             const eff = row.valid_from ? row.valid_from.replace('T', ' ').substring(0, 16) : '';
             const exp = row.valid_to ? row.valid_to.replace('T', ' ').substring(0, 16) : '';
@@ -1885,7 +1885,7 @@ async function handleFirGetNotamEditorData(context) {
 
 async function handleFirGetNotamResults(context) {
     try {
-        const { results: dbNotams } = await context.env.DB.prepare('SELECT * FROM notams').all();
+        const { results: dbNotams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
         const now = new Date();
         const results = dbNotams.map(row => {
             const parsed = parseNotamRow(row);
