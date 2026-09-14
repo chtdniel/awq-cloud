@@ -444,10 +444,15 @@ async function buildXlsxResponse(context, form) {
         const continuation = index === 6 && weatherStations.length > 7;
         xml = setInlineCell(xml, 'C' + (20 + index), continuation ? 'CONT.' : taf?.stationEntered || taf?.station || '');
         xml = setInlineCell(xml, 'E' + (20 + index), continuation ? 'See WX sheet for all station forecasts.' : taf?.forecast || '');
-          
-          xml = setInlineCell(xml, stCol + r, continuation ? 'CONT.' : nt.stationEntered || nt.station || '');
-          xml = setInlineCell(xml, txtCol + r, continuation ? 'See NOTAM sheet for all selected NOTAMs.' : nt.text || '');
-      }
+    }
+    const notamStations = form.notams || [];
+    for (let index = 0; index < 7; index++) {
+        const nt = notamStations[index];
+        const continuation = index === 6 && notamStations.length > 7;
+        const row = 39 + index;
+        xml = setInlineCell(xml, 'C' + row, continuation ? 'CONT.' : nt?.stationEntered || nt?.station || '');
+        xml = setInlineCell(xml, 'E' + row, continuation ? 'See NOTAM sheet for all selected NOTAMs.' : nt?.text || '');
+    }
     const sig = form.signatures || {};
     xml = setInlineCell(xml, ANCHORS.dxrName, sig.dxrName || '');
     xml = setInlineCell(xml, ANCHORS.picName, sig.picName || '');
