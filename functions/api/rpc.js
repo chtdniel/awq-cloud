@@ -499,6 +499,7 @@ async function handleAnalyzeNotams(context, args) {
         });
 
         const results = [];
+        const grouped = new Map();
         const now = new Date();
 
         // 3. Main Flight Loop
@@ -558,6 +559,14 @@ async function handleAnalyzeNotams(context, args) {
             });
             
             routeSectors.forEach(sector => {
+                if (!grouped.has(sector.icao)) {
+                    grouped.set(sector.icao, { station: sector.icao, windowStr: "OPS WINDOW APPLIED", flights: new Set(), sectorWindows: [], notamsMap: new Map() });
+                }
+                const station = grouped.get(sector.icao);
+                station.flights.add(f.FLIGHT);
+                if (!station.sectorWindows.some(sw => sw.flight === f.FLIGHT && sw.start.getTime() === sector.start.getTime())) {
+                    station.sectorWindows.push({ start: sector.start, end: sector.end, flight: f.FLIGHT });
+                }
                 if (!notamMap.has(sector.icao)) return;
                 const stationNotams = notamMap.get(sector.icao);
                 
@@ -599,7 +608,6 @@ async function handleAnalyzeNotams(context, args) {
         });
 
         // 4. Group results for UI rendering
-        const grouped = new Map();
         results.forEach(r => {
             if (!grouped.has(r.airport)) {
                 grouped.set(r.airport, { station: r.airport, windowStr: "OPS WINDOW APPLIED", flights: new Set(), sectorWindows: [], notamsMap: new Map() });
