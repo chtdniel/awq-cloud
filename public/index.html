@@ -5600,6 +5600,7 @@
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.downloadReportXlsx()" id="btn-download-sheet" title="Download Crew Briefing Report as .xlsx sheet (CBR + WX + NOTAM)">
         <svg class="ic ic-sm"><use href="#i-save"/></svg> DOWNLOAD SHEET (XLSX)
       </button>
+      <button class="btn-execute-cbr btn-solid-primary" onclick="window.createReportGoogleSheet()" id="btn-google-sheet" disabled title="Create the report in your Google Drive and open Google Sheets">CREATE GOOGLE SHEET</button>
     </div>
   </div>
   
@@ -5825,6 +5826,7 @@
        const btnSheet = document.getElementById('btn-download-sheet');
        const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
        resetNoSigOnFlightChange(selectedFlights);
+       if (window.updateGoogleReportButton) window.updateGoogleReportButton();
        
          // Get NOTAM analysis count
         let notamCount = 0;
@@ -5945,6 +5947,16 @@
        `);
        statusDiv.scrollTop = statusDiv.scrollHeight;
     };
+    window.printReportTerminalLine = printTerminalLine;
+
+    window.getReportSheetPayload = function() {
+      const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+      return {
+        flights: selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean),
+        notamAnalysis: window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {},
+        noSigMap: getNoSigStationMap()
+      };
+    };
 
     // Helper: accept absolute http/https OR same-origin relative /briefing or /briefing-form URLs
     window.isValidReportUrl = function(u) {
@@ -5965,6 +5977,7 @@
     };
 
      window.downloadReportXlsx = function() {
+       if (window.reportState.isBusy) return;
        const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
        if (selectedFlights.length === 0) {
          printTerminalLine("DOWNLOAD SHEET: No flights selected.", "warn");
@@ -5973,14 +5986,16 @@
        const callSigns = selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean);
        if (callSigns.length === 0) return;
        const btnSheet = document.getElementById('btn-download-sheet');
-       let savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
-       let noSigStationMap = getNoSigStationMap();
+       window.reportState.isBusy = true;
+       ['btn-exec-cbr', 'btn-open-form', 'btn-google-sheet'].forEach(function(id) {
+         document.getElementById(id).disabled = true;
+       });
        if (btnSheet) { btnSheet.disabled = true; btnSheet.innerHTML = '<svg class="ic ic-sm"><use href="#i-sync"/></svg> GENERATING XLSX...'; }
        printTerminalLine("SHEET: Generating Crew Briefing XLSX (CBR + WX + NOTAM) for " + callSigns.join(', ') + " ...", "info");
        fetch('/api/rpc', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ method: 'generateReportXlsx', args: [{ flights: callSigns, notamAnalysis: savedNotamAnalysis, noSigMap: noSigStationMap }] })
+         body: JSON.stringify({ method: 'generateReportXlsx', args: [window.getReportSheetPayload()] })
        }).then(function(res){
          if (!res.ok) return res.text().then(function(t){ throw new Error(t || ('HTTP ' + res.status)); });
          return res.blob();
@@ -5995,6 +6010,11 @@
        }).catch(function(err){
          printTerminalLine("SHEET FAILED: " + (err && err.message ? err.message : 'unknown error'), "error");
        }).then(function(){
+         window.reportState.isBusy = false;
+         ['btn-exec-cbr', 'btn-open-form'].forEach(function(id) {
+           document.getElementById(id).disabled = false;
+         });
+         if (window.updateGoogleReportButton) window.updateGoogleReportButton();
          if (btnSheet) { btnSheet.disabled = false; btnSheet.innerHTML = '<svg class="ic ic-sm"><use href="#i-download"/></svg> DOWNLOAD SHEET (XLSX)'; }
        });
      };
@@ -6008,6 +6028,7 @@
         const statusDiv = document.getElementById('report-status');
         
         window.reportState.isBusy = true;
+        if (window.updateGoogleReportButton) window.updateGoogleReportButton();
         btn.disabled = true;
         if (btnOpenForm) btnOpenForm.disabled = true;
         const btnSheetBusy = document.getElementById('btn-download-sheet');
@@ -6085,6 +6106,7 @@
                 const _bs = document.getElementById('btn-download-sheet');
                 if (_bs && selectedFlights.length > 0) _bs.disabled = false;
                 window.reportState.isBusy = false;
+                if (window.updateGoogleReportButton) window.updateGoogleReportButton();
             })
            .withFailureHandler(err => { 
                clearInterval(statusCycle);
@@ -6095,10 +6117,12 @@
                const _bs2 = document.getElementById('btn-download-sheet');
                if (_bs2 && selectedFlights.length > 0) _bs2.disabled = false;
                window.reportState.isBusy = false;
+               if (window.updateGoogleReportButton) window.updateGoogleReportButton();
            })
           .generateBriefingPackage(selectedFlights, savedNotamAnalysis, noSigStationMap);
     };
   </script>
+  <script src="/report-google-sheets.js"></script>
 </div>
 
     <style>
@@ -9421,24 +9445,20 @@
     tokens.forEach(tok => { const t = tok.trim().toUpperCase(); const c = wpMap[t] || parseInlineCoord(t); pushUnique({ name: t, c }); });
     const desCoord = wpMap[String(flight.DES).trim().toUpperCase()] || null;
     pushUnique({ name: String(flight.DES).trim().toUpperCase(), c: desCoord });
-    if (backbone.length < 2) return null;
-    const dist = (a,b) => Math.hypot(a[0]-b[0], a[1]-b[1]);
-    const enriched = [];
-    for (let i = 0; i < backbone.length-1; i++) {
-      const a = backbone[i], b = backbone[i+1];
-      enriched.push(a);
-      const segLen = dist(a.c, b.c);
-      if (segLen === 0) continue;
-      const minX = Math.min(a.c[0], b.c[0]) - 0.02, maxX = Math.max(a.c[0], b.c[0]) + 0.02;
-      const minY = Math.min(a.c[1], b.c[1]) - 0.02, maxY = Math.max(a.c[1], b.c[1]) + 0.02;
-      allCoords
-        .filter(p => p.c[0] >= minX && p.c[0] <= maxX && p.c[1] >= minY && p.c[1] <= maxY &&
-          !(p.c[0]===a.c[0]&&p.c[1]===a.c[1]) && !(p.c[0]===b.c[0]&&p.c[1]===b.c[1]))
-        .sort((p1,p2) => dist(a.c,p1.c) - dist(a.c,p2.c))
-        .forEach(p => enriched.push(p));
+    if (allCoords.length >= 2) {
+      const depName = String(flight.DEP).trim().toUpperCase();
+      const desName = String(flight.DES).trim().toUpperCase();
+      if (allCoords[0].name !== depName && depCoord) {
+        allCoords.unshift({ name: depName, c: depCoord });
+      }
+      if (allCoords[allCoords.length-1].name !== desName && desCoord) {
+        allCoords.push({ name: desName, c: desCoord });
+      }
+      return allCoords;
     }
-    enriched.push(backbone[backbone.length-1]);
-    return enriched.length >= 2 ? enriched : null;
+
+    if (backbone.length < 2) return null;
+    return backbone;
   }
 
   function safeRemoveLayer(m) {
@@ -10280,8 +10300,10 @@
         console.log('[FIR] User triggered manual refresh');
         refreshBtn.disabled = true;
         try {
-          await loadFlights();
-          addToast('Flight list refreshed');
+          await Promise.all([loadFlights(), loadActiveNotams()]);
+          renderHazardChips();
+          renderHazardList();
+          addToast('Flights and FIR NOTAMs refreshed');
         } catch (e) {
           console.error('[FIR] Refresh failed:', e);
           addToast('Refresh failed: ' + String(e.message || e));
@@ -10297,6 +10319,12 @@
     // REMOVED: Auto-reload event listeners (occ:boardChanged, storage)
     // REMOVED: Auto-load flight on init (loadFlights())
     
+    window.addEventListener('occ:firNotamsChanged', async () => {
+      await loadActiveNotams();
+      renderHazardChips();
+      renderHazardList();
+      if (state.selected) await selectFlight(state.selected._rowId);
+    });
     loadActiveNotams();
     // The view-section becomes active before this runs, but Leaflet may have
     // measured the map while it was hidden; refresh size once visible.
@@ -11364,10 +11392,10 @@
     });
     box.innerHTML = h;
     box.querySelectorAll('[data-edit]').forEach(function (el) {
-      el.addEventListener('click', function () { editFromResults(Number(el.getAttribute('data-edit'))); });
+      el.addEventListener('click', function () { editFromResults(el.getAttribute('data-edit')); });
     });
     box.querySelectorAll('[data-map]').forEach(function (el) {
-      el.addEventListener('click', function () { showOnMap(Number(el.getAttribute('data-map'))); });
+      el.addEventListener('click', function () { showOnMap(el.getAttribute('data-map')); });
     });
     try { updateFirnMap(); } catch(e){}
   }
@@ -11548,6 +11576,7 @@
     if (btn) { btn.textContent = orig; btn.disabled = false; validateForm(false); }
     if (res && res.ok) {
       addToast(res.message || 'Saved.');
+      window.dispatchEvent(new CustomEvent('occ:firNotamsChanged', { detail: { source: 'editor' } }));
       // ponytail: don't auto-select FIR — let user stay on current filter
       await load(true);
       renderFirLocations();
@@ -11574,6 +11603,7 @@
     var res = await run('firDeleteNotam', { rowId: state.editingRowId, updatedAt: state.editingUpdatedAt || '' });
     if (res && res.ok) {
       addToast(res.message || 'Deleted.');
+      window.dispatchEvent(new CustomEvent('occ:firNotamsChanged', { detail: { source: 'editor' } }));
       await load(true);
       clearForm();
     } else {
@@ -11797,6 +11827,13 @@
       return;
     }
     state.initialized = true;
+    window.addEventListener('occ:firNotamsChanged', function (event) {
+      if (event.detail && event.detail.source === 'editor') return;
+      clearForm();
+      state.lastLoad = 0;
+      state.lastResultsLoad = 0;
+      load(true);
+    });
     bindEditorEnhancements();
     $('firn-refresh').addEventListener('click', function(){ load(true); loadResults(true); });
     $('firn-new').addEventListener('click', clearForm);
@@ -11918,7 +11955,7 @@
     <div class="firn-form">
       <div class="firn-field">
         <label for="firn-bulk-raw">Paste TSV (Excel/DINS) or Raw ICAO (multiple Q) → Preview</label>
-        <textarea id="firn-bulk-raw" placeholder="TSV: Location&#9;NOTAM #/LTA #&#9;Class&#9;Issue Date&#9;Effective Date&#9;Expiration Date&#9;NOTAM Condition/LTA subject&#10;YBBB&#9;J5531/25&#9;International...&#9;...&#9;Q)YBBB/Q...&#10;&#10;Or Raw ICAO:&#10;Q)WIII/QWULW/...&#10;A)WIII B)260827...&#10;E)RWY ...&#10;Q)WAAA/Q..."></textarea>
+        <textarea id="firn-bulk-raw" placeholder="Paste the DINS table including Location, NOTAM # and NOTAM Condition columns.&#10;&#10;Or paste complete ICAO NOTAMs:&#10;(A1234/26 NOTAMN&#10;Q) WIIF/QRTCA/IV/BO/E/000/999/0600S10600E005&#10;A) WIIF B) 2609010000 C) 2610010000&#10;E) AIRSPACE RESTRICTED)"></textarea>
       </div>
       <div class="firn-actions" style="flex-wrap:wrap;">
         <button type="button" class="firn-btn" id="firn-bulk-preview">👁 PREVIEW</button>
@@ -11939,7 +11976,7 @@
           <tbody id="firn-bulk-tbody"></tbody>
         </table>
       </div>
-      <div class="firn-hint">TSV DINS: header `Location  NOTAM #/LTA #  Class  ...  NOTAM Condition` auto-detected. Raw ICAO: split per `Q)`. Duplicate `Location|NOTAM #` already in `FIR`/`NOTAM` will be skipped. PERM supported.</div>
+      <div class="firn-hint">Paste FIR/enroute NOTAMs as DINS TSV or complete ICAO messages including their NOTAM numbers. Aerodrome-only NOTAMs (Q scope A) belong in UPDATE NOTAM. Append skips existing numbers; overwrite replaces the FIR dataset. PERM supported.</div>
     </div>
   </div>
 </div>
@@ -12005,7 +12042,15 @@
   }
 
   // ---- Bulk FIR helpers ----
-  var bulkState = { lastPreview: null, raw: '' };
+  var bulkState = { lastPreview: null, raw: '', busy: false, initialized: false };
+
+  function resetPreview() {
+    bulkState.lastPreview = null;
+    bulkState.raw = '';
+    $('firn-bulk-import').disabled = true;
+    $('firn-bulk-overwrite').disabled = true;
+    $('firn-bulk-preview-box').style.display = 'none';
+  }
   function renderBulkPreview(data){
     var box=$('firn-bulk-preview-box'), tb=$('firn-bulk-tbody'), st=$('firn-bulk-status');
     var imp=$('firn-bulk-import'), over=$('firn-bulk-overwrite');
@@ -12046,31 +12091,49 @@
     bulkState.raw=raw;
     var st=$('firn-bulk-status'); if(st) st.textContent='⏳ Preview...';
     var res=await run('firBulkPreviewNotams', raw);
+    if ($('firn-bulk-raw').value !== raw) return;
     renderBulkPreview(res);
     if(res && res.ok) addToast('Preview '+res.total+' • '+res.valid+' valid');
   }
   async function doBulkImport(mode){
-    var raw=bulkState.raw || ($('firn-bulk-raw') ? $('firn-bulk-raw').value : '');
-    if(!raw.trim()){ addToast('Paste first & Preview.'); return; }
+    if (bulkState.busy) return;
+    var raw=$('firn-bulk-raw') ? $('firn-bulk-raw').value : '';
+    if(!raw.trim() || !bulkState.lastPreview || raw !== bulkState.raw){ resetPreview(); addToast('Text changed. Preview again before importing.'); return; }
     if(mode==='overwrite' && !confirm('OVERWRITE: erase all FIR then refill with '+ (bulkState.lastPreview? bulkState.lastPreview.total : '?') +' NOTAM?')) return;
     var btn = mode==='overwrite' ? $('firn-bulk-overwrite') : $('firn-bulk-import');
     var orig = btn ? btn.textContent : '';
+    bulkState.busy = true;
+    $('firn-bulk-import').disabled = true;
+    $('firn-bulk-overwrite').disabled = true;
+    $('firn-bulk-preview').disabled = true;
+    $('firn-bulk-raw').disabled = true;
     if(btn){ btn.disabled=true; btn.textContent='⏳ IMPORT...'; }
     var res=await run('firBulkImportNotams', raw, mode);
-    if(btn){ btn.textContent=orig; btn.disabled=false; }
+    bulkState.busy = false;
+    $('firn-bulk-preview').disabled = false;
+    $('firn-bulk-raw').disabled = false;
+    if(btn) btn.textContent=orig;
     if(res && res.ok){
       addToast((mode==='overwrite'?'Overwritten ':'Appended ')+res.appended+' • skip dup '+res.skippedDup+' • invalid '+res.skippedInvalid);
-      bulkState.raw='';
+      resetPreview();
+      window.dispatchEvent(new CustomEvent('occ:firNotamsChanged'));
       if($('firn-bulk-raw')) $('firn-bulk-raw').value='';
       var box=$('firn-bulk-preview-box'); if(box) box.style.display='none';
-      var st=$('firn-bulk-status'); if(st) st.textContent='Done '+res.appended+' appended';
+      var st=$('firn-bulk-status'); if(st) st.textContent='Done: '+res.appended+' FIR NOTAMs '+(mode==='overwrite'?'replaced the previous dataset':'appended');
     } else {
+      renderBulkPreview(bulkState.lastPreview);
       addToast('Import failed: '+esc((res&&res.error)||'unknown'));
       var st2=$('firn-bulk-status'); if(st2) st2.textContent='Error: '+(res&&res.error||'unknown');
     }
   }
 
   function init() {
+    if (bulkState.initialized) return;
+    bulkState.initialized = true;
+    $('firn-bulk-raw').addEventListener('input', function () {
+      resetPreview();
+      $('firn-bulk-status').textContent = 'Text changed. Preview before importing.';
+    });
     var bp=$('firn-bulk-preview'); if(bp) bp.addEventListener('click', doBulkPreview);
     var bi=$('firn-bulk-import'); if(bi) bi.addEventListener('click', function(){ doBulkImport('append'); });
     var bo=$('firn-bulk-overwrite'); if(bo) bo.addEventListener('click', function(){ doBulkImport('overwrite'); });

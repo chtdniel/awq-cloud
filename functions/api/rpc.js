@@ -1,4 +1,4 @@
-import { parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch } from './notamUtils.js';
+import { parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 
 function rpcGuard(context) {
@@ -1368,11 +1368,13 @@ async function handleGetActiveNotams(context) {
         // Halaman FIR menampilkan FIR NOTAM saja (kind='FIR'); aerodrome (kind='AD') tetap
         // dipakai analyze* untuk risiko DEP/DEST (migration 005).
         const { results: notamRows } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
-        
+        const firIds = await fetchFirIds(context);
+
         const now = new Date();
         const activeNotams = [];
-        
+
         for (const row of notamRows) {
+            if (!isValidFirNotam(row, firIds)) continue;
             const parsed = parseNotamRow(row);
             const isUnverified = !parsed;
             
@@ -1576,8 +1578,9 @@ async function handleAnalyzeFlightNotams(context, args) {
         // dinormalisasi — index migration 004 membantu query lain sementara ini.
         // Halaman FIR: kind='FIR' saja; aerodrome (kind='AD') milik halaman NOTAM/FLIGHT.
         const { results: notams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
+        const firIds = await fetchFirIds(context);
 
-        const result = analyzeSingleFlight(flight, notams, routes);
+        const result = analyzeSingleFlight(flight, notams.filter(row => isValidFirNotam(row, firIds)), routes);
         return Response.json({ data: result });
     } catch (e) {
         console.error('Analyze Flight NOTAMs Error:', e);
@@ -1595,8 +1598,10 @@ async function handleAnalyzeFlightList(context, args) {
         const { results: flights } = await context.env.DB.prepare(flightsQuery).bind(...ids).all();
         const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
         const { results: notams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
+        const firIds = await fetchFirIds(context);
 
-        const results = flights.map(f => analyzeSingleFlight(f, notams, routes));
+        const firNotams = notams.filter(row => isValidFirNotam(row, firIds));
+        const results = flights.map(f => analyzeSingleFlight(f, firNotams, routes));
         return Response.json({ data: results });
     } catch (e) {
         console.error('Analyze Flight List Error:', e);
@@ -1798,7 +1803,7 @@ function firParseBulkNotamText(rawText) {
         const data = parseTsv(text);
         if (data.length === 0) return { ok: false, error: 'Empty table.' };
         const header = data[0].map(h => String(h || '').trim().toLowerCase());
-        const hasHeader = header.some(h => h.includes('location') || h.includes('notam') || h.includes('condition'));
+        const hasHeader = header.some(h => /^(location|notam\s*#(?:\/lta\s*#)?|notam condition(?:\/lta subject)?)$/.test(h));
         let textIdx = header.findIndex(h => h.includes('condition') || h.includes('subject') || h.includes('text'));
         const locIdx = header.findIndex(h => h.includes('location'));
         const numIdx = header.findIndex(h => h.includes('notam #') || h.includes('lta #'));
@@ -1826,10 +1831,12 @@ function firParseBulkNotamText(rawText) {
             rows.push([loc.toUpperCase(), no.toUpperCase(), nt]);
         }
     } else {
-        let t = text;
-        const qIdx = t.indexOf('Q)');
-        if (qIdx > 0 && /Location\s+NOTAM #\/LTA #|NOTAMs for Location search/i.test(t.substring(0, qIdx))) t = t.substring(qIdx);
-        const parts = t.split(/(?=Q\))/g).filter(p => p.trim() !== '');
+        const t = text;
+        const headerPattern = /(?:^|\n)[ \t]*\(?[A-Z]\d{4}\/\d{2}[ \t]+NOTAM[NRC]\b/gi;
+        const headers = Array.from(t.matchAll(headerPattern));
+        const parts = headers.length
+            ? headers.map((header, index) => t.slice(header.index, headers[index + 1]?.index ?? t.length))
+            : t.split(/(?=Q\))/gi).filter(part => part.trim() !== '');
         for (const nt of parts) {
             if (!nt || !nt.includes('Q)')) continue;
             const loc = ((nt.match(/Q\)\s*([^ \/]+)/) || [])[1] || 'UNKNOWN').toUpperCase();
@@ -1844,25 +1851,32 @@ function firParseBulkNotamText(rawText) {
 // Overwrite hapus FIR dulu lalu isi ulang — dedup lawan DB dilewati agar refill jalan;
 // dedup dalam batch tetap. Jalur FIR hanya lawan kind='FIR'.
 async function firBulkValidateRows(context, parsedRows, skipDbDedup) {
-    const { results: existing } = await context.env.DB.prepare("SELECT id, location FROM notams WHERE kind = 'FIR'").all();
+    const { results: existing } = await context.env.DB.prepare('SELECT id, location, kind FROM notams').all();
     const keySet = {};
-    (existing || []).forEach(r => { keySet[String(r.location || '').concat('|', String(r.id || '')).toUpperCase()] = true; });
+    const otherKindIds = new Set();
+    (existing || []).forEach(row => {
+        const number = String(row.id || '').toUpperCase();
+        if (row.kind === 'FIR') keySet[number] = true;
+        else otherKindIds.add(number);
+    });
     let valid = 0, invalid = 0, duplicates = 0;
     const seenBatch = {};
     const preview = [];
     const validRows = [];
     for (const [loc, no, nt] of parsedRows) {
         const p = parseNotamRow({ id: no, message: nt });
-        const rowOk = /^[A-Z]{4}$/.test(loc || '') && isValidNum.test(no || '') && nt && p && p.effFrom;
+        const aerodromeOnly = isAerodromeOnlyNotam(nt);
+        const rowOk = !aerodromeOnly && /^[A-Z]{4}$/.test(loc || '') && isValidNum.test(no || '') && nt && p && p.effFrom;
         let isDup = null;
         if (rowOk) {
-            const key = (loc + '|' + no).toUpperCase();
-            if ((!skipDbDedup && keySet[key]) || seenBatch[key]) isDup = 'FIR/NOTAM';
+            const key = no.toUpperCase();
+            if (otherKindIds.has(key)) isDup = 'This NOTAM number belongs to the aerodrome dataset. FIR import cannot replace it.';
+            else if ((!skipDbDedup && keySet[key]) || seenBatch[key]) isDup = 'Already exists in FIR/NOTAM';
             else { seenBatch[key] = true; valid++; validRows.push({ loc, no, nt, p }); }
             if (isDup) duplicates++; else preview.push({ Location: loc, 'NOTAM #': no, ok: true, textPreview: nt.slice(0, 80).replace(/\n/g, ' ') });
         } else invalid++;
-        if (isDup) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: 'Already exists in FIR/NOTAM' });
-        else if (!rowOk) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: 'Invalid (butuh Location ICAO, NOTAM # A1234/26, dan B)/C) date)' });
+        if (isDup) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: isDup });
+        else if (!rowOk) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: aerodromeOnly ? 'Aerodrome-only NOTAM (Q scope A): use UPDATE NOTAM.' : 'Invalid (butuh Location ICAO, NOTAM # A1234/26, dan B)/C) date)' });
     }
     return { valid, invalid, duplicates, preview: preview.slice(0, 40), validRows };
 }
@@ -1903,7 +1917,7 @@ async function handleFirBulkImportNotams(context, args) {
         if (m === 'overwrite') stmts.push(context.env.DB.prepare("DELETE FROM notams WHERE kind = 'FIR'"));
         for (const r of v.validRows) {
             stmts.push(context.env.DB.prepare(
-                'INSERT INTO notams (id, location, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET location = excluded.location, message = excluded.message, valid_from = excluded.valid_from, valid_to = excluded.valid_to, kind = excluded.kind'
+                "INSERT INTO notams (id, location, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET location = excluded.location, message = excluded.message, valid_from = excluded.valid_from, valid_to = excluded.valid_to, kind = excluded.kind, updated_at = CURRENT_TIMESTAMP WHERE notams.kind = 'FIR'"
             ).bind(r.no, r.loc, r.nt, r.p.effFrom ? r.p.effFrom.toISOString() : null, r.p.isContinuous ? new Date('2099-01-01T00:00:00Z').toISOString() : (r.p.effTo ? r.p.effTo.toISOString() : null), 'FIR'));
         }
         await context.env.DB.batch(stmts);
@@ -1917,7 +1931,8 @@ async function handleFirBulkImportNotams(context, args) {
 async function handleFirGetNotamEditorData(context) {
     try {
         const { results } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
-        const notams = results.map(row => {
+        const firIds = await fetchFirIds(context);
+        const notams = results.filter(row => isValidFirNotam(row, firIds)).map(row => {
             const eff = row.valid_from ? row.valid_from.replace('T', ' ').substring(0, 16) : '';
             const exp = row.valid_to ? row.valid_to.replace('T', ' ').substring(0, 16) : '';
             return {
@@ -1984,6 +1999,27 @@ function firInferNotamClass(text) {
     }
 }
 
+// Fetch FIR IDs from the firs table once per request (small table).
+// Returns a Set of lowercase FIR IDs for O(1) membership checks.
+async function fetchFirIds(context) {
+    try {
+        const { results } = await context.env.DB.prepare('SELECT id FROM firs').all();
+        return new Set(results.map(r => String(r.id || '').toLowerCase()));
+    } catch (e) {
+        return new Set();
+    }
+}
+
+// Read-side guard: returns true if the row is a valid FIR NOTAM.
+// Checks: (1) kind='FIR' is already in the query, (2) location exists in firs table,
+// (3) content is not aerodrome-only via Q-line scope check.
+function isValidFirNotam(row, firIds) {
+    const loc = String(row.location || '').toLowerCase();
+    if (firIds.size > 0 && !firIds.has(loc)) return false;
+    if (isAerodromeOnlyNotam(row.message)) return false;
+    return true;
+}
+
 // Kelas NOTAM untuk response (Class/cls): q_code kalau berisi kelas 1 huruf (editor
 // firSaveNotam/firUpdateNotam menulis clean.Class ke q_code); selain itu infer dari nomor
 // NOTAM — live D1 hari ini q_code kosong di semua baris (bulk import tidak menulisnya).
@@ -1995,7 +2031,9 @@ function firResolveNotamClass(row) {
 
 async function handleFirGetNotamResults(context) {
     try {
-        const { results: dbNotams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
+        const { results: storedNotams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
+        const firIds = await fetchFirIds(context);
+        const dbNotams = storedNotams.filter(row => isValidFirNotam(row, firIds));
         const now = new Date();
         const lifecycleMap = parseNotamLifecycleMap(dbNotams.map(row => ({
             'NOTAM #': row.id,
@@ -2009,7 +2047,6 @@ async function handleFirGetNotamResults(context) {
             if (parsed && parsed.effTo && parsed.effTo < now) status = 'EXPIRED';
             const risk = parsed ? parsed.priority : 'LOW';
             const lifecycle = lifecycleMap[String(row.id || '').trim().toUpperCase()] || 'ACTIVE';
-            // Superseded info supersedes ACTIVE, but never masks EXPIRED.
             if ((lifecycle === 'REPLACED' || lifecycle === 'CANCELLED') && status === 'ACTIVE') {
                 status = lifecycle;
             }
@@ -2070,6 +2107,7 @@ function firValidateNotamPayload(payload) {
     if (!/^[A-Z]\d{4}\/\d{2}$/i.test(number)) return { ok: false, error: 'NOTAM # must match format like A1234/26.' };
     if (!cls) return { ok: false, error: 'Class is required (e.g. A, B, C, D, E).' };
     if (!text) return { ok: false, error: 'NOTAM Text is required.' };
+    if (isAerodromeOnlyNotam(text)) return { ok: false, error: 'Aerodrome-only NOTAM (Q scope A): use UPDATE NOTAM.' };
     if (/NOTAMs for Location search|Query ran at UTC|NOTAM Condition\/LTA subject|Filter\(s\) used:/i.test(text)) {
         return { ok: false, error: 'NOTAM Text contains a DINS query header — paste a single ICAO NOTAM only. Use the UPDATE NOTAM page / table TSV path.' };
     }
@@ -2108,10 +2146,11 @@ async function firNotamDuplicateCheck(context, number, excludeRowId) {
     const num = String(number || '').trim().toUpperCase();
     if (!num) return null;
     try {
-        const existing = await context.env.DB.prepare("SELECT id FROM notams WHERE id = ? AND kind = 'FIR'").bind(num).first();
+        const existing = await context.env.DB.prepare('SELECT id, kind FROM notams WHERE id = ?').bind(num).first();
         if (existing) {
+            if (existing.kind !== 'FIR') return 'This NOTAM number belongs to the aerodrome dataset. FIR editor cannot replace it.';
             if (excludeRowId && String(existing.id) === String(excludeRowId)) return null;
-            return 'D1 Database';
+            return 'NOTAM ' + num + ' already exists. Edit the existing row instead.';
         }
     } catch (e) {
         console.warn('[RPC] firNotamDuplicateCheck error: ' + e.message);
@@ -2137,7 +2176,7 @@ async function handleFirSaveNotam(context, args) {
         if (clean.error) return Response.json({ data: clean });
 
         const dup = await firNotamDuplicateCheck(context, clean['NOTAM #'], null);
-        if (dup) return Response.json({ data: { ok: false, error: 'NOTAM ' + clean['NOTAM #'] + ' already exists. Edit the existing row instead.' } });
+        if (dup) return Response.json({ data: { ok: false, error: dup } });
 
         const toIso = (s) => { const d = firParseUiDate(s); return d ? d.toISOString() : null; };
         await context.env.DB.prepare(
@@ -2170,18 +2209,19 @@ async function handleFirUpdateNotam(context, args) {
         const clean = firValidateNotamPayload(payload);
         if (clean.error) return Response.json({ data: clean });
 
-        const current = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(rowId).first();
+        const current = await context.env.DB.prepare("SELECT updated_at FROM notams WHERE id = ? AND kind = 'FIR' LIMIT 1").bind(rowId).first();
         if (!current) return Response.json({ data: { ok: false, error: 'Row ' + rowId + ' no longer exists (deleted elsewhere?). Reload.' } });
         const staleErr = firNotamStaleError(rowId, current.updated_at, payload.updatedAt);
         if (staleErr) return Response.json({ data: { ok: false, error: staleErr } });
 
         const dup = await firNotamDuplicateCheck(context, clean['NOTAM #'], rowId);
-        if (dup) return Response.json({ data: { ok: false, error: 'NOTAM ' + clean['NOTAM #'] + ' already exists. Edit the existing row instead.' } });
+        if (dup) return Response.json({ data: { ok: false, error: dup } });
 
         const toIso = (s) => { const d = firParseUiDate(s); return d ? d.toISOString() : null; };
         await context.env.DB.prepare(
-            'UPDATE notams SET location = ?, q_code = ?, message = ?, valid_from = ?, valid_to = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+            "UPDATE notams SET id = ?, location = ?, q_code = ?, message = ?, valid_from = ?, valid_to = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND kind = 'FIR'"
         ).bind(
+            clean['NOTAM #'],
             clean.Location,
             clean.Class,
             clean['NOTAM Text'],
@@ -2190,7 +2230,7 @@ async function handleFirUpdateNotam(context, args) {
             rowId
         ).run();
 
-        const fresh = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(rowId).first();
+        const fresh = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(clean['NOTAM #']).first();
         return Response.json({
             data: {
                 ok: true,
@@ -2215,12 +2255,12 @@ async function handleFirDeleteNotam(context, args) {
         const rowId = payload.rowId;
         if (!rowId) return Response.json({ data: { ok: false, error: 'Invalid rowId.' } });
 
-        const current = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(rowId).first();
+        const current = await context.env.DB.prepare("SELECT updated_at FROM notams WHERE id = ? AND kind = 'FIR' LIMIT 1").bind(rowId).first();
         if (!current) return Response.json({ data: { ok: false, error: 'Row ' + rowId + ' no longer exists. Reload.' } });
         const staleErr = firNotamStaleError(rowId, current.updated_at, payload.updatedAt);
         if (staleErr) return Response.json({ data: { ok: false, error: 'Row changed by another user. Reload the list first.' } });
 
-        await context.env.DB.prepare('DELETE FROM notams WHERE id = ?').bind(rowId).run();
+        await context.env.DB.prepare("DELETE FROM notams WHERE id = ? AND kind = 'FIR'").bind(rowId).run();
         return Response.json({ data: { ok: true, message: 'NOTAM row deleted.' } });
     } catch (e) {
         console.error('[RPC] firDeleteNotam Error:', e);
