@@ -663,7 +663,7 @@
   function firnFocusOnMap(rowId){
     var n = state.results.find(function(x){ return x.rowId===rowId; });
     if(!n) return;
-    if(!ensureFirnMap()) return;
+    if(!ensureFirnMap()) { addToast('Map unavailable. Reload the page to retry.'); return; }
     var ll=firnGetLatLon(n);
     if(!ll) { addToast('No coordinates for '+n.Location); return; }
     if(!state.firnMapShow){ state.firnMapShow=true; updateFirnMap(); }
@@ -988,10 +988,10 @@
     });
     box.innerHTML = h;
     box.querySelectorAll('[data-edit]').forEach(function (el) {
-      el.addEventListener('click', function () { editFromResults(Number(el.getAttribute('data-edit'))); });
+      el.addEventListener('click', function () { editFromResults(el.getAttribute('data-edit')); });
     });
     box.querySelectorAll('[data-map]').forEach(function (el) {
-      el.addEventListener('click', function () { showOnMap(Number(el.getAttribute('data-map'))); });
+      el.addEventListener('click', function () { showOnMap(el.getAttribute('data-map')); });
     });
     try { updateFirnMap(); } catch(e){}
   }
@@ -1039,11 +1039,23 @@
 
   function showOnMap(rowId) {
     var n = state.results.find(function (x) { return x.rowId === rowId; });
-    if (!n) return;
+    if (!n) { addToast('NOTAM not found in results.'); return; }
     state.firnMapShowAll = false;
     state.firnMapFocused = rowId;
-    setTimeout(function(){ try { ensureFirnMap(); if(state.firnMap) state.firnMap.invalidateSize(); updateFirnMap(); } catch(e){} }, 80);
-    setTimeout(function(){ try { firnFocusOnMap(rowId); } catch(e){} }, 160);
+    function doFocus() {
+      setTimeout(function(){ try { ensureFirnMap(); if(state.firnMap) state.firnMap.invalidateSize(); updateFirnMap(); } catch(e){} }, 80);
+      setTimeout(function(){ try { firnFocusOnMap(rowId); } catch(e){} }, 160);
+    }
+    if (typeof L !== 'undefined') { doFocus(); return; }
+    // Leaflet not loaded yet — try dynamic loading (same CDN as Index.html occEnsureLeaflet)
+    if (typeof window.occEnsureLeaflet === 'function') {
+      addToast('Loading map library...');
+      window.occEnsureLeaflet().then(function(){ doFocus(); }).catch(function(){
+        addToast('Failed to load map library. Check your connection and reload.');
+      });
+    } else {
+      addToast('Map library unavailable. Reload the page to retry.');
+    }
   }
   // exposed for popup Edit button
   window.firnEditFromMap = function(rowId){ editFromResults(rowId); };
@@ -1172,6 +1184,7 @@
     if (btn) { btn.textContent = orig; btn.disabled = false; validateForm(false); }
     if (res && res.ok) {
       addToast(res.message || 'Saved.');
+      window.dispatchEvent(new CustomEvent('occ:firNotamsChanged', { detail: { source: 'editor' } }));
       // ponytail: don't auto-select FIR — let user stay on current filter
       await load(true);
       renderFirLocations();
@@ -1198,6 +1211,7 @@
     var res = await run('firDeleteNotam', { rowId: state.editingRowId, updatedAt: state.editingUpdatedAt || '' });
     if (res && res.ok) {
       addToast(res.message || 'Deleted.');
+      window.dispatchEvent(new CustomEvent('occ:firNotamsChanged', { detail: { source: 'editor' } }));
       await load(true);
       clearForm();
     } else {
@@ -1421,6 +1435,13 @@
       return;
     }
     state.initialized = true;
+    window.addEventListener('occ:firNotamsChanged', function (event) {
+      if (event.detail && event.detail.source === 'editor') return;
+      clearForm();
+      state.lastLoad = 0;
+      state.lastResultsLoad = 0;
+      load(true);
+    });
     bindEditorEnhancements();
     $('firn-refresh').addEventListener('click', function(){ load(true); loadResults(true); });
     $('firn-new').addEventListener('click', clearForm);
@@ -1462,20 +1483,28 @@
     document.addEventListener('webkitfullscreenchange', function(){ syncFirnExpandBtn(); setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); },80); });
     window.addEventListener('resize', function(){ if(state.firnMap) state.firnMap.invalidateSize(); });
     // When FIR NOTAM view becomes active, ensure map correct size
+    function firnDeferredInit() {
+      setTimeout(function(){ ensureFirnMap(); if(state.firnMap) state.firnMap.invalidateSize(); updateFirnMap(); }, 100);
+      setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); }, 350);
+    }
     try {
       var firNotamView = document.getElementById('view-fir-notam');
       if (firNotamView) {
         var obs = new MutationObserver(function(){
           if (firNotamView.classList.contains('active')) {
-            setTimeout(function(){ ensureFirnMap(); if(state.firnMap) state.firnMap.invalidateSize(); updateFirnMap(); }, 100);
-            setTimeout(function(){ if(state.firnMap) state.firnMap.invalidateSize(); }, 350);
+            if (typeof L !== 'undefined') { firnDeferredInit(); return; }
+            if (typeof window.occEnsureLeaflet === 'function') {
+              window.occEnsureLeaflet().then(firnDeferredInit).catch(function(){});
+            }
           }
         });
         obs.observe(firNotamView, {attributes:true, attributeFilter:['class']});
       }
     } catch(e){}
     // initial map init (deferred so container is laid out)
-    setTimeout(function(){ ensureFirnMap(); updateFirnMap(); }, 400);
+    function firnInitialMapInit(){ setTimeout(function(){ ensureFirnMap(); updateFirnMap(); }, 400); }
+    if (typeof L !== 'undefined') { firnInitialMapInit(); }
+    else if (typeof window.occEnsureLeaflet === 'function') { window.occEnsureLeaflet().then(firnInitialMapInit).catch(firnInitialMapInit); }
     // allow clicking FIR tabs via keyboard Enter/Space when focused
     updateTextCount();
     validateForm(false);
