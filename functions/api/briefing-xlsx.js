@@ -419,12 +419,11 @@ async function buildXlsxResponse(context, form) {
         const leg = legs[index] || {};
         const row = 7 + index * 2;
         xml = setInlineCell(xml, 'H' + row, leg.pod || '');
-        xml = setInlineCell(xml, 'I' + row, leg.std || '');
+        // STD dan OFP Ref No tidak perlu diisi sesuai permintaan
         xml = setInlineCell(xml, 'K' + row, leg.poa || '');
         xml = setInlineCell(xml, 'M' + row, leg.sta || '');
         xml = setInlineCell(xml, 'O' + row, leg.alt || '');
-        xml = setInlineCell(xml, 'S' + row, leg.ofpRef || '');
-        for (const column of ['E', 'F', 'G', 'M', 'O', 'P']) xml = setInlineCell(xml, column + (30 + index), '');
+        for (const column of ['E', 'F', 'G', 'M', 'O', 'Q']) xml = setInlineCell(xml, column + (30 + index), '');
     }
     (form.tafs || []).forEach((t) => {
         const match = String(t.slot || '').match(/^(POD|POA)\s*([1-6])$/i);
@@ -434,7 +433,7 @@ async function buildXlsxResponse(context, form) {
         const right = legIndex >= 3;
         const stCol = right ? 'M' : 'E';
         const tmCol = right ? 'O' : 'F';
-        const txCol = right ? 'P' : 'G';
+        const txCol = right ? 'Q' : 'G';
         xml = setInlineCell(xml, stCol + r, t.stationEntered || t.station || '');
         xml = setInlineCell(xml, tmCol + r, t.time || '');
         xml = setInlineCell(xml, txCol + r, t.forecast || '');
