@@ -2,6 +2,9 @@ name = "awq-cloud"
 compatibility_date = "2024-03-20"
 pages_build_output_dir = "public"
 
+[vars]
+GOOGLE_OAUTH_CLIENT_ID = "446216387962-7fk8ii9l8otapfiisd5r3onlo49m7lt8.apps.googleusercontent.com"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "awq-db"
