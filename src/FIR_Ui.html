@@ -800,24 +800,20 @@
     tokens.forEach(tok => { const t = tok.trim().toUpperCase(); const c = wpMap[t] || parseInlineCoord(t); pushUnique({ name: t, c }); });
     const desCoord = wpMap[String(flight.DES).trim().toUpperCase()] || null;
     pushUnique({ name: String(flight.DES).trim().toUpperCase(), c: desCoord });
-    if (backbone.length < 2) return null;
-    const dist = (a,b) => Math.hypot(a[0]-b[0], a[1]-b[1]);
-    const enriched = [];
-    for (let i = 0; i < backbone.length-1; i++) {
-      const a = backbone[i], b = backbone[i+1];
-      enriched.push(a);
-      const segLen = dist(a.c, b.c);
-      if (segLen === 0) continue;
-      const minX = Math.min(a.c[0], b.c[0]) - 0.02, maxX = Math.max(a.c[0], b.c[0]) + 0.02;
-      const minY = Math.min(a.c[1], b.c[1]) - 0.02, maxY = Math.max(a.c[1], b.c[1]) + 0.02;
-      allCoords
-        .filter(p => p.c[0] >= minX && p.c[0] <= maxX && p.c[1] >= minY && p.c[1] <= maxY &&
-          !(p.c[0]===a.c[0]&&p.c[1]===a.c[1]) && !(p.c[0]===b.c[0]&&p.c[1]===b.c[1]))
-        .sort((p1,p2) => dist(a.c,p1.c) - dist(a.c,p2.c))
-        .forEach(p => enriched.push(p));
+    if (allCoords.length >= 2) {
+      const depName = String(flight.DEP).trim().toUpperCase();
+      const desName = String(flight.DES).trim().toUpperCase();
+      if (allCoords[0].name !== depName && depCoord) {
+        allCoords.unshift({ name: depName, c: depCoord });
+      }
+      if (allCoords[allCoords.length-1].name !== desName && desCoord) {
+        allCoords.push({ name: desName, c: desCoord });
+      }
+      return allCoords;
     }
-    enriched.push(backbone[backbone.length-1]);
-    return enriched.length >= 2 ? enriched : null;
+
+    if (backbone.length < 2) return null;
+    return backbone;
   }
 
   function safeRemoveLayer(m) {
@@ -1659,8 +1655,10 @@
         console.log('[FIR] User triggered manual refresh');
         refreshBtn.disabled = true;
         try {
-          await loadFlights();
-          addToast('Flight list refreshed');
+          await Promise.all([loadFlights(), loadActiveNotams()]);
+          renderHazardChips();
+          renderHazardList();
+          addToast('Flights and FIR NOTAMs refreshed');
         } catch (e) {
           console.error('[FIR] Refresh failed:', e);
           addToast('Refresh failed: ' + String(e.message || e));
@@ -1676,6 +1674,12 @@
     // REMOVED: Auto-reload event listeners (occ:boardChanged, storage)
     // REMOVED: Auto-load flight on init (loadFlights())
     
+    window.addEventListener('occ:firNotamsChanged', async () => {
+      await loadActiveNotams();
+      renderHazardChips();
+      renderHazardList();
+      if (state.selected) await selectFlight(state.selected._rowId);
+    });
     loadActiveNotams();
     // The view-section becomes active before this runs, but Leaflet may have
     // measured the map while it was hidden; refresh size once visible.
