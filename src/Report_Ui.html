@@ -6,13 +6,16 @@
         SYSTEM READY <span class="sep">|</span> BRIEFING PACKAGE COMPILATION v2.4
       </div>
     </div>
-    <div class="rcb-actions" style="display: flex; gap: 12px;">
+    <div class="rcb-actions" style="display: flex; gap: 12px; flex-wrap: wrap;">
       <button class="control-btn" onclick="window.resetReportEngine()"><svg class="ic ic-sm"><use href="#i-sync"/></svg> RESET FORM</button>
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.compileFinalCbr()" id="btn-exec-cbr">
         <svg class="ic ic-sm"><use href="#i-bolt"/></svg> CREATE REPORT
       </button>
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.openBriefingForm()" id="btn-open-form">
         <svg class="ic ic-sm"><use href="#i-bolt"/></svg> OPEN EDITABLE FORM
+      </button>
+      <button class="btn-execute-cbr btn-solid-primary" onclick="window.downloadReportXlsx()" id="btn-download-sheet" title="Download Crew Briefing Report as .xlsx sheet (CBR + WX + NOTAM)">
+        <svg class="ic ic-sm"><use href="#i-save"/></svg> DOWNLOAD SHEET (XLSX)
       </button>
     </div>
   </div>
@@ -232,10 +235,11 @@
       return changed;
     }
 
-    window.renderReportPreview = function() {
+     window.renderReportPreview = function() {
        const statusDiv = document.getElementById('report-status');
        const btn = document.getElementById('btn-exec-cbr');
        const btnOpenForm = document.getElementById('btn-open-form');
+       const btnSheet = document.getElementById('btn-download-sheet');
        const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
        resetNoSigOnFlightChange(selectedFlights);
        
@@ -308,12 +312,14 @@
             btn.disabled = true;
             btn.innerHTML = `WAITING FOR CONTEXT`;
             if (btnOpenForm) btnOpenForm.disabled = true;
+            if (btnSheet) btnSheet.disabled = true;
             printTerminalLine("CRITICAL: NO FLIGHT DATA DETECTED IN ACTIVE CACHE.", "error");
             printTerminalLine("INSTRUCTION: SELECT AT LEAST ONE FLIGHT FROM MONITORING BOARD.", "warn");
         } else {
             btn.disabled = false;
             btn.innerHTML = `<svg class="ic ic-sm"><use href="#i-bolt"/></svg> CREATE REPORT`;
             if (btnOpenForm) btnOpenForm.disabled = false;
+            if (btnSheet) btnSheet.disabled = false;
             printTerminalLine(`SYSTEM READY: ${selectedFlights.length} FLIGHTS DETECTED.`, "success");
            if (noSigCount>0) printTerminalLine(`NO SIG: ${noSigCount} STATION(S) MARKED NO SIGNIFICANT NOTAM.`, "info");
            if (notamCount > 0) {
@@ -366,7 +372,7 @@
       return false;
     };
 
-    window.openBriefingForm = function() {
+     window.openBriefingForm = function() {
       const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
       if (selectedFlights.length === 0) return;
       const callSigns = selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean);
@@ -374,6 +380,41 @@
       const formUrl = '/briefing-form?flights=' + encodeURIComponent(callSigns.join(','));
       window.open(formUrl, '_blank', 'noopener,noreferrer');
     };
+
+     window.downloadReportXlsx = function() {
+       const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+       if (selectedFlights.length === 0) {
+         printTerminalLine("DOWNLOAD SHEET: No flights selected.", "warn");
+         return;
+       }
+       const callSigns = selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean);
+       if (callSigns.length === 0) return;
+       const btnSheet = document.getElementById('btn-download-sheet');
+       let savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
+       let noSigStationMap = getNoSigStationMap();
+       if (btnSheet) { btnSheet.disabled = true; btnSheet.innerHTML = '<svg class="ic ic-sm"><use href="#i-sync"/></svg> GENERATING XLSX...'; }
+       printTerminalLine("SHEET: Generating Crew Briefing XLSX (CBR + WX + NOTAM) for " + callSigns.join(', ') + " ...", "info");
+       fetch('/api/rpc', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ method: 'generateReportXlsx', args: [{ flights: callSigns, notamAnalysis: savedNotamAnalysis, noSigMap: noSigStationMap }] })
+       }).then(function(res){
+         if (!res.ok) return res.text().then(function(t){ throw new Error(t || ('HTTP ' + res.status)); });
+         return res.blob();
+       }).then(function(blob){
+         const a = document.createElement('a');
+         a.href = URL.createObjectURL(blob);
+         a.download = 'Crew-Briefing-' + callSigns.join('-') + '.xlsx';
+         document.body.appendChild(a);
+         a.click();
+         setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+         printTerminalLine("SHEET: XLSX downloaded — " + callSigns.join('-') + ".xlsx", "success");
+       }).catch(function(err){
+         printTerminalLine("SHEET FAILED: " + (err && err.message ? err.message : 'unknown error'), "error");
+       }).then(function(){
+         if (btnSheet) { btnSheet.disabled = false; btnSheet.innerHTML = '<svg class="ic ic-sm"><use href="#i-download"/></svg> DOWNLOAD SHEET (XLSX)'; }
+       });
+     };
 
     window.compileFinalCbr = function() {
         const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
@@ -386,6 +427,8 @@
         window.reportState.isBusy = true;
         btn.disabled = true;
         if (btnOpenForm) btnOpenForm.disabled = true;
+        const btnSheetBusy = document.getElementById('btn-download-sheet');
+        if (btnSheetBusy) btnSheetBusy.disabled = true;
         btn.innerHTML = `<svg class="ic ic-sm"><use href="#i-bolt"/></svg> GENERATING...`;
        
         statusDiv.innerHTML = '<div class="terminal-header">AWQ :: BRIEFING ENGINE :: CORE_STABLE_v2.4</div>';
@@ -455,16 +498,20 @@
                    btn.disabled = false;
                    btn.innerHTML = `RETRY GENERATION`;
                }
+                if (btnOpenForm && selectedFlights.length > 0) btnOpenForm.disabled = false;
+                const _bs = document.getElementById('btn-download-sheet');
+                if (_bs && selectedFlights.length > 0) _bs.disabled = false;
+                window.reportState.isBusy = false;
+            })
+           .withFailureHandler(err => { 
+               clearInterval(statusCycle);
+               printTerminalLine(`FATAL ERROR: ${err.message}`, "error");
+               btn.disabled = false;
+               btn.innerHTML = `RETRY GENERATION`;
                if (btnOpenForm && selectedFlights.length > 0) btnOpenForm.disabled = false;
+               const _bs2 = document.getElementById('btn-download-sheet');
+               if (_bs2 && selectedFlights.length > 0) _bs2.disabled = false;
                window.reportState.isBusy = false;
-           })
-          .withFailureHandler(err => { 
-              clearInterval(statusCycle);
-              printTerminalLine(`FATAL ERROR: ${err.message}`, "error");
-              btn.disabled = false;
-              btn.innerHTML = `RETRY GENERATION`;
-              if (btnOpenForm && selectedFlights.length > 0) btnOpenForm.disabled = false;
-              window.reportState.isBusy = false;
            })
           .generateBriefingPackage(selectedFlights, savedNotamAnalysis, noSigStationMap);
     };

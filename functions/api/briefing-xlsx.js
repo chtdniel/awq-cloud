@@ -1,13 +1,14 @@
 // ============================================================================
 // BRIEFING XLSX GENERATION - Native .xlsx output using template-edit approach
 // ----------------------------------------------------------------------------
-// Fills the committed template public/briefing-template.xlsx (sheet CBR) with
-// the SAME payload shape as briefing-form.js collectForm() output.
+// Fills the committed template public/briefing-template.xlsx (sheets CBR,
+// WX, NOTAM) with the SAME payload shape as briefing-form.js collectForm().
 // Only value cells are touched; merges/styles/images/print setup stay intact.
 // NO EXTERNAL DEPENDENCIES - pure JS ZIP handling (inflate via
 // DecompressionStream, deflate via CompressionStream, CRC32 table).
 //
 // Route: POST /api/rpc {method:'generateBriefingXlsx', args:[form]}
+//         POST /api/rpc {method:'generateReportXlsx',   args:[{flights, notamAnalysis, noSigMap}]}
 // ============================================================================
 
 // --- Cell mapping (verified against template CBR sheet cells/styles/merges) --
@@ -19,6 +20,17 @@ const ANCHORS = {
     recNo: 'R2', formDate: 'T3', pageOf: 'T4',
     dxrName: 'E48', picName: 'O48'
 };
+
+// WX / NOTAM sheet layout (verified via openpyxl):
+//   Row 1: B1="WX DOM" | D1="WX INTL"  ;  B1="NOTAM DOM" | D1="NOTAM INTL"
+//   Data rows 3..17 inclusive (15 rows). Each physical row holds 2 stations:
+//     Left:  A=station, B=text (TAF or NOTAM)
+//     Right: C=station, D=text
+//   Capacity = 15 rows * 2 = 30 entries. Rows 18+ hold summary (left as-is or
+//   overwritten with flight list). Row 26 on NOTAM: A26="CREATE BY : " B26=creator.
+const WX_NOTAM_START_ROW = 3;
+const WX_NOTAM_END_ROW = 17;
+const WX_NOTAM_CAPACITY = (WX_NOTAM_END_ROW - WX_NOTAM_START_ROW + 1) * 2; // 30
 
 // --- ZIP handling -----------------------------------------------------------
 
@@ -166,6 +178,302 @@ function findSheetFile(workbookXml, workbookRelsXml, sheetName) {
     return target.startsWith('worksheets/') ? 'xl/' + target : 'xl/worksheets/' + target;
 }
 
+function fillBulkSheet(xml, entries, textKey) {
+    for (let i = 0; i < WX_NOTAM_CAPACITY; i++) {
+        const row = WX_NOTAM_START_ROW + Math.floor(i / 2);
+        const isLeft = i % 2 === 0;
+        const colStn = isLeft ? 'A' : 'C';
+        const colTxt = isLeft ? 'B' : 'D';
+        const entry = entries[i];
+        if (entry) {
+            const stn = (entry.stationEntered || entry.station || '').toString().trim().toUpperCase();
+            const txt = (entry[textKey] || '').toString();
+            xml = setInlineCell(xml, colStn + row, stn);
+            xml = setInlineCell(xml, colTxt + row, txt);
+        } else {
+            xml = setInlineCell(xml, colStn + row, '');
+            xml = setInlineCell(xml, colTxt + row, '');
+        }
+    }
+    return xml;
+}
+
+function stationCode(v) {
+    if (!v) return '';
+    const raw = String(v).trim().toUpperCase();
+    if (!raw || raw === '-') return '';
+    return raw.split(/[\s,;\/|]+/)[0] || '';
+}
+
+function compactTime(v) {
+    if (v === null || v === undefined) return '';
+    const s = String(v).trim();
+    if (!s) return '';
+    const pad = (n) => (String(n).length < 2 ? '0' + n : String(n));
+    const withColon = s.match(/(\d{1,2}):(\d{2})/);
+    if (withColon) return pad(withColon[1]) + ':' + withColon[2];
+    const digits = s.replace(/[^0-9]/g, '');
+    if (digits.length === 4) return digits.slice(0, 2) + ':' + digits.slice(2);
+    if (digits.length === 6) return digits.slice(2, 4) + ':' + digits.slice(4);
+    if (digits.length >= 8) return digits.slice(8, 10) + ':' + digits.slice(10, 12);
+    return s;
+}
+
+async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, noSigStationMap) {
+    const flightList = (flightInputs || []).map(s => String(s).trim().toUpperCase()).filter(Boolean);
+    if (flightList.length === 0) throw new Error('No flights specified');
+    const placeholders = flightList.map(() => '?').join(',');
+    const { results: flights } = await context.env.DB.prepare(
+        `SELECT * FROM flights WHERE callsign IN (${placeholders}) OR id IN (${placeholders})`
+    ).bind(...flightList, ...flightList).all();
+    if (!flights || flights.length === 0) throw new Error('Flights not found');
+    const orderedFlights = [];
+    flightList.forEach(key => {
+        flights.forEach(f => {
+            const cs = String(f.callsign || '').trim().toUpperCase();
+            const id = String(f.id || '').trim().toUpperCase();
+            if ((cs === key || id === key) && !orderedFlights.some(x => x.id === f.id)) orderedFlights.push(f);
+        });
+    });
+    flights.forEach(f => { if (!orderedFlights.some(x => x.id === f.id)) orderedFlights.push(f); });
+    const legs = orderedFlights.slice(0, 6);
+    const { results: tafRows } = await context.env.DB.prepare('SELECT * FROM tafs').all();
+    const tafMap = {};
+    (tafRows || []).forEach(t => {
+        const stn = stationCode(t.station);
+        if (!stn) return;
+        tafMap[stn] = { raw: t.raw_text || '', issue_time: t.issue_time || '' };
+    });
+    const orderedStations = [];
+    const enrStations = [];
+    orderedFlights.forEach(f => {
+        const callsign = String(f.callsign || '').trim().toUpperCase();
+        const cands = [
+            { station: stationCode(f.dep), label: '' },
+            { station: stationCode(f.dest), label: '' },
+            { station: stationCode(f.alt), label: '' },
+            { station: stationCode(f.enr1), label: 'ENR1' },
+            { station: stationCode(f.enr2), label: 'ENR2' },
+            { station: stationCode(f.enr3), label: 'ENR3' }
+        ];
+        cands.forEach(c => {
+            if (!c.station) return;
+            const existing = orderedStations.find(s => s.station === c.station);
+            if (!existing) orderedStations.push({ station: c.station, label: c.label, isEnr: !!c.label, flights: callsign ? [callsign] : [] });
+            else {
+                if (callsign && !existing.flights.includes(callsign)) existing.flights.push(callsign);
+                if (c.label && !existing.label) { existing.label = c.label; existing.isEnr = true; }
+            }
+            if (c.label) enrStations.push({ slotId: c.label + '_' + (callsign || 'FLT'), label: c.label, station: c.station, flight: callsign });
+        });
+    });
+    const stationCodes = orderedStations.map(s => s.station);
+    const notamMap = {};
+    if (stationCodes.length > 0) {
+        const stnPlaceholders = stationCodes.map(() => '?').join(',');
+        const { results: notamRows } = await context.env.DB.prepare(
+            `SELECT id, location, message FROM notams WHERE location IN (${stnPlaceholders})`
+        ).bind(...stationCodes).all();
+        (notamRows || []).forEach(n => {
+            const stn = stationCode(n.location);
+            if (!stn) return;
+            if (!notamMap[stn]) notamMap[stn] = [];
+            const text = String(n.message || '').trim();
+            if (text && !notamMap[stn].includes(text)) notamMap[stn].push(text);
+        });
+    }
+    const analysis = savedNotamAnalysis && typeof savedNotamAnalysis === 'object' ? savedNotamAnalysis : {};
+    const tafs = [];
+    for (let i = 0; i < 6; i++) {
+        const f = legs[i];
+        const callsign = f ? String(f.callsign || '').trim().toUpperCase() : '';
+        const podStn = f ? stationCode(f.dep) : '';
+        const poaStn = f ? stationCode(f.dest) : '';
+        const podTime = f ? compactTime(f.etd) : '';
+        const poaTime = f ? compactTime(f.eta) : '';
+        const podRaw = podStn ? (tafMap[podStn]?.raw || '') : '';
+        const poaRaw = poaStn ? (tafMap[poaStn]?.raw || '') : '';
+        const podForecast = podStn ? (podRaw || 'NIL TAF DATA IN DATABASE') : '';
+        const poaForecast = poaStn ? (poaRaw || 'NIL TAF DATA IN DATABASE') : '';
+        tafs.push({ slot: 'POD' + (i + 1), station: podStn, stationEntered: podStn, time: podTime || (podStn && tafMap[podStn]?.issue_time ? compactTime(tafMap[podStn].issue_time) : ''), forecast: podForecast, flight: callsign });
+        tafs.push({ slot: 'POA' + (i + 1), station: poaStn, stationEntered: poaStn, time: poaTime || (poaStn && tafMap[poaStn]?.issue_time ? compactTime(tafMap[poaStn].issue_time) : ''), forecast: poaForecast, flight: callsign });
+    }
+    enrStations.forEach(e => {
+        const raw = tafMap[e.station]?.raw || '';
+        tafs.push({ slot: e.label, station: e.station, stationEntered: e.station, time: '', forecast: raw || 'NIL TAF DATA IN DATABASE', flight: e.flight });
+    });
+    const notams = orderedStations.map(entry => {
+        const key = entry.station;
+        const isNoSig = !!(noSigStationMap && noSigStationMap[key]);
+        const grouped = notamMap[key] || [];
+        let text = '';
+        if (grouped.length > 0) text = grouped.join('\n\n');
+        else if (isNoSig) text = 'NIL SIGNIFICANT NOTAM';
+        else text = 'NIL OPERATIONAL NOTAM.';
+        const selected = analysis[entry.flights[0]] || analysis[key] || [];
+        if (Array.isArray(selected) && selected.length > 0) {
+            const ids = selected.map(x => typeof x === 'string' ? x : x.id || x).filter(Boolean);
+            if (ids.length > 0) {
+                const filtered = grouped.filter((_, idx) => ids.includes(String(idx)));
+            }
+        }
+        return { station: entry.station, stationEntered: entry.station, flights: entry.flights, enr: entry.isEnr, text };
+    });
+    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 16) + 'Z';
+    const flightsKey = flightList.join(',');
+    let savedFields = {};
+    try {
+        const { results: savedRows } = await context.env.DB.prepare(
+            'SELECT content_json FROM briefing_reports WHERE flights_key = ? ORDER BY id DESC LIMIT 1'
+        ).bind(flightsKey).all();
+        if (savedRows && savedRows.length > 0 && savedRows[0].content_json) {
+            const parsed = JSON.parse(savedRows[0].content_json);
+            if (parsed && parsed.fields) savedFields = parsed.fields;
+        }
+    } catch {}
+    const fields = {
+        recNo: savedFields.recNo || ('CBR-' + flightList.join('-') + '-' + new Date().toISOString().substring(0, 10).replace(/-/g, '')),
+        formDate: savedFields.formDate || nowUtc,
+        pageOf: savedFields.pageOf || '1 of 1',
+        dxrName: savedFields.dxrName || '',
+        picName: savedFields.picName || ''
+    };
+    const legsPayload = legs.map((f, idx) => ({
+        leg: idx + 1,
+        flightNo: String(f.callsign || '').trim().toUpperCase(),
+        date: String(f.dof || ''),
+        reg: String(f.ac_type || ''),
+        pod: stationCode(f.dep),
+        std: compactTime(f.etd),
+        poa: stationCode(f.dest),
+        sta: compactTime(f.eta),
+        alt: stationCode(f.alt),
+        ofpRef: ''
+    }));
+    while (legsPayload.length < 6) legsPayload.push({ leg: legsPayload.length + 1, flightNo: '', date: '', reg: '', pod: '', std: '', poa: '', sta: '', alt: '', ofpRef: '' });
+    return {
+        formType: 'CREW BRIEFING REPORT FORM',
+        docRef: 'IAA/OCC/F/001 Rev.03',
+        recNo: fields.recNo,
+        date: fields.formDate,
+        page: fields.pageOf,
+        legs: legsPayload,
+        tafs,
+        notams,
+        signatures: { dxrName: fields.dxrName, picName: fields.picName },
+        fields,
+        orderedStations
+    };
+}
+
+async function buildXlsxResponse(context, form) {
+    const tplUrl = new URL('/briefing-template.xlsx', context.request.url);
+    const tplRes = await context.env.ASSETS.fetch(new Request(tplUrl));
+    if (!tplRes.ok) throw new Error('briefing-template.xlsx not reachable (' + tplRes.status + ')');
+    const tplBytes = new Uint8Array(await tplRes.arrayBuffer());
+    const entries = parseLocalEntries(tplBytes);
+    const dec = new TextDecoder();
+    const enc = new TextEncoder();
+    const files = [];
+    for (const e of entries) {
+        const raw = e.method === 8 ? await inflateRaw(e.data) : e.data;
+        files.push({ name: e.name, nameBytes: e.nameBytes, text: e.name.endsWith('.xml') || e.name.endsWith('.rels') ? dec.decode(raw) : null, bin: raw });
+    }
+    const get = (name) => files.find(f => f.name === name);
+    const workbookXml = get('xl/workbook.xml').text;
+    const workbookRels = get('xl/_rels/workbook.xml.rels').text;
+    const cbrFile = findSheetFile(workbookXml, workbookRels, 'CBR');
+    if (!cbrFile) throw new Error('CBR sheet not found in template');
+    const cbrSheet = get(cbrFile);
+    if (!cbrSheet || cbrSheet.text === null) throw new Error(cbrFile + ' missing/unreadable');
+    let xml = cbrSheet.text;
+    const fields = form.fields || {};
+    xml = setInlineCell(xml, ANCHORS.recNo, fields.recNo || '');
+    xml = setInlineCell(xml, ANCHORS.formDate, fields.formDate || '');
+    xml = setInlineCell(xml, ANCHORS.pageOf, fields.pageOf || '1 of 1');
+    (form.legs || []).slice(0, 6).forEach((leg, i) => {
+        const r = 8 + i * 2;
+        const ofpCell = 'R' + r;
+        xml = setInlineCell(xml, 'B' + r, leg.flightNo || '');
+        xml = setInlineCell(xml, 'D' + r, leg.date || '');
+        xml = setInlineCell(xml, 'H' + r, leg.reg || '');
+        xml = setInlineCell(xml, 'G' + r, leg.pod || '');
+        xml = setInlineCell(xml, 'I' + r, leg.std || '');
+        xml = setInlineCell(xml, 'J' + r, leg.poa || '');
+        xml = setInlineCell(xml, 'K' + r, leg.sta || '');
+        xml = setInlineCell(xml, 'N' + r, leg.alt || '');
+        xml = setInlineCell(xml, ofpCell, leg.ofpRef || '');
+    });
+    const tafRowFor = (slot) => {
+        const m = String(slot || '').match(/(POD|POA)\s*(\d)/i);
+        if (!m) return null;
+        const idx = (+m[2] - 1) * 2 + (m[1].toUpperCase() === 'POD' ? 0 : 1);
+        if (idx < 0 || idx > 5) return null;
+        return 30 + idx;
+    };
+    (form.tafs || []).forEach((t) => {
+        const r = tafRowFor(t.slot);
+        if (!r) return;
+        const right = /POA/i.test(t.slot || '') && +String(t.slot).replace(/\D/g, '') > 3;
+        const stCol = right ? 'K' : 'C';
+        const tmCol = right ? 'L' : 'D';
+        const txCol = right ? 'P' : 'G';
+        xml = setInlineCell(xml, stCol + r, t.stationEntered || t.station || '');
+        xml = setInlineCell(xml, tmCol + r, t.time || '');
+        xml = setInlineCell(xml, txCol + r, t.forecast || '');
+    });
+    (form.notams || []).slice(0, 7).forEach((nt, i) => {
+        const r = 39 + i;
+        xml = setInlineCell(xml, 'C' + r, nt.stationEntered || nt.station || '');
+        xml = setInlineCell(xml, 'E' + r, nt.text || '');
+    });
+    const sig = form.signatures || {};
+    xml = setInlineCell(xml, ANCHORS.dxrName, sig.dxrName || '');
+    xml = setInlineCell(xml, ANCHORS.picName, sig.picName || '');
+    cbrSheet.text = xml;
+    const wxFile = findSheetFile(workbookXml, workbookRels, 'WX');
+    if (wxFile) {
+        const wxSheet = get(wxFile);
+        if (wxSheet && wxSheet.text !== null) {
+            let wxXml = wxSheet.text;
+            const wxEntries = (form.tafs || []).map(t => ({ station: t.stationEntered || t.station, stationEntered: t.stationEntered || t.station, forecast: t.forecast || '' }));
+            if (wxEntries.length === 0 && form.orderedStations) {
+                form.orderedStations.forEach(s => wxEntries.push({ station: s.station, stationEntered: s.station, forecast: 'NIL TAF DATA IN DATABASE' }));
+            }
+            wxXml = fillBulkSheet(wxXml, wxEntries, 'forecast');
+            const flightsStr = (form.legs || []).filter(l => l && l.flightNo).map(l => l.flightNo).join(' ');
+            if (flightsStr) wxXml = setInlineCell(wxXml, 'B18', flightsStr);
+            wxSheet.text = wxXml;
+        }
+    }
+    const notamFile = findSheetFile(workbookXml, workbookRels, 'NOTAM');
+    if (notamFile) {
+        const ntSheet = get(notamFile);
+        if (ntSheet && ntSheet.text !== null) {
+            let ntXml = ntSheet.text;
+            const ntEntries = form.notams || [];
+            ntXml = fillBulkSheet(ntXml, ntEntries, 'text');
+            const flightsStr2 = (form.legs || []).filter(l => l && l.flightNo).map(l => l.flightNo).join(' ');
+            if (flightsStr2) ntXml = setInlineCell(ntXml, 'B18', flightsStr2);
+            ntSheet.text = ntXml;
+        }
+    }
+    const out = [];
+    for (const f of files) {
+        const data = f.text !== null ? enc.encode(f.text) : f.bin;
+        out.push({ name: f.nameBytes, data });
+    }
+    const xlsx = buildZip(out);
+    const flightsStr = (form.legs || []).filter(l => l && l.flightNo).map(l => l.flightNo).join('-') || 'BRIEFING';
+    return new Response(xlsx, {
+        headers: {
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': 'attachment; filename="Crew-Briefing-' + flightsStr + '.xlsx"',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+        }
+    });
+}
+
 // --- Handler ----------------------------------------------------------------
 
 export async function handleGenerateBriefingXlsx(context, args) {
@@ -174,101 +482,31 @@ export async function handleGenerateBriefingXlsx(context, args) {
         return Response.json({ error: 'Invalid form payload (need {legs,tafs,notams,signatures,fields})' }, { status: 400 });
     }
     try {
-        const tplUrl = new URL('/briefing-template.xlsx', context.request.url);
-        // Use ASSETS binding to fetch the static file directly, bypassing CF Access
-        const tplRes = await context.env.ASSETS.fetch(new Request(tplUrl));
-        if (!tplRes.ok) throw new Error('briefing-template.xlsx not reachable (' + tplRes.status + ')');
-        const tplBytes = new Uint8Array(await tplRes.arrayBuffer());
-        const entries = parseLocalEntries(tplBytes);
-
-        const dec = new TextDecoder();
-        const enc = new TextEncoder();
-        const files = [];
-        for (const e of entries) {
-            const raw = e.method === 8 ? await inflateRaw(e.data) : e.data;
-            files.push({ name: e.name, nameBytes: e.nameBytes, text: e.name.endsWith('.xml') || e.name.endsWith('.rels') ? dec.decode(raw) : null, bin: raw });
-        }
-        const get = (name) => files.find(f => f.name === name);
-
-        const workbookXml = get('xl/workbook.xml').text;
-        const workbookRels = get('xl/_rels/workbook.xml.rels').text;
-        const cbrFile = findSheetFile(workbookXml, workbookRels, 'CBR');
-        if (!cbrFile) throw new Error('CBR sheet not found in template');
-        const sheet = get(cbrFile);
-        if (!sheet || sheet.text === null) throw new Error(cbrFile + ' missing/unreadable');
-
-        let xml = sheet.text;
-        const fields = form.fields || {};
-        xml = setInlineCell(xml, ANCHORS.recNo, fields.recNo || '');
-        xml = setInlineCell(xml, ANCHORS.formDate, fields.formDate || '');
-        xml = setInlineCell(xml, ANCHORS.pageOf, fields.pageOf || '1 of 1');
-
-        (form.legs || []).slice(0, 6).forEach((leg, i) => {
-            const r = 8 + i * 2; // value rows 8,10,12,14,16,18
-            // Columns follow the label facets: B(FLIGHT NO) D(DATE) H(A/C REG)
-            // G(POD) I(STD) J(POA) K(STA) N(ALTN) + OFP at R.
-            const ofpCell = 'R' + r;
-            xml = setInlineCell(xml, 'B' + r, leg.flightNo || '');
-            xml = setInlineCell(xml, 'D' + r, leg.date || '');
-            xml = setInlineCell(xml, 'H' + r, leg.reg || '');
-            xml = setInlineCell(xml, 'G' + r, leg.pod || '');
-            xml = setInlineCell(xml, 'I' + r, leg.std || '');
-            xml = setInlineCell(xml, 'J' + r, leg.poa || '');
-            xml = setInlineCell(xml, 'K' + r, leg.sta || '');
-            xml = setInlineCell(xml, 'N' + r, leg.alt || '');
-            xml = setInlineCell(xml, ofpCell, leg.ofpRef || '');
-        });
-
-        // TAF slots: form slot keys look like "POD1"/"POA1"... map to rows 30-35
-        // left block (C anchor + D time, text merged G:J anchor G) and
-        // right block (K anchor + L time, text merged P:S anchor P).
-        const tafRowFor = (slot) => {
-            const m = String(slot || '').match(/(POD|POA)\s*(\d)/i);
-            if (!m) return null;
-            const idx = (+m[2] - 1) * 2 + (m[1].toUpperCase() === 'POD' ? 0 : 1);
-            if (idx < 0 || idx > 5) return null;
-            return 30 + idx;
-        };
-        (form.tafs || []).forEach((t) => {
-            const r = tafRowFor(t.slot);
-            if (!r) return;
-            const right = /POA/i.test(t.slot || '') && +String(t.slot).replace(/\D/g, '') > 3;
-            const stCol = right ? 'K' : 'C';
-            const tmCol = right ? 'L' : 'D';
-            const txCol = right ? 'P' : 'G';
-            xml = setInlineCell(xml, stCol + r, t.stationEntered || t.station || '');
-            xml = setInlineCell(xml, tmCol + r, t.time || '');
-            xml = setInlineCell(xml, txCol + r, t.forecast || '');
-        });
-
-        // NOTAM rows 39-45 (template has 7 slots): station C:D anchor C, text E:S anchor E.
-        (form.notams || []).slice(0, 7).forEach((nt, i) => {
-            const r = 39 + i;
-            xml = setInlineCell(xml, 'C' + r, nt.stationEntered || nt.station || '');
-            xml = setInlineCell(xml, 'E' + r, nt.text || '');
-        });
-
-        const sig = form.signatures || {};
-        xml = setInlineCell(xml, ANCHORS.dxrName, sig.dxrName || '');
-        xml = setInlineCell(xml, ANCHORS.picName, sig.picName || '');
-
-        // Rebuild: store everything uncompressed (valid ZIP, Excel-compatible).
-        const out = [];
-        for (const f of files) {
-            const data = (f.name === cbrFile) ? enc.encode(xml) : (f.text !== null ? enc.encode(f.text) : f.bin);
-            out.push({ name: f.nameBytes, data });
-        }
-        const xlsx = buildZip(out);
-        const flightsStr = (form.legs || []).filter(l => l && l.flightNo).map(l => l.flightNo).join('-') || 'BRIEFING';
-        return new Response(xlsx, {
-            headers: {
-                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                'Content-Disposition': 'attachment; filename="Crew-Briefing-' + flightsStr + '.xlsx"',
-                'Cache-Control': 'no-cache, no-store, must-revalidate'
-            }
-        });
+        return await buildXlsxResponse(context, form);
     } catch (e) {
         console.error('[XLSX] generate failed:', e);
         return Response.json({ error: 'XLSX generation failed: ' + e.message }, { status: 500 });
+    }
+}
+
+export async function handleGenerateReportXlsx(context, args) {
+    const [payload] = args || [];
+    if (!payload) return Response.json({ error: 'Missing payload' }, { status: 400 });
+    try {
+        let form = null;
+        if (payload.legs && Array.isArray(payload.legs)) {
+            form = payload;
+        } else {
+            const flights = payload.flights || payload.flightList || payload.callsigns || [];
+            const flightArr = Array.isArray(flights) ? flights : String(flights).split(',').map(s => s.trim()).filter(Boolean);
+            if (flightArr.length === 0) throw new Error('No flights specified');
+            const savedNotamAnalysis = payload.notamAnalysis || payload.savedNotamAnalysis || payload.analysis || {};
+            const noSigMap = payload.noSigMap || payload.noSigStationMap || {};
+            form = await buildFormFromFlights(context, flightArr, savedNotamAnalysis, noSigMap);
+        }
+        return await buildXlsxResponse(context, form);
+    } catch (e) {
+        console.error('[XLSX report] generate failed:', e);
+        return Response.json({ error: 'XLSX report generation failed: ' + e.message }, { status: 500 });
     }
 }
