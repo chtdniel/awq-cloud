@@ -34,6 +34,13 @@ export function duFormatDateTimeUTC(d) {
     return y + '-' + m + '-' + d2 + ' ' + hh + ':' + mm;
 }
   
+export function isAerodromeOnlyNotam(text) {
+    const qualifier = String(text || '').match(/(?:^|\s)Q\)\s*([A-Z]{4}\s*\/[^\r\n]+)/i);
+    if (!qualifier) return false;
+    const scope = (qualifier[1].split('/')[4] || '').trim().toUpperCase();
+    return scope === 'A';
+}
+
 export function parseNotamRow(row) {
     const notamNum = String(row.id || '').trim();
     const fullText = String(row.message || '');

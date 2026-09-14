@@ -44,7 +44,7 @@
     <div class="firn-form">
       <div class="firn-field">
         <label for="firn-bulk-raw">Paste TSV (Excel/DINS) or Raw ICAO (multiple Q) → Preview</label>
-        <textarea id="firn-bulk-raw" placeholder="TSV: Location&#9;NOTAM #/LTA #&#9;Class&#9;Issue Date&#9;Effective Date&#9;Expiration Date&#9;NOTAM Condition/LTA subject&#10;YBBB&#9;J5531/25&#9;International...&#9;...&#9;Q)YBBB/Q...&#10;&#10;Or Raw ICAO:&#10;Q)WIII/QWULW/...&#10;A)WIII B)260827...&#10;E)RWY ...&#10;Q)WAAA/Q..."></textarea>
+        <textarea id="firn-bulk-raw" placeholder="Paste the DINS table including Location, NOTAM # and NOTAM Condition columns.&#10;&#10;Or paste complete ICAO NOTAMs:&#10;(A1234/26 NOTAMN&#10;Q) WIIF/QRTCA/IV/BO/E/000/999/0600S10600E005&#10;A) WIIF B) 2609010000 C) 2610010000&#10;E) AIRSPACE RESTRICTED)"></textarea>
       </div>
       <div class="firn-actions" style="flex-wrap:wrap;">
         <button type="button" class="firn-btn" id="firn-bulk-preview">👁 PREVIEW</button>
@@ -65,7 +65,7 @@
           <tbody id="firn-bulk-tbody"></tbody>
         </table>
       </div>
-      <div class="firn-hint">TSV DINS: header `Location  NOTAM #/LTA #  Class  ...  NOTAM Condition` auto-detected. Raw ICAO: split per `Q)`. Duplicate `Location|NOTAM #` already in `FIR`/`NOTAM` will be skipped. PERM supported.</div>
+      <div class="firn-hint">Paste FIR/enroute NOTAMs as DINS TSV or complete ICAO messages including their NOTAM numbers. Aerodrome-only NOTAMs (Q scope A) belong in UPDATE NOTAM. Append skips existing numbers; overwrite replaces the FIR dataset. PERM supported.</div>
     </div>
   </div>
 </div>
@@ -131,7 +131,15 @@
   }
 
   // ---- Bulk FIR helpers ----
-  var bulkState = { lastPreview: null, raw: '' };
+  var bulkState = { lastPreview: null, raw: '', busy: false, initialized: false };
+
+  function resetPreview() {
+    bulkState.lastPreview = null;
+    bulkState.raw = '';
+    $('firn-bulk-import').disabled = true;
+    $('firn-bulk-overwrite').disabled = true;
+    $('firn-bulk-preview-box').style.display = 'none';
+  }
   function renderBulkPreview(data){
     var box=$('firn-bulk-preview-box'), tb=$('firn-bulk-tbody'), st=$('firn-bulk-status');
     var imp=$('firn-bulk-import'), over=$('firn-bulk-overwrite');
@@ -172,31 +180,49 @@
     bulkState.raw=raw;
     var st=$('firn-bulk-status'); if(st) st.textContent='⏳ Preview...';
     var res=await run('firBulkPreviewNotams', raw);
+    if ($('firn-bulk-raw').value !== raw) return;
     renderBulkPreview(res);
     if(res && res.ok) addToast('Preview '+res.total+' • '+res.valid+' valid');
   }
   async function doBulkImport(mode){
-    var raw=bulkState.raw || ($('firn-bulk-raw') ? $('firn-bulk-raw').value : '');
-    if(!raw.trim()){ addToast('Paste first & Preview.'); return; }
+    if (bulkState.busy) return;
+    var raw=$('firn-bulk-raw') ? $('firn-bulk-raw').value : '';
+    if(!raw.trim() || !bulkState.lastPreview || raw !== bulkState.raw){ resetPreview(); addToast('Text changed. Preview again before importing.'); return; }
     if(mode==='overwrite' && !confirm('OVERWRITE: erase all FIR then refill with '+ (bulkState.lastPreview? bulkState.lastPreview.total : '?') +' NOTAM?')) return;
     var btn = mode==='overwrite' ? $('firn-bulk-overwrite') : $('firn-bulk-import');
     var orig = btn ? btn.textContent : '';
+    bulkState.busy = true;
+    $('firn-bulk-import').disabled = true;
+    $('firn-bulk-overwrite').disabled = true;
+    $('firn-bulk-preview').disabled = true;
+    $('firn-bulk-raw').disabled = true;
     if(btn){ btn.disabled=true; btn.textContent='⏳ IMPORT...'; }
     var res=await run('firBulkImportNotams', raw, mode);
-    if(btn){ btn.textContent=orig; btn.disabled=false; }
+    bulkState.busy = false;
+    $('firn-bulk-preview').disabled = false;
+    $('firn-bulk-raw').disabled = false;
+    if(btn) btn.textContent=orig;
     if(res && res.ok){
       addToast((mode==='overwrite'?'Overwritten ':'Appended ')+res.appended+' • skip dup '+res.skippedDup+' • invalid '+res.skippedInvalid);
-      bulkState.raw='';
+      resetPreview();
+      window.dispatchEvent(new CustomEvent('occ:firNotamsChanged'));
       if($('firn-bulk-raw')) $('firn-bulk-raw').value='';
       var box=$('firn-bulk-preview-box'); if(box) box.style.display='none';
-      var st=$('firn-bulk-status'); if(st) st.textContent='Done '+res.appended+' appended';
+      var st=$('firn-bulk-status'); if(st) st.textContent='Done: '+res.appended+' FIR NOTAMs '+(mode==='overwrite'?'replaced the previous dataset':'appended');
     } else {
+      renderBulkPreview(bulkState.lastPreview);
       addToast('Import failed: '+esc((res&&res.error)||'unknown'));
       var st2=$('firn-bulk-status'); if(st2) st2.textContent='Error: '+(res&&res.error||'unknown');
     }
   }
 
   function init() {
+    if (bulkState.initialized) return;
+    bulkState.initialized = true;
+    $('firn-bulk-raw').addEventListener('input', function () {
+      resetPreview();
+      $('firn-bulk-status').textContent = 'Text changed. Preview before importing.';
+    });
     var bp=$('firn-bulk-preview'); if(bp) bp.addEventListener('click', doBulkPreview);
     var bi=$('firn-bulk-import'); if(bi) bi.addEventListener('click', function(){ doBulkImport('append'); });
     var bo=$('firn-bulk-overwrite'); if(bo) bo.addEventListener('click', function(){ doBulkImport('overwrite'); });

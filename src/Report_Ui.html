@@ -17,6 +17,7 @@
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.downloadReportXlsx()" id="btn-download-sheet" title="Download Crew Briefing Report as .xlsx sheet (CBR + WX + NOTAM)">
         <svg class="ic ic-sm"><use href="#i-save"/></svg> DOWNLOAD SHEET (XLSX)
       </button>
+      <button class="btn-execute-cbr btn-solid-primary" onclick="window.createReportGoogleSheet()" id="btn-google-sheet" disabled title="Create the report in your Google Drive and open Google Sheets">CREATE GOOGLE SHEET</button>
     </div>
   </div>
   
@@ -242,6 +243,7 @@
        const btnSheet = document.getElementById('btn-download-sheet');
        const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
        resetNoSigOnFlightChange(selectedFlights);
+       if (window.updateGoogleReportButton) window.updateGoogleReportButton();
        
          // Get NOTAM analysis count
         let notamCount = 0;
@@ -362,6 +364,16 @@
        `);
        statusDiv.scrollTop = statusDiv.scrollHeight;
     };
+    window.printReportTerminalLine = printTerminalLine;
+
+    window.getReportSheetPayload = function() {
+      const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+      return {
+        flights: selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean),
+        notamAnalysis: window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {},
+        noSigMap: getNoSigStationMap()
+      };
+    };
 
     // Helper: accept absolute http/https OR same-origin relative /briefing or /briefing-form URLs
     window.isValidReportUrl = function(u) {
@@ -382,6 +394,7 @@
     };
 
      window.downloadReportXlsx = function() {
+       if (window.reportState.isBusy) return;
        const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
        if (selectedFlights.length === 0) {
          printTerminalLine("DOWNLOAD SHEET: No flights selected.", "warn");
@@ -390,14 +403,16 @@
        const callSigns = selectedFlights.map(function(f){ return f.FLIGHT; }).filter(Boolean);
        if (callSigns.length === 0) return;
        const btnSheet = document.getElementById('btn-download-sheet');
-       let savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
-       let noSigStationMap = getNoSigStationMap();
+       window.reportState.isBusy = true;
+       ['btn-exec-cbr', 'btn-open-form', 'btn-google-sheet'].forEach(function(id) {
+         document.getElementById(id).disabled = true;
+       });
        if (btnSheet) { btnSheet.disabled = true; btnSheet.innerHTML = '<svg class="ic ic-sm"><use href="#i-sync"/></svg> GENERATING XLSX...'; }
        printTerminalLine("SHEET: Generating Crew Briefing XLSX (CBR + WX + NOTAM) for " + callSigns.join(', ') + " ...", "info");
        fetch('/api/rpc', {
          method: 'POST',
          headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ method: 'generateReportXlsx', args: [{ flights: callSigns, notamAnalysis: savedNotamAnalysis, noSigMap: noSigStationMap }] })
+         body: JSON.stringify({ method: 'generateReportXlsx', args: [window.getReportSheetPayload()] })
        }).then(function(res){
          if (!res.ok) return res.text().then(function(t){ throw new Error(t || ('HTTP ' + res.status)); });
          return res.blob();
@@ -412,6 +427,11 @@
        }).catch(function(err){
          printTerminalLine("SHEET FAILED: " + (err && err.message ? err.message : 'unknown error'), "error");
        }).then(function(){
+         window.reportState.isBusy = false;
+         ['btn-exec-cbr', 'btn-open-form'].forEach(function(id) {
+           document.getElementById(id).disabled = false;
+         });
+         if (window.updateGoogleReportButton) window.updateGoogleReportButton();
          if (btnSheet) { btnSheet.disabled = false; btnSheet.innerHTML = '<svg class="ic ic-sm"><use href="#i-download"/></svg> DOWNLOAD SHEET (XLSX)'; }
        });
      };
@@ -425,6 +445,7 @@
         const statusDiv = document.getElementById('report-status');
         
         window.reportState.isBusy = true;
+        if (window.updateGoogleReportButton) window.updateGoogleReportButton();
         btn.disabled = true;
         if (btnOpenForm) btnOpenForm.disabled = true;
         const btnSheetBusy = document.getElementById('btn-download-sheet');
@@ -502,6 +523,7 @@
                 const _bs = document.getElementById('btn-download-sheet');
                 if (_bs && selectedFlights.length > 0) _bs.disabled = false;
                 window.reportState.isBusy = false;
+                if (window.updateGoogleReportButton) window.updateGoogleReportButton();
             })
            .withFailureHandler(err => { 
                clearInterval(statusCycle);
@@ -512,8 +534,10 @@
                const _bs2 = document.getElementById('btn-download-sheet');
                if (_bs2 && selectedFlights.length > 0) _bs2.disabled = false;
                window.reportState.isBusy = false;
+               if (window.updateGoogleReportButton) window.updateGoogleReportButton();
            })
           .generateBriefingPackage(selectedFlights, savedNotamAnalysis, noSigStationMap);
     };
   </script>
+  <script src="/report-google-sheets.js"></script>
 </div>

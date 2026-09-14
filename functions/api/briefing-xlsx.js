@@ -17,7 +17,7 @@
 // writing the anchor (top-left) cell carries the whole merged area.
 
 const ANCHORS = {
-    recNo: 'R2', formDate: 'T3', pageOf: 'T4',
+    recNo: 'Q2', formDate: 'Q3', pageOf: 'Q4',
     dxrName: 'E48', picName: 'O48'
 };
 
@@ -147,13 +147,14 @@ function xmlEscape(s) {
 }
 
 function setInlineCell(sheetXml, ref, value) {
+    if (String(value).length > 32767) throw new RangeError('Spreadsheet cell exceeds 32767 characters; split the report into fewer flights or NOTAMs.');
     const start = sheetXml.indexOf('<c r="' + ref + '"');
-    if (start === -1) return sheetXml;
+    if (start === -1) throw new Error('Template cell missing: ' + ref);
     const tagEnd = sheetXml.indexOf('>', start);
     if (tagEnd === -1) return sheetXml;
     if (sheetXml[tagEnd - 1] === '/') {
         // self-closing <c r="X" s="N"/> → expand to inline string
-        const openTag = sheetXml.slice(start, tagEnd - 1);
+        const openTag = sheetXml.slice(start, tagEnd - 1).replace(/\s+t="[^"]*"/, '');
         return sheetXml.slice(0, start) + openTag + ' t="inlineStr"><is><t>'
             + xmlEscape(value) + '</t></is></c>' + sheetXml.slice(tagEnd + 1);
     }
@@ -179,6 +180,7 @@ function findSheetFile(workbookXml, workbookRelsXml, sheetName) {
 }
 
 function fillBulkSheet(xml, entries, textKey) {
+    if (entries.length > WX_NOTAM_CAPACITY) throw new RangeError('Template supports at most 30 ' + textKey + ' entries; split the report.');
     for (let i = 0; i < WX_NOTAM_CAPACITY; i++) {
         const row = WX_NOTAM_START_ROW + Math.floor(i / 2);
         const isLeft = i % 2 === 0;
@@ -236,7 +238,9 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         });
     });
     flights.forEach(f => { if (!orderedFlights.some(x => x.id === f.id)) orderedFlights.push(f); });
-    const legs = orderedFlights.slice(0, 6);
+    if (flightList.some(key => !orderedFlights.some(flight => String(flight.callsign).toUpperCase() === key || String(flight.id) === key))) throw new RangeError('Some selected flights no longer exist; refresh the flight selection.');
+    if (orderedFlights.length > 6) throw new RangeError('Template supports at most 6 flights; split the report.');
+    const legs = orderedFlights;
     const { results: tafRows } = await context.env.DB.prepare('SELECT * FROM tafs').all();
     const tafMap = {};
     (tafRows || []).forEach(t => {
@@ -267,22 +271,42 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
             if (c.label) enrStations.push({ slotId: c.label + '_' + (callsign || 'FLT'), label: c.label, station: c.station, flight: callsign });
         });
     });
-    const stationCodes = orderedStations.map(s => s.station);
+    const analysis = savedNotamAnalysis && typeof savedNotamAnalysis === 'object' ? savedNotamAnalysis : {};
+    const selectedIds = new Set();
+    const selectedFlightsById = new Map();
+    orderedFlights.forEach(flight => {
+        const callsign = String(flight.callsign || '').trim().toUpperCase();
+        const keys = [callsign, String(flight.id), ...orderedStations.filter(station => station.flights.includes(callsign)).map(station => station.station)];
+        keys.forEach(key => {
+            const selected = analysis[key];
+            if (!Array.isArray(selected)) return;
+            selected.forEach(item => {
+                const id = String(typeof item === 'string' ? item : item?.notamNum || item?.id || '').trim();
+                if (!id) return;
+                selectedIds.add(id);
+                if (!selectedFlightsById.has(id)) selectedFlightsById.set(id, new Set());
+                selectedFlightsById.get(id).add(callsign);
+            });
+        });
+    });
     const notamMap = {};
-    if (stationCodes.length > 0) {
-        const stnPlaceholders = stationCodes.map(() => '?').join(',');
+    if (selectedIds.size > 0) {
+        const ids = [...selectedIds];
+        const stnPlaceholders = ids.map(() => '?').join(',');
         const { results: notamRows } = await context.env.DB.prepare(
-            `SELECT id, location, message FROM notams WHERE location IN (${stnPlaceholders})`
-        ).bind(...stationCodes).all();
+            `SELECT id, location, message FROM notams WHERE id IN (${stnPlaceholders})`
+        ).bind(...ids).all();
+        const foundIds = new Set((notamRows || []).map(notam => notam.id));
+        if (ids.some(id => !foundIds.has(id))) throw new RangeError('Selected NOTAMs have changed or expired; run NOTAM analysis again before generating the report.');
         (notamRows || []).forEach(n => {
             const stn = stationCode(n.location);
             if (!stn) return;
+            if (!orderedStations.some(station => station.station === stn)) orderedStations.push({ station: stn, label: 'FIR', isEnr: true, flights: [...selectedFlightsById.get(n.id)] });
             if (!notamMap[stn]) notamMap[stn] = [];
             const text = String(n.message || '').trim();
             if (text && !notamMap[stn].includes(text)) notamMap[stn].push(text);
         });
     }
-    const analysis = savedNotamAnalysis && typeof savedNotamAnalysis === 'object' ? savedNotamAnalysis : {};
     const tafs = [];
     for (let i = 0; i < 6; i++) {
         const f = legs[i];
@@ -309,14 +333,7 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         let text = '';
         if (grouped.length > 0) text = grouped.join('\n\n');
         else if (isNoSig) text = 'NIL SIGNIFICANT NOTAM';
-        else text = 'NIL OPERATIONAL NOTAM.';
-        const selected = analysis[entry.flights[0]] || analysis[key] || [];
-        if (Array.isArray(selected) && selected.length > 0) {
-            const ids = selected.map(x => typeof x === 'string' ? x : x.id || x).filter(Boolean);
-            if (ids.length > 0) {
-                const filtered = grouped.filter((_, idx) => ids.includes(String(idx)));
-            }
-        }
+        else text = 'NO NOTAM SELECTED';
         return { station: entry.station, stationEntered: entry.station, flights: entry.flights, enr: entry.isEnr, text };
     });
     const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 16) + 'Z';
@@ -367,6 +384,8 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
 }
 
 async function buildXlsxResponse(context, form) {
+    if ((form.legs || []).length > 6) throw new RangeError('Template supports at most 6 flights; split the report.');
+    if ((form.tafs || []).length > WX_NOTAM_CAPACITY || (form.notams || []).length > WX_NOTAM_CAPACITY) throw new RangeError('Template supports at most 30 weather or NOTAM entries; split the report.');
     const tplUrl = new URL('/briefing-template.xlsx', context.request.url);
     const tplRes = await context.env.ASSETS.fetch(new Request(tplUrl));
     if (!tplRes.ok) throw new Error('briefing-template.xlsx not reachable (' + tplRes.status + ')');
@@ -388,45 +407,48 @@ async function buildXlsxResponse(context, form) {
     if (!cbrSheet || cbrSheet.text === null) throw new Error(cbrFile + ' missing/unreadable');
     let xml = cbrSheet.text;
     const fields = form.fields || {};
-    xml = setInlineCell(xml, ANCHORS.recNo, fields.recNo || '');
-    xml = setInlineCell(xml, ANCHORS.formDate, fields.formDate || '');
-    xml = setInlineCell(xml, ANCHORS.pageOf, fields.pageOf || '1 of 1');
-    (form.legs || []).slice(0, 6).forEach((leg, i) => {
-        const r = 8 + i * 2;
-        const ofpCell = 'R' + r;
-        xml = setInlineCell(xml, 'B' + r, leg.flightNo || '');
-        xml = setInlineCell(xml, 'D' + r, leg.date || '');
-        xml = setInlineCell(xml, 'H' + r, leg.reg || '');
-        xml = setInlineCell(xml, 'G' + r, leg.pod || '');
-        xml = setInlineCell(xml, 'I' + r, leg.std || '');
-        xml = setInlineCell(xml, 'J' + r, leg.poa || '');
-        xml = setInlineCell(xml, 'K' + r, leg.sta || '');
-        xml = setInlineCell(xml, 'N' + r, leg.alt || '');
-        xml = setInlineCell(xml, ofpCell, leg.ofpRef || '');
-    });
-    const tafRowFor = (slot) => {
-        const m = String(slot || '').match(/(POD|POA)\s*(\d)/i);
-        if (!m) return null;
-        const idx = (+m[2] - 1) * 2 + (m[1].toUpperCase() === 'POD' ? 0 : 1);
-        if (idx < 0 || idx > 5) return null;
-        return 30 + idx;
-    };
+    xml = setInlineCell(xml, ANCHORS.recNo, 'Rec. No.: ' + (fields.recNo || ''));
+    xml = setInlineCell(xml, ANCHORS.formDate, 'Date: ' + (fields.formDate || ''));
+    xml = setInlineCell(xml, ANCHORS.pageOf, 'Page: ' + (fields.pageOf || '1 of 1'));
+    const legs = form.legs || [];
+    const distinctLegValues = key => [...new Set(legs.map(leg => leg[key]).filter(Boolean))].join(' / ');
+    xml = setInlineCell(xml, 'D7', distinctLegValues('flightNo'));
+    xml = setInlineCell(xml, 'D9', distinctLegValues('date'));
+    xml = setInlineCell(xml, 'D11', distinctLegValues('reg'));
+    for (let index = 0; index < 6; index++) {
+        const leg = legs[index] || {};
+        const row = 7 + index * 2;
+        xml = setInlineCell(xml, 'H' + row, leg.pod || '');
+        xml = setInlineCell(xml, 'I' + row, leg.std || '');
+        xml = setInlineCell(xml, 'K' + row, leg.poa || '');
+        xml = setInlineCell(xml, 'M' + row, leg.sta || '');
+        xml = setInlineCell(xml, 'O' + row, leg.alt || '');
+        xml = setInlineCell(xml, 'S' + row, leg.ofpRef || '');
+        for (const column of ['E', 'F', 'G', 'M', 'O', 'P']) xml = setInlineCell(xml, column + (30 + index), '');
+    }
     (form.tafs || []).forEach((t) => {
-        const r = tafRowFor(t.slot);
-        if (!r) return;
-        const right = /POA/i.test(t.slot || '') && +String(t.slot).replace(/\D/g, '') > 3;
-        const stCol = right ? 'K' : 'C';
-        const tmCol = right ? 'L' : 'D';
+        const match = String(t.slot || '').match(/^(POD|POA)\s*([1-6])$/i);
+        if (!match) return;
+        const legIndex = Number(match[2]) - 1;
+        const r = 30 + (legIndex % 3) * 2 + (match[1].toUpperCase() === 'POA' ? 1 : 0);
+        const right = legIndex >= 3;
+        const stCol = right ? 'M' : 'E';
+        const tmCol = right ? 'O' : 'F';
         const txCol = right ? 'P' : 'G';
         xml = setInlineCell(xml, stCol + r, t.stationEntered || t.station || '');
         xml = setInlineCell(xml, tmCol + r, t.time || '');
         xml = setInlineCell(xml, txCol + r, t.forecast || '');
     });
-    (form.notams || []).slice(0, 7).forEach((nt, i) => {
-        const r = 39 + i;
-        xml = setInlineCell(xml, 'C' + r, nt.stationEntered || nt.station || '');
-        xml = setInlineCell(xml, 'E' + r, nt.text || '');
-    });
+    const weatherStations = [...new Map((form.tafs || []).filter(taf => taf.stationEntered || taf.station).map(taf => [taf.stationEntered || taf.station, taf])).values()];
+    for (let index = 0; index < 7; index++) {
+        const taf = weatherStations[index];
+        const continuation = index === 6 && weatherStations.length > 7;
+        xml = setInlineCell(xml, 'C' + (20 + index), continuation ? 'CONT.' : taf?.stationEntered || taf?.station || '');
+        xml = setInlineCell(xml, 'E' + (20 + index), continuation ? 'See WX sheet for all station forecasts.' : taf?.forecast || '');
+          
+          xml = setInlineCell(xml, stCol + r, continuation ? 'CONT.' : nt.stationEntered || nt.station || '');
+          xml = setInlineCell(xml, txtCol + r, continuation ? 'See NOTAM sheet for all selected NOTAMs.' : nt.text || '');
+      }
     const sig = form.signatures || {};
     xml = setInlineCell(xml, ANCHORS.dxrName, sig.dxrName || '');
     xml = setInlineCell(xml, ANCHORS.picName, sig.picName || '');
@@ -442,7 +464,7 @@ async function buildXlsxResponse(context, form) {
             }
             wxXml = fillBulkSheet(wxXml, wxEntries, 'forecast');
             const flightsStr = (form.legs || []).filter(l => l && l.flightNo).map(l => l.flightNo).join(' ');
-            if (flightsStr) wxXml = setInlineCell(wxXml, 'B18', flightsStr);
+            wxXml = setInlineCell(wxXml, 'B18', flightsStr);
             wxSheet.text = wxXml;
         }
     }
@@ -454,12 +476,22 @@ async function buildXlsxResponse(context, form) {
             const ntEntries = form.notams || [];
             ntXml = fillBulkSheet(ntXml, ntEntries, 'text');
             const flightsStr2 = (form.legs || []).filter(l => l && l.flightNo).map(l => l.flightNo).join(' ');
-            if (flightsStr2) ntXml = setInlineCell(ntXml, 'B18', flightsStr2);
+            ntXml = setInlineCell(ntXml, 'B18', flightsStr2);
+            ntXml = setInlineCell(ntXml, 'B26', sig.dxrName || '');
             ntSheet.text = ntXml;
         }
     }
+    const retainedSheets = new Set([cbrFile, wxFile, notamFile]);
+    const removedFiles = new Set(files.filter(file => /^xl\/worksheets\/(?:_rels\/)?sheet\d+\.xml(?:\.rels)?$/.test(file.name) && !retainedSheets.has(file.name.replace('/_rels/', '/').replace(/\.rels$/, ''))).map(file => file.name));
+    get('xl/workbook.xml').text = workbookXml.replace(/<sheet\b[^>]*\/>/g, tag => /name="(?:CBR|WX|NOTAM)"/.test(tag) ? tag : '').replace(/<definedNames>[\s\S]*?<\/definedNames>/, '');
+    get('xl/_rels/workbook.xml.rels').text = workbookRels.replace(/<Relationship\b[^>]*\/>/g, tag => {
+        const target = tag.match(/Target="([^"]+)"/)?.[1];
+        return target && removedFiles.has('xl/' + target) ? '' : tag;
+    });
+    get('[Content_Types].xml').text = get('[Content_Types].xml').text.replace(/<Override\b[^>]*\/>/g, tag => removedFiles.has(tag.match(/PartName="\/([^"]+)"/)?.[1]) ? '' : tag);
     const out = [];
     for (const f of files) {
+        if (removedFiles.has(f.name)) continue;
         const data = f.text !== null ? enc.encode(f.text) : f.bin;
         out.push({ name: f.nameBytes, data });
     }
@@ -485,7 +517,7 @@ export async function handleGenerateBriefingXlsx(context, args) {
         return await buildXlsxResponse(context, form);
     } catch (e) {
         console.error('[XLSX] generate failed:', e);
-        return Response.json({ error: 'XLSX generation failed: ' + e.message }, { status: 500 });
+        return Response.json({ error: 'XLSX generation failed: ' + e.message }, { status: e instanceof RangeError ? 400 : 500 });
     }
 }
 
@@ -507,6 +539,6 @@ export async function handleGenerateReportXlsx(context, args) {
         return await buildXlsxResponse(context, form);
     } catch (e) {
         console.error('[XLSX report] generate failed:', e);
-        return Response.json({ error: 'XLSX report generation failed: ' + e.message }, { status: 500 });
+        return Response.json({ error: 'XLSX report generation failed: ' + e.message }, { status: e instanceof RangeError ? 400 : 500 });
     }
 }
