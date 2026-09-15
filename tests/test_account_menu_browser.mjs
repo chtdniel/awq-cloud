@@ -6,7 +6,7 @@ const local = !process.env.AWQ_MENU_URL;
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 mkdirSync('test-results/account-menu', { recursive: true });
 try {
- for (const width of [375,768,1280]) {
+ for (const width of [375,768,1280,1920]) {
   const page = await browser.newPage({viewport:{width,height:800}});
   const errors=[];
   page.on('pageerror', error=>errors.push(error.message));
@@ -28,10 +28,27 @@ try {
   const toggle=page.locator('#awq-account-toggle'), panel=page.locator('#awq-account-panel');
   await toggle.waitFor();
   assert.equal(await panel.isVisible(),false);
+  await page.evaluate(() => {
+    window.allDbFlights = Array.from({length:10}, (_,i)=>({rowIdx:i+1, FLIGHT:String(640+i), DEP:'WADD', ARR:'WATO', REG:'PK-AZK', DOF:'20260916', STD:'03:25', STA:'04:40'}));
+    window.activeBoardRowIds = window.allDbFlights.map(f=>f.rowIdx);
+    window.renderBoard();
+  });
+  await page.locator('#master-cb').check();
+  const fab=page.locator('#bulk-fab');
+  await page.waitForFunction(()=>getComputedStyle(document.getElementById('bulk-fab')).opacity==='1');
+  const accountBox=await toggle.boundingBox(), fabBox=await fab.boundingBox();
+  assert(accountBox.x>=0 && accountBox.x+accountBox.width<=width);
+  assert(accountBox.y+accountBox.height<fabBox.y, 'Account must clear selected-flight actions');
+  assert.equal(await toggle.evaluate(el=>Boolean(el.closest('.occ-nav-bar'))),true);
+  await fab.click();
+  assert.equal(await page.locator('#bulk-action-panel').evaluate(el=>el.classList.contains('active')),true);
+  await fab.click();
+  await page.waitForFunction(()=>getComputedStyle(document.getElementById('bulk-action-panel')).opacity==='0');
   await page.screenshot({path:`test-results/account-menu/${local?'local':'deployed'}-${width}-closed.png`});
   await toggle.click(); await panel.waitFor();
   assert.equal(await toggle.getAttribute('aria-expanded'),'true');
   const box=await panel.boundingBox(); assert(box.x>=0 && box.x+box.width<=width);
+  assert(box.y>=accountBox.y+accountBox.height, 'Menu opens below header trigger');
   await page.screenshot({path:`test-results/account-menu/${local?'local':'deployed'}-${width}-open.png`});
   await page.keyboard.press('Escape'); await panel.waitFor({state:'hidden'});
   await toggle.focus(); await page.keyboard.press('Enter'); await panel.waitFor();
@@ -39,6 +56,9 @@ try {
   await page.keyboard.press('Enter'); await page.locator('#awq-change-password-dialog').waitFor();
   assert.equal(await panel.isVisible(),false);
   await page.locator('#awq-cancel-password').click();
+  await toggle.click(); await panel.waitFor();
+  await page.setViewportSize({width,height:780}); await panel.waitFor({state:'hidden'});
+  await page.setViewportSize({width,height:800});
   await toggle.click(); await panel.waitFor(); await page.mouse.click(8,8); await panel.waitFor({state:'hidden'});
   await toggle.click(); await page.locator('#awq-logout').click();
   await page.locator('#awq-account-error').waitFor();

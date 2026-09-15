@@ -8,7 +8,7 @@ Use the existing system-ui font, slate surface #0f172a, border #334155, text #e2
 
 ## Component and placement
 
-The account trigger is a 44 px square with a 20 px outlined user SVG, fixed 16 px from the bottom/right. The account panel is 208 px wide, capped to the viewport minus 32 px, and opens 8 px above the trigger. It retains the original slate surface, border and subtle shadow. Role appears above two full-width, minimum 44 px actions.
+The account trigger is a 44 px square with a 20 px outlined user SVG, placed in the header actions after the theme button. The bottom-right corner belongs to Flight bulk actions. At mobile widths up to 480 px, header actions occupy their own full-width row. The account panel is 208 px wide, capped to the viewport minus 32 px, and opens 8 px below the trigger, aligned to its right edge and clamped 16 px inside the viewport. Scrolling or resizing dismisses the panel so it cannot detach from the trigger. It retains the existing slate surface, border and subtle shadow. Role appears above two full-width, minimum 44 px actions.
 
 ## Interaction and accessibility
 

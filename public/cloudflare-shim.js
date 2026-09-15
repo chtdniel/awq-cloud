@@ -50,16 +50,21 @@ window.google.script = window.google.script || {};
   }
 
   function installUserBar() {
-    if (!document.body || !authState.user || document.getElementById('awq-user-bar')) return;
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', installUserBar, { once: true });
+      return;
+    }
+    if (!authState.user || document.getElementById('awq-user-bar')) return;
     var bar = document.createElement('div');
     bar.id = 'awq-user-bar';
-    bar.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99999;font:600 12px system-ui,sans-serif';
+    bar.style.cssText = 'position:relative;flex-shrink:0;font:600 12px system-ui,sans-serif';
     bar.innerHTML = '<style>' +
+      '@media(max-width:480px){.occ-nav-bar .nav-actions{width:100%;justify-content:flex-end;gap:8px}.occ-nav-bar .utc-heartbeat{margin-right:auto}}' +
       '#awq-user-bar button{font:inherit;cursor:pointer;color:#e2e8f0}' +
       '#awq-user-bar button:focus-visible{outline:2px solid #cbd5e1;outline-offset:2px}' +
       '#awq-account-toggle{display:grid;place-items:center;width:44px;height:44px;padding:0;border:1px solid #334155;border-radius:10px;background:#0f172a;box-shadow:0 4px 12px #0002}' +
       '#awq-account-toggle:hover,#awq-account-toggle[aria-expanded="true"]{background:#334155}' +
-      '#awq-account-panel{position:fixed;inset:auto 16px 68px auto;margin:0;width:208px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:8px;border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px #0003}' +
+      '#awq-account-panel{position:fixed;inset:auto;margin:0;width:208px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:8px;border:1px solid #334155;border-radius:10px;background:#0f172a;color:#e2e8f0;box-shadow:0 8px 24px #0003}' +
       '#awq-account-role{display:block;padding:8px 12px;color:#cbd5e1}' +
       '#awq-account-panel button{display:block;width:100%;min-height:44px;padding:8px 12px;border:0;border-radius:6px;background:transparent;text-align:left}' +
       '#awq-account-panel button:hover{background:#334155}' +
@@ -68,10 +73,22 @@ window.google.script = window.google.script || {};
       '</style><button id="awq-account-toggle" type="button" aria-label="Account" title="Account" aria-expanded="false" aria-controls="awq-account-panel" popovertarget="awq-account-panel">' +
       '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button>' +
       '<div id="awq-account-panel" popover="auto" aria-label="Account actions"><span id="awq-account-role"></span><button id="awq-change-password" type="button">Change password</button><button id="awq-logout" type="button">Logout</button><p id="awq-account-error" role="alert" hidden></p></div>';
-    document.body.appendChild(bar);
+    document.querySelector('.occ-nav-bar .nav-actions').appendChild(bar);
     var panel = document.getElementById('awq-account-panel');
     var toggle = document.getElementById('awq-account-toggle');
     document.getElementById('awq-account-role').textContent = String(authState.user.role).toUpperCase();
+    var dismissListeners = null;
+    panel.addEventListener('beforetoggle', function (event) {
+      if (dismissListeners) dismissListeners.abort();
+      if (event.newState !== 'open') return;
+      var rect = toggle.getBoundingClientRect();
+      panel.style.top = (rect.bottom + 8) + 'px';
+      panel.style.right = Math.max(16, window.innerWidth - rect.right) + 'px';
+      dismissListeners = new AbortController();
+      function dismiss() { panel.hidePopover(); }
+      window.addEventListener('resize', dismiss, { signal: dismissListeners.signal });
+      document.addEventListener('scroll', dismiss, { capture: true, signal: dismissListeners.signal });
+    });
     panel.addEventListener('toggle', function (event) {
       toggle.setAttribute('aria-expanded', String(event.newState === 'open'));
     });
@@ -82,6 +99,7 @@ window.google.script = window.google.script || {};
       error.hidden = true;
       try {
         await callRpc('authLogout', [], false);
+        panel.hidePopover();
         bar.remove();
         authState.user = null;
         showLogin();
