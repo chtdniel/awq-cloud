@@ -1,3 +1,4 @@
+import { fetchLatestTafs } from '../../shared/taf.mjs';
 // ============================================================================
 // AWQ BACKGROUND CRON WORKER
 // Triggered every 30 minutes to fetch live TAFs and update Cloudflare D1
@@ -30,19 +31,7 @@ async function refreshTafs(env) {
 
         if (stations.length === 0) return { status: 'NO_STATIONS' };
 
-        const url = `https://aviationweather.gov/api/data/taf?ids=${stations.join(',')}&format=raw`;
-        const res = await fetch(url);
-        if (!res.ok) return { status: 'API_ERROR', httpStatus: res.status };
-
-        const text = await res.text();
-        const tafMap = {};
-        const blocks = text.split(/(?=\bTAF\s)/);
-        blocks.forEach(block => {
-            const bTrim = block.trim();
-            if (!bTrim) return;
-            const m = bTrim.match(/^TAF\s+(?:AMD\s+|COR\s+)?([A-Z]{4})/i);
-            if (m) tafMap[m[1].toUpperCase()] = bTrim;
-        });
+        const tafMap = await fetchLatestTafs(stations);
 
         const now = new Date().toISOString();
         const stmts = [];

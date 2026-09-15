@@ -1,26 +1,41 @@
+import { fetchLatestTafs } from '../../shared/taf.mjs';
 import { parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
+import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
+
+const REGISTERED_WRITE_METHODS = new Set([
+  'saveFlightEdit', 'saveFlightRoute', 'deleteRoute', 'setActiveFlightRoute',
+  'firSaveNotam', 'firUpdateNotam', 'firDeleteNotam', 'firBulkImportNotams',
+  'saveNotamData', 'saveTafData', 'generateBriefingPackage', 'saveBriefingForm',
+  'saveAirportNotes', 'saveFlightData', 'addNewFlightToDb', 'bulkUpdateFlightDof',
+  'bulkClearTafColumns', 'bulkClearCgoColumns', 'saveFlightEnr',
+  'persistAnalysisResults'
+]);
+
+const ADMIN_ONLY_METHODS = new Set([
+  'setSettingsAdminEmails', 'setOccAllowedEmails',
+  'getSettingsAdminList', 'getOccSettings', 'getOccSystemSettings', 'getSettingsBundle',
+  'adminListUsers', 'adminCreateUser', 'adminUpdateUserRole', 'adminSetUserActive', 'adminResetPassword',
+  'wxAiSetCatalog'
+]);
+
+const AUTH_METHODS = new Set(['authLogin', 'authLogout', 'authMe', 'authBootstrap']);
+const AUTHENTICATED_READ_METHODS = new Set([
+  'getFlightDashboardData', 'getAllRoutes', 'syncNotamAnalysisState', 'analyzeNotams', 'analyzeFlightNotams', 'analyzeFlightList',
+  'firGetNotamEditorData', 'firGetNotamResults', 'firBulkPreviewNotams', 'getTafData', 'fetchLatestTafFromApi',
+  'getActiveFlightDataForWarning', 'analyzeWxWithManual', 'getFirData', 'getFirGeometry', 'getActiveNotams', 'getSelectedFlightsData',
+  'getActiveFlightList', 'getFlightSummary', 'latlongGetEditorData', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
+  'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
+  'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'syncCgoData', 'getSettingsAccessInfo'
+]);
 
 function rpcGuard(context) {
-  // Saat Cloudflare Access on, JWT header selalu ada.
-  if (context.request.headers.get('Cf-Access-Jwt-Assertion')) return null;
-
-  // Fallback: browser same-origin check — bot/curl tanpa Origin diblok.
-  // ponytail: bukan proof-of-work; setelah Access aktif diha, jalur ini bisa dilepas
   const origin = context.request.headers.get('Origin');
-  const host = context.request.headers.get('Host') || '';
-  if (!origin || !host) return 'Missing Origin/Host';
+  const requestOrigin = new URL(context.request.url).origin;
+  if (!origin) return 'Missing Origin';
   try {
-    if (new URL(origin).host !== host) return 'Cross-origin request';
+    if (new URL(origin).origin !== requestOrigin) return 'Cross-origin request';
   } catch { return 'Bad Origin header'; }
-
-  // E-mail pengguna dari Access (kalau Access on, front end kirim via header alt)
-  const accessEmail = context.request.headers.get('CF-Access-Authenticated-User-Email');
-  if (accessEmail && !accessEmail.endsWith('@' + (context.env.RPC_ALLOWED_EMAIL_DOMAIN || ''))) {
-    // ponytail: domain whitelist opsional; tanpa env, semua email Access lolos
-    if (context.env.RPC_ALLOWED_EMAIL_DOMAIN) return 'Email not allowed';
-  }
-
   return null;
 }
 
@@ -32,11 +47,56 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const requestData = await context.request.json();
-    const { method, args } = requestData;
+    const { method, args = [] } = requestData;
+    const access = await getAccess(context);
+    if (!AUTH_METHODS.has(method) && !access.user) {
+      return Response.json({ error: 'Authentication required.', code: 'AUTH_REQUIRED' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+    }
+    const stateChangingMethod = REGISTERED_WRITE_METHODS.has(method) || ADMIN_ONLY_METHODS.has(method) || method === 'authChangePassword' || method.startsWith('admin');
+    if (stateChangingMethod && requireCsrf(context)) {
+      return Response.json({ error: 'Invalid CSRF token.', code: 'CSRF_INVALID' }, { status: 403 });
+    }
+    if (ADMIN_ONLY_METHODS.has(method) && access.tier !== 'admin') {
+      return Response.json({
+        error: 'Forbidden: administrator access is required for this operation.',
+        code: 'ADMIN_REQUIRED',
+        tier: access.tier
+      }, { status: 403 });
+    }
+    if (REGISTERED_WRITE_METHODS.has(method) && !['admin', 'registered'].includes(access.tier)) {
+      return Response.json({
+        error: 'Forbidden: registered user access is required for this operation.',
+        code: 'REGISTERED_REQUIRED',
+        tier: access.tier
+      }, { status: 403 });
+    }
 
+    if (AUTHENTICATED_READ_METHODS.has(method) && !access.user) {
+      return Response.json({ error: 'Authentication required.', code: 'AUTH_REQUIRED' }, { status: 401 });
+    }
     console.log(`[RPC] Memanggil method: ${method}`);
     // TODO: Implementasi logika untuk masing-masing fungsi backend (.gs) di sini
     switch (method) {
+      case 'authLogin':
+        return await handleAuthLogin(context, args);
+      case 'authLogout':
+        return await handleAuthLogout(context, access.requestUser);
+      case 'authMe':
+        return Response.json({ data: access }, { headers: { 'Cache-Control': 'no-store' } });
+      case 'authChangePassword':
+        return await handleAuthChangePassword(context, access.requestUser, args);
+      case 'authBootstrap':
+        return await handleAuthBootstrap(context, args);
+      case 'adminListUsers':
+        return await handleAdminListUsers(context, access.requestUser);
+      case 'adminCreateUser':
+        return await handleAdminCreateUser(context, access.requestUser, args);
+      case 'adminUpdateUserRole':
+        return await handleAdminUpdateUserRole(context, access.requestUser, args);
+      case 'adminSetUserActive':
+        return await handleAdminSetUserActive(context, access.requestUser, args);
+      case 'adminResetPassword':
+        return await handleAdminResetPassword(context, access.requestUser, args);
       case 'getFlightDashboardData':
         return await handleGetFlightDashboardData(context);
         
@@ -132,7 +192,10 @@ export async function onRequestPost(context) {
         return Response.json({ data: { sections: [], source: 'default' } });
 
       case 'wxAiGetCatalog':
-        return Response.json({ data: { ok: true, enabled: true, catalog: [{ provider: 'gemini', model: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', enabled: true }] } });
+        return await handleWxAiGetCatalog(context);
+
+      case 'wxAiSetCatalog':
+        return await handleWxAiSetCatalog(context, access.requestUser, args);
 
       case 'generateBriefingPackage':
         return await handleGenerateBriefingPackage(context, args);
@@ -166,7 +229,7 @@ export async function onRequestPost(context) {
         return await handleGetNotamData(context);
 
       case 'getSettingsAccessInfo':
-        return Response.json({ data: getOpenSettingsAccess(context) });
+         return Response.json({ data: access });
 
       case 'getSettingsAdminList':
         return await handleGetSettingsAdminList(context);
@@ -216,7 +279,7 @@ export async function onRequestPost(context) {
     }
   } catch (error) {
     console.error('[RPC] Error:', error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: error.message }, { status: Number(error.status) >= 400 ? Number(error.status) : 500 });
   }
 }
 
@@ -724,6 +787,11 @@ async function handleSaveNotamData(context, args) {
         let textIdx = 6; 
         if (textIdx >= headerRow.length) textIdx = headerRow.length - 1;
         
+        const { results: protectedRows } = await context.env.DB.prepare(
+            "SELECT id FROM notams WHERE kind IS NOT NULL AND kind != 'AD'"
+        ).all();
+        const protectedNotamIds = new Set((protectedRows || []).map(row => String(row.id || '').trim().toUpperCase()));
+
         // Aerodrome import ganti kind='AD' saja; FIR milik halaman FIR.
         // D1 batch = atomic (single transaction) — DELETE gagal di tengah tidak menyisakan tabel kosong.
         const deleteAllStmt = context.env.DB.prepare("DELETE FROM notams WHERE kind = 'AD'");
@@ -731,10 +799,11 @@ async function handleSaveNotamData(context, args) {
         // Prepare batch inserts
         const stmts = [deleteAllStmt];
         let rowsInserted = 0;
+        let rowsSkippedProtected = 0;
         
         for (const row of dataRows) {
-            const location = locIdx >= 0 ? String(row[locIdx]) : String(row[0]);
-            const notamNum = numIdx >= 0 ? String(row[numIdx]) : String(row[1]);
+            const location = (locIdx >= 0 ? String(row[locIdx]) : String(row[0])).trim().toUpperCase();
+            const notamNum = (numIdx >= 0 ? String(row[numIdx]) : String(row[1])).trim().toUpperCase();
             
             // Try to find the full text
             let fullText = String(row[textIdx] || '');
@@ -747,6 +816,10 @@ async function handleSaveNotamData(context, args) {
             }
             
             if (!location || !notamNum || !fullText) continue;
+            if (protectedNotamIds.has(notamNum)) {
+                rowsSkippedProtected++;
+                continue;
+            }
             
             // Parse details using our utility to get valid_from/to
             const parsed = parseNotamRow({ id: notamNum, message: fullText });
@@ -755,7 +828,7 @@ async function handleSaveNotamData(context, args) {
             const qCode = ''; // Could extract Q code if needed
             
             const stmt = context.env.DB.prepare(
-                'INSERT INTO notams (id, location, q_code, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?, ?)'
+                "INSERT INTO notams (id, location, q_code, message, valid_from, valid_to, kind) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET location = excluded.location, q_code = excluded.q_code, message = excluded.message, valid_from = excluded.valid_from, valid_to = excluded.valid_to, kind = excluded.kind WHERE notams.kind = 'AD'"
             ).bind(notamNum, location, qCode, fullText, validFrom, validTo, 'AD');
             
             stmts.push(stmt);
@@ -772,7 +845,8 @@ async function handleSaveNotamData(context, args) {
             data: { 
                 status: 'success', 
                 message: 'Saved Successfully', 
-                rowsInserted: rowsInserted 
+                rowsInserted: rowsInserted,
+                rowsSkippedProtected: rowsSkippedProtected
             }
         });
         
@@ -868,50 +942,8 @@ async function handleFetchLatestTafFromApi(context, args) {
         const [icaoList] = args;
         if (!icaoList || icaoList.length === 0) return Response.json({ data: { error: 'No stations provided.' }});
         
-        const stations = icaoList.map(s => s.trim().toUpperCase()).filter(s => s.length >= 3);
-        const MAX_RETRIES = 2;
-        
-        for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
-            try {
-                const url = `https://aviationweather.gov/api/data/taf?ids=${stations.join(",")}&format=raw`;
-                const res = await fetch(url);
-                
-                if (res.ok) {
-                    const text = await res.text();
-                    if (!text || text.trim().length < 10) {
-                        if (attempt <= MAX_RETRIES) {
-                            await new Promise(r => setTimeout(r, 2000 * attempt));
-                            continue;
-                        }
-                        return Response.json({ data: { error: 'Empty response from API.' }});
-                    }
-                    
-                    const tafMap = {};
-                    const blocks = text.split(/(?=\bTAF\s)/);
-                    blocks.forEach(block => {
-                        const bTrim = block.trim();
-                        if (!bTrim) return;
-                        const m = bTrim.match(/^TAF\s+(?:AMD\s+|COR\s+)?([A-Z]{4})/i);
-                        if (m) tafMap[m[1].toUpperCase()] = bTrim;
-                    });
-                    
-                    return Response.json({ data: tafMap });
-                }
-                
-                if (attempt <= MAX_RETRIES) {
-                    await new Promise(r => setTimeout(r, 2000 * attempt));
-                    continue;
-                }
-                return Response.json({ data: { error: 'API returned HTTP ' + res.status + '.' }});
-            } catch (fetchErr) {
-                if (attempt <= MAX_RETRIES) {
-                    await new Promise(r => setTimeout(r, 2000 * attempt));
-                    continue;
-                }
-                return Response.json({ data: { error: 'Network error: ' + fetchErr.message }});
-            }
-        }
-        return Response.json({ data: { error: 'Unexpected failure.' }});
+        const tafMap = await fetchLatestTafs(icaoList);
+        return Response.json({ data: tafMap });
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
     }
@@ -2080,9 +2112,9 @@ async function handleFirGetNotamResults(context) {
 }
 
 /* ---------- FIR NOTAM editor: write path (port dari archive/FIR_Notam_Backend.gs) ---------- */
-// Auth: sama dengan semua method lain — rpcGuard di onRequestPost (JWT Cloudflare Access /
-// origin check) sudah mengeksekusi sebelum dispatcher. Tidak ada gate tambahan per-method
-// di handleFirBulkImportNotams; jalur tulis ini ikut gate yang sama. Tidak ada downgrade.
+// Auth: sama dengan semua method lain — rpcGuard di onRequestPost (origin + session/role
+// guard) sudah mengeksekusi sebelum dispatcher. Tidak ada gate tambahan per-method di
+// handleFirBulkImportNotams; jalur tulis ini ikut gate yang sama.
 
 // Port firNotamDateToText / duParseNotamDate untuk string 'YYYY-MM-DD HH:MM' (UTC).
 // Return Date UTC valid atau null; round-trip cek menolak tanggal imajiner (31 Feb).
@@ -2466,6 +2498,13 @@ const icaoRe = /^[A-Z]{4}$/;
 const dofRe = /^\d{8}$/;
 const timeRe = /^\d{2,4}$/; // HHMM atau HH:MM
 
+function normalizeBulkFlightDof(value) {
+    const raw = String(value || '').trim();
+    if (dofRe.test(raw)) return raw;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.replace(/-/g, '');
+    return '';
+}
+
 function validateFlightForm(fd) {
     if (!fd || typeof fd !== 'object') return 'formData invalid';
     const cs = String(fd.FLT_NO || '').trim().toUpperCase();
@@ -2503,10 +2542,11 @@ async function handleBulkUpdateFlightDof(context, args) {
     try {
         const [rowIds, newDof] = args;
         const ids = Array.isArray(rowIds) ? rowIds.map(Number).filter(n => !isNaN(n)) : [];
-        if (!dofRe.test(String(newDof || '').trim())) return Response.json({ error: 'DOF invalid (YYYYMMDD)' }, { status: 400 });
+        const normalizedDof = normalizeBulkFlightDof(newDof);
+        if (!normalizedDof) return Response.json({ error: 'DOF invalid (YYYY-MM-DD or YYYYMMDD)' }, { status: 400 });
         if (ids.length === 0) return await handleGetFlightDashboardData(context);
         const query = `UPDATE flights SET dof = ? WHERE id IN (${ids.map(() => '?').join(',')})`;
-        await context.env.DB.prepare(query).bind(String(newDof).trim(), ...ids).run();
+        await context.env.DB.prepare(query).bind(normalizedDof, ...ids).run();
         return await handleGetFlightDashboardData(context);
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
@@ -2579,14 +2619,160 @@ async function handleSyncCgoData(context, args) {
     }
 }
 
-// Settings: open mode — nav tampil untuk semua. Auth tetap di rpcGuard.
-// ponytail: allowlist email di Cloudflare Access; tambah cek bila perlu.
-function getAccessEmail(context) {
-    return context.request.headers.get('CF-Access-Authenticated-User-Email') || '';
+function authResponse(data, headers) {
+  return new Response(JSON.stringify({ data }), { status: 200, headers: headers || { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 
-function getOpenSettingsAccess(context) {
-    return { ok: true, user: getAccessEmail(context), canView: true, canEdit: true };
+async function handleAuthLogin(context, args) {
+  const [rawEmail, password] = Array.isArray(args) ? args : [];
+  let email;
+  try { email = normalizeEmail(rawEmail); } catch { return Response.json({ error: 'Invalid email or password.' }, { status: 401 }); }
+  const user = await context.env.DB.prepare('SELECT * FROM auth_users WHERE email_normalized = ? LIMIT 1').bind(email).first();
+  const locked = user && user.locked_until && new Date(user.locked_until).getTime() > Date.now();
+  const valid = !locked && user && Number(user.is_active) === 1 && await verifyPassword(password, user);
+  if (!valid) {
+    if (user && Number(user.is_active) === 1) {
+      const failedCount = Number(user.failed_login_count || 0) + 1;
+      const lockedUntil = failedCount >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
+      await context.env.DB.prepare('UPDATE auth_users SET failed_login_count = ?, locked_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(failedCount, lockedUntil, user.id).run();
+    }
+    await audit(context, null, 'login_failed', user?.id, 'failure');
+    return Response.json({ error: 'Invalid email or password.' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+  }
+  await context.env.DB.prepare('UPDATE auth_users SET failed_login_count = 0, locked_until = NULL, last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(user.id).run();
+  const session = await createSession(context, user.id);
+  await audit(context, user.id, 'login_success', user.id, 'success');
+  return authResponse({ user: { id: user.id, email: user.email_display, role: user.role, mustChangePassword: Number(user.must_change_password) === 1 }, expiresAt: session.expiresAt }, session.headers);
+}
+
+async function handleAuthLogout(context, user) {
+  await revokeCurrentSession(context, user);
+  await audit(context, user?.id, 'logout', user?.id, 'success');
+  const headers = new Headers({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  clearAuthCookies(headers);
+  return authResponse({ ok: true }, headers);
+}
+
+async function handleAuthChangePassword(context, user, args) {
+  if (!user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
+  const [oldPassword, newPassword] = Array.isArray(args) ? args : [];
+  const row = await context.env.DB.prepare('SELECT * FROM auth_users WHERE id = ? LIMIT 1').bind(user.id).first();
+  if (!await verifyPassword(oldPassword, row)) return Response.json({ error: 'Current password is incorrect.' }, { status: 400 });
+  const encoded = await hashPassword(newPassword);
+  await context.env.DB.prepare('UPDATE auth_users SET password_hash = ?, password_salt = ?, password_iterations = ?, password_algorithm = ?, must_change_password = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(encoded.hash, encoded.salt, encoded.iterations, encoded.algorithm, user.id).run();
+  await revokeUserSessions(context, user.id);
+  await audit(context, user.id, 'password_changed', user.id, 'success');
+  return authResponse({ ok: true });
+}
+
+function adminOnly(user) {
+  return user && user.role === 'admin';
+}
+
+function roleValue(value) {
+  const role = String(value || '').trim().toLowerCase();
+  if (!['admin', 'registered', 'readonly'].includes(role)) throw new Error('Invalid role');
+  return role;
+}
+
+async function handleAuthBootstrap(context, args) {
+  const [secret, email, temporaryPassword] = Array.isArray(args) ? args : [];
+  if (!context.env.AUTH_BOOTSTRAP_SECRET || secret !== context.env.AUTH_BOOTSTRAP_SECRET) return Response.json({ error: 'Bootstrap unavailable.' }, { status: 404 });
+  const existing = await context.env.DB.prepare("SELECT COUNT(*) AS count FROM auth_users WHERE role = 'admin' AND is_active = 1").first();
+  if (Number(existing?.count || 0) > 0) return Response.json({ error: 'Bootstrap unavailable.' }, { status: 404 });
+  const normalized = normalizeEmail(email);
+  const encoded = await hashPassword(temporaryPassword);
+  const result = await context.env.DB.prepare('INSERT INTO auth_users (email_normalized, email_display, password_hash, password_salt, password_iterations, password_algorithm, role, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
+    .bind(normalized, String(email).trim(), encoded.hash, encoded.salt, encoded.iterations, encoded.algorithm, 'admin').run();
+  await audit(context, null, 'bootstrap_admin_created', result.meta?.last_row_id, 'success');
+  return authResponse({ ok: true });
+}
+
+async function handleAdminListUsers(context, user) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const { results } = await context.env.DB.prepare('SELECT id, email_display AS email, role, is_active AS isActive, must_change_password AS mustChangePassword, failed_login_count AS failedLoginCount, locked_until AS lockedUntil, created_at AS createdAt, updated_at AS updatedAt, last_login_at AS lastLoginAt FROM auth_users ORDER BY email_normalized').all();
+  return authResponse({ users: results });
+}
+
+async function handleAdminCreateUser(context, user, args) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const [email, role, temporaryPassword] = Array.isArray(args) ? args : [];
+  const normalized = normalizeEmail(email);
+  const encoded = await hashPassword(temporaryPassword);
+  try {
+    const result = await context.env.DB.prepare('INSERT INTO auth_users (email_normalized, email_display, password_hash, password_salt, password_iterations, password_algorithm, role, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, 1)')
+      .bind(normalized, String(email).trim(), encoded.hash, encoded.salt, encoded.iterations, encoded.algorithm, roleValue(role)).run();
+    await audit(context, user.id, 'user_created', result.meta?.last_row_id, 'success');
+    return authResponse({ ok: true });
+  } catch (error) {
+    if (String(error.message).toLowerCase().includes('unique')) return Response.json({ error: 'User already exists.' }, { status: 409 });
+    throw error;
+  }
+}
+
+async function findUserByEmail(context, email) {
+  return context.env.DB.prepare('SELECT * FROM auth_users WHERE email_normalized = ? LIMIT 1').bind(normalizeEmail(email)).first();
+}
+
+async function activeAdminCount(context) {
+  const row = await context.env.DB.prepare("SELECT COUNT(*) AS count FROM auth_users WHERE role = 'admin' AND is_active = 1").first();
+  return Number(row?.count || 0);
+}
+
+async function handleAdminUpdateUserRole(context, user, args) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const [email, requestedRole] = Array.isArray(args) ? args : [];
+  const target = await findUserByEmail(context, email);
+  const role = roleValue(requestedRole);
+  if (!target) return Response.json({ error: 'User not found.' }, { status: 404 });
+  if (target.role === 'admin' && role !== 'admin' && Number(target.is_active) === 1 && await activeAdminCount(context) <= 1) return Response.json({ error: 'At least one active admin is required.' }, { status: 409 });
+  await context.env.DB.prepare('UPDATE auth_users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(role, target.id).run();
+  await audit(context, user.id, 'user_role_updated', target.id, 'success');
+  return authResponse({ ok: true });
+}
+
+async function handleAdminSetUserActive(context, user, args) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const [email, active] = Array.isArray(args) ? args : [];
+  const target = await findUserByEmail(context, email);
+  const isActive = Boolean(active);
+  if (!target) return Response.json({ error: 'User not found.' }, { status: 404 });
+  if (target.role === 'admin' && !isActive && Number(target.is_active) === 1 && await activeAdminCount(context) <= 1) return Response.json({ error: 'At least one active admin is required.' }, { status: 409 });
+  await context.env.DB.prepare('UPDATE auth_users SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(isActive ? 1 : 0, target.id).run();
+  if (!isActive) await revokeUserSessions(context, target.id);
+  await audit(context, user.id, 'user_active_updated', target.id, 'success');
+  return authResponse({ ok: true });
+}
+
+async function handleAdminResetPassword(context, user, args) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const [email, temporaryPassword] = Array.isArray(args) ? args : [];
+  const target = await findUserByEmail(context, email);
+  if (!target) return Response.json({ error: 'User not found.' }, { status: 404 });
+  const encoded = await hashPassword(temporaryPassword);
+  await context.env.DB.prepare('UPDATE auth_users SET password_hash = ?, password_salt = ?, password_iterations = ?, password_algorithm = ?, must_change_password = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .bind(encoded.hash, encoded.salt, encoded.iterations, encoded.algorithm, target.id).run();
+  await revokeUserSessions(context, target.id);
+  await audit(context, user.id, 'password_reset', target.id, 'success');
+  return authResponse({ ok: true });
+}
+
+async function getAccess(context) {
+  const user = await getRequestUser(context);
+  const tier = user?.role || 'anonymous';
+  return {
+    ok: Boolean(user),
+    user: user?.email || '',
+    requestUser: user,
+    tier,
+    isAuthorized: Boolean(user),
+    canView: Boolean(user),
+    canEdit: tier === 'admin' || tier === 'registered',
+    canManageUsers: tier === 'admin',
+    mustChangePassword: Boolean(user?.mustChangePassword),
+    userId: user?.id || null
+  };
 }
 
 function normalizeEmailList(csv) {
@@ -2599,6 +2785,21 @@ function normalizeEmailList(csv) {
     });
     out.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
     return out;
+}
+
+function parseValidatedEmailList(csv) {
+  const entries = String(csv || '').split(/[,;\n]+/).map(value => String(value || '').trim()).filter(Boolean);
+  const invalid = [];
+  const valid = [];
+  for (const entry of entries) {
+    try { valid.push(normalizeEmail(entry)); } catch { invalid.push(entry); }
+  }
+  if (invalid.length) {
+    const error = new Error(`Invalid email entries: ${invalid.slice(0, 10).join(', ')}`);
+    error.status = 400;
+    throw error;
+  }
+  return normalizeEmailList(valid.join(','));
 }
 
 async function metaGet(context, key) {
@@ -2619,30 +2820,91 @@ async function metaSet(context, key, value) {
 }
 
 async function handleGetSettingsAdminList(context) {
-    const raw = await metaGet(context, 'SETTINGS_ADMIN_EMAILS');
-    return Response.json({ data: { ok: true, raw, admins: normalizeEmailList(raw), currentUser: getAccessEmail(context) } });
+  const access = await getAccess(context);
+  if (access.tier !== 'admin') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  const raw = await metaGet(context, 'SETTINGS_ADMIN_EMAILS');
+  return Response.json({ data: { ok: true, raw, admins: normalizeEmailList(raw), currentUser: (await getAccess(context)).user } });
 }
 
 async function handleSetSettingsAdminEmails(context, args) {
-    const [csv] = args;
-    const deduped = normalizeEmailList(csv);
-    await metaSet(context, 'SETTINGS_ADMIN_EMAILS', deduped.join(', '));
-    return Response.json({ data: getOpenSettingsAccess(context) });
+  const access = await getAccess(context);
+  if (access.tier !== 'admin') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  const [csv] = args;
+  const before = await metaGet(context, 'SETTINGS_ADMIN_EMAILS');
+  const deduped = parseValidatedEmailList(csv);
+  await metaSet(context, 'SETTINGS_ADMIN_EMAILS', deduped.join(', '));
+  await audit(context, access.userId, 'settings_admin_list_updated', null, 'success', `count:${deduped.length}; changed:${before !== deduped.join(', ')}`);
+  return Response.json({ data: await getAccess(context) });
 }
 
 async function handleGetOccSettings(context) {
-    const raw = await metaGet(context, 'OCC_ALLOWED_EMAILS');
-    const allowed = normalizeEmailList(raw);
-    return Response.json({
-        data: { ok: true, raw, allowed, currentUser: getAccessEmail(context), isAuthorized: true, isOpen: !raw.trim() }
-    });
+  const access = await getAccess(context);
+  if (access.tier !== 'admin') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  const raw = await metaGet(context, 'OCC_ALLOWED_EMAILS');
+  const allowed = normalizeEmailList(raw);
+  return Response.json({
+    data: { ok: true, raw, allowed, currentUser: access.user, isAuthorized: true, isOpen: false, tier: access.tier }
+  });
 }
 
 async function handleSetOccAllowedEmails(context, args) {
-    const [csv] = args;
-    const deduped = normalizeEmailList(csv);
+  const access = await getAccess(context);
+  if (access.tier !== 'admin') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  const [csv] = args;
+    const before = await metaGet(context, 'OCC_ALLOWED_EMAILS');
+    const deduped = parseValidatedEmailList(csv);
     await metaSet(context, 'OCC_ALLOWED_EMAILS', deduped.join(', '));
+    await audit(context, access.userId, 'occ_allowlist_updated', null, 'success', `count:${deduped.length}; changed:${before !== deduped.join(', ')}`);
     return handleGetOccSettings(context);
+}
+
+const WX_AI_DEFAULT_CATALOG = [
+  { id: 'gemini-flash-lite', provider: 'gemini', model: 'gemini-3.5-flash-lite', label: 'Gemini · 3.5-flash-lite', enabled: true }
+];
+
+function validateWxCatalog(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.catalog) || value.catalog.length > 50) throw new Error('Invalid WX AI catalog');
+  const seen = new Set();
+  const catalog = value.catalog.map((item) => {
+    if (!item || typeof item !== 'object') throw new Error('Invalid WX AI catalog row');
+    const id = String(item.id || '').trim().toLowerCase();
+    const provider = String(item.provider || '').trim().toLowerCase();
+    const model = String(item.model || '').trim();
+    const label = String(item.label || '').trim();
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id) || !['gemini', 'openrouter', 'custom'].includes(provider) || !model || model.length > 160 || !label || label.length > 160 || seen.has(id)) throw new Error(`Invalid WX AI catalog row: ${id || 'missing id'}`);
+    seen.add(id);
+    return { id, provider, model, label, enabled: item.enabled !== false };
+  });
+  return { enabled: value.enabled !== false, catalog };
+}
+
+async function handleWxAiGetCatalog(context) {
+  const raw = await metaGet(context, 'WX_AI_CATALOG');
+  const enabledRaw = await metaGet(context, 'WX_AI_ENABLED');
+  if (!raw) return Response.json({ data: { ok: true, enabled: enabledRaw !== 'false', catalog: WX_AI_DEFAULT_CATALOG, source: 'default' } });
+  try {
+    const parsed = validateWxCatalog(JSON.parse(raw));
+    return Response.json({ data: { ok: true, ...parsed, source: 'property' } });
+  } catch {
+    return Response.json({ data: { ok: true, enabled: false, catalog: [], source: 'fail-closed', warning: 'WX AI catalog is invalid; AI is disabled until an admin saves a valid catalog.' } });
+  }
+}
+
+async function handleWxAiSetCatalog(context, user, args) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const payload = validateWxCatalog(Array.isArray(args) ? args[0] : null);
+  await metaSet(context, 'WX_AI_CATALOG', JSON.stringify(payload));
+  await metaSet(context, 'WX_AI_ENABLED', payload.enabled ? 'true' : 'false');
+  await audit(context, user.id, 'wx_ai_catalog_updated', null, 'success', `enabled:${payload.enabled}; count:${payload.catalog.length}`);
+  return Response.json({ data: { ok: true, ...payload, source: 'property' } });
 }
 
 function getOpenSystemSettings() {
@@ -2650,8 +2912,12 @@ function getOpenSystemSettings() {
 }
 
 async function handleGetSettingsBundle(context) {
-    const access = getOpenSettingsAccess(context);
-    const settings = (await handleGetOccSettings(context).then(r => r.json())).data;
+  const access = await getAccess(context);
+  if (access.tier !== 'admin') {
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  const settings = (await handleGetOccSettings(context).then(r => r.json())).data;
     const adminsRes = await handleGetSettingsAdminList(context).then(r => r.json());
-    return Response.json({ data: { ok: true, access, settings, admins: adminsRes.data, system: getOpenSystemSettings(), wx: { ok: true } } });
+    const wx = (await handleWxAiGetCatalog(context).then(r => r.json())).data;
+    return Response.json({ data: { ok: true, access, settings, admins: adminsRes.data, system: getOpenSystemSettings(), wx } });
 }

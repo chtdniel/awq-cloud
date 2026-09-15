@@ -1,3 +1,4 @@
+import { fetchLatestTafs } from '../../shared/taf.mjs';
 // ============================================================================
 // CLOUDFLARE PAGES CRON / REFRESH WORKER ENDPOINT
 // Fetches live TAF data for all active flight stations and updates D1
@@ -22,24 +23,9 @@ export async function onRequest(context) {
             return Response.json({ status: 'NO_STATIONS', count: 0 });
         }
 
-        // 2. Fetch live TAFs from NOAA API
-        const url = `https://aviationweather.gov/api/data/taf?ids=${stations.join(',')}&format=raw`;
-        const res = await fetch(url);
-        if (!res.ok) {
-            return Response.json({ status: 'API_ERROR', httpStatus: res.status }, { status: 502 });
-        }
+        // 2. Fetch ADDS TAFs with regional fallbacks
+        const tafMap = await fetchLatestTafs(stations);
 
-        const text = await res.text();
-        const tafMap = {};
-        const blocks = text.split(/(?=\bTAF\s)/);
-        blocks.forEach(block => {
-            const bTrim = block.trim();
-            if (!bTrim) return;
-            const m = bTrim.match(/^TAF\s+(?:AMD\s+|COR\s+)?([A-Z]{4})/i);
-            if (m) tafMap[m[1].toUpperCase()] = bTrim;
-        });
-
-        // 3. Batch upsert into D1 tafs table
         const now = new Date().toISOString();
         const stmts = [];
         for (const st of stations) {
