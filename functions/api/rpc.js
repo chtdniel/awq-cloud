@@ -1,6 +1,6 @@
 import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
 import { fetchLatestTafs } from '../../shared/taf.mjs';
-import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
+import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
 
@@ -599,15 +599,8 @@ async function handleAnalyzeNotams(context, args) {
                 } else return;
             }
             
-            const parseTime = (tStr) => {
-                if (!tStr) return null;
-                const clean = String(tStr).replace(/[^0-9]/g, '');
-                if (clean.length >= 4) return { h: parseInt(clean.substring(0, 2), 10), m: parseInt(clean.substring(2, 4), 10) };
-                return null;
-            };
-            
-            const std = parseTime(f.STD);
-            const sta = parseTime(f.STA);
+            const std = duParseFlightTime(f.STD);
+            const sta = duParseFlightTime(f.STA);
             if (!std || !sta) return;
             
             const stdDate = new Date(Date.UTC(yr, mo, dy, std.h, std.m));
@@ -1729,16 +1722,8 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
         }
     }
 
-    const parseTime = (tStr) => {
-        if (!tStr) return null;
-        const clean = String(tStr).replace(/[^0-9]/g, '');
-        if (clean.length >= 4) return { h: parseInt(clean.substring(0, 2), 10), m: parseInt(clean.substring(2, 4), 10) };
-        if (clean.length === 3) return { h: parseInt(clean.substring(0, 1), 10), m: parseInt(clean.substring(1, 3), 10) };
-        return null;
-    };
-
-    const std = parseTime(flight.etd);
-    const sta = parseTime(flight.eta);
+    const std = duParseFlightTime(flight.etd);
+    const sta = duParseFlightTime(flight.eta);
     const stdDate = std ? new Date(Date.UTC(yr, mo, dy, std.h, std.m)) : new Date();
     let staDate = sta ? new Date(Date.UTC(yr, mo, dy, sta.h, sta.m)) : new Date(stdDate.getTime() + 2 * 3600000);
     if (staDate < stdDate) staDate.setUTCDate(staDate.getUTCDate() + 1);

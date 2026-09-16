@@ -509,13 +509,20 @@
       }
 
       const selectedFlights = typeof window.getSelectedFlightObjects === 'function' ? window.getSelectedFlightObjects() : [];
+      const displayFlightTime = value => {
+        const raw = String(value ?? '').trim();
+        const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/);
+        if (isoMatch) return `${isoMatch[1]}${isoMatch[2]}`;
+        const compact = raw.replace(/[^0-9]/g, '');
+        return compact.length === 3 ? compact.padStart(4, '0') : (compact.length >= 4 ? compact.slice(0, 4) : raw);
+      };
       let multiLegDetailsHtml = '';
       selectedFlights.forEach(f => {
          multiLegDetailsHtml += `
            <div class="banner-leg-item">
              <div class="flt-num"><svg class="ic ic-sm"><use href="#i-plane"/></svg> ${esc(f.FLIGHT)}</div>
              <div class="route">${esc(f.DEP)} <svg class="ic ic-sm"><use href="#i-arrow-r"/></svg> ${esc(f.ARR)}</div>
-             <div style="font-size: 12px; opacity: 0.6; font-family: var(--font-mono);">${esc(f.STD)}Z - ${esc(f.STA)}Z</div>
+             <div style="font-size: 12px; opacity: 0.6; font-family: var(--font-mono);">${esc(displayFlightTime(f.STD))}Z - ${esc(displayFlightTime(f.STA))}Z</div>
            </div>
          `;
       });

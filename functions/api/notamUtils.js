@@ -44,6 +44,28 @@ export function duFormatDateTimeUTC(d) {
     const mm = String(d.getUTCMinutes()).padStart(2, '0');
     return y + '-' + m + '-' + d2 + ' ' + hh + ':' + mm;
 }
+
+export function duParseFlightTime(value) {
+    if (value instanceof Date) {
+        return isNaN(value.getTime()) ? null : { h: value.getUTCHours(), m: value.getUTCMinutes() };
+    }
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+
+    const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/);
+    if (isoMatch) {
+        const h = Number(isoMatch[1]);
+        const m = Number(isoMatch[2]);
+        return h <= 23 && m <= 59 ? { h, m } : null;
+    }
+    if (/\d{4}-\d{2}-\d{2}/.test(raw)) return null;
+
+    const compact = raw.replace(/[^0-9]/g, '');
+    if (compact.length < 3) return null;
+    const h = compact.length === 3 ? Number(compact.slice(0, 1)) : Number(compact.slice(0, 2));
+    const m = compact.length === 3 ? Number(compact.slice(1, 3)) : Number(compact.slice(2, 4));
+    return h <= 23 && m <= 59 ? { h, m } : null;
+}
   
 export function isAerodromeOnlyNotam(text) {
     const qualifier = String(text || '').match(/(?:^|\s)Q\)\s*([A-Z]{4}\s*\/[^\r\n]+)/i);
