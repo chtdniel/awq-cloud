@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { inflateRawSync } from 'node:zlib';
 
-const source = await readFile(new URL('../functions/api/briefing-xlsx.js', import.meta.url), 'utf8');
+const source = (await readFile(new URL('../functions/api/briefing-xlsx.js', import.meta.url), 'utf8')).replace("'./notamUtils.js'", JSON.stringify('data:text/javascript;base64,' + Buffer.from(await readFile(new URL('../functions/api/notamUtils.js', import.meta.url), 'utf8')).toString('base64')));
 const handlers = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 const template = await readFile(new URL('../public/briefing-template.xlsx', import.meta.url));
 assert.deepEqual(template, await readFile(new URL('../archive/Crew Briefing Report Form.xlsx', import.meta.url)));

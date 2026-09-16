@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { inflateRawSync } from 'node:zlib';
 import { build } from 'esbuild';
+import { seedAuthUser } from './rpc_auth_fixture.mjs';
 
 const playwrightModule = process.env.PLAYWRIGHT_MODULE;
 const { chromium } = await import(playwrightModule ? pathToFileURL(playwrightModule).href : 'playwright');
@@ -52,6 +53,7 @@ const DB = {
     } catch (error) { database.exec('ROLLBACK'); throw error; }
   }
 };
+const authHeaders = await seedAuthUser(database, DB, 'admin');
 const publicDirectory = resolve('public');
 const contentTypes = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.json': 'application/json', '.svg': 'image/svg+xml' };
 async function asset(request) {
@@ -73,7 +75,7 @@ const server = createServer(async (incoming, outgoing) => {
       const body = Buffer.concat(chunks).toString();
       rpcRequests.push(JSON.parse(body));
       const headers = new Headers(incoming.headers);
-      headers.set('CF-Access-Authenticated-User-Email', 'admin@example.com');
+      for (const [name, value] of Object.entries(authHeaders)) headers.set(name, value);
       response = await onRequestPost({ request: new Request(url, { method: 'POST', headers, body }), env: { DB, ASSETS: { fetch: asset } } });
     } else if (incoming.url === '/api/google-sheets-config') {
       response = Response.json({ clientId: googleConfigured ? 'fixture-client.apps.googleusercontent.com' : '' });
@@ -120,7 +122,7 @@ const browser = await chromium.launch({ headless: false });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true, serviceWorkers: 'block' });
 await context.addInitScript(() => {
   localStorage.setItem('occ_active_board', JSON.stringify([1]));
-  localStorage.setItem('occ_notam_analysis', JSON.stringify({ QZ646: ['A2001/26', 'A1001/26'] }));
+  localStorage.setItem('occ_notam_analysis', JSON.stringify({ QZ646: ['A2001/26', 'A1001/26', 'A1002/26'], QZ999: ['A2001/26'] }));
 });
 const page = await context.newPage();
 const pageErrors = [];
@@ -170,6 +172,21 @@ try {
   assert.doesNotMatch(await page.locator('#firn-results-list').innerText(), /A200[123]\/26|AERODROME/);
   await page.screenshot({ path: join(artifactDirectory, 'fir-notam-results.png'), fullPage: true });
   console.log('PASS FIR display and results exclude AD and legacy mislabeled aerodrome records');
+  const staleResponse = await page.evaluate(async () => {
+    const response = await fetch('/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ method: 'generateReportXlsx', args: [window.getReportSheetPayload()] }) });
+    return { status: response.status, body: await response.json() };
+  });
+  assert.equal(staleResponse.status, 400);
+  assert.match(staleResponse.body.error, /Selected NOTAMs have changed or expired/);
+  await page.locator('#nav-notam').click();
+  await page.waitForFunction(() => {
+    const saved = JSON.parse(localStorage.getItem('occ_notam_analysis'));
+    return saved && !saved.QZ646.includes('A1002/26');
+  });
+  const refreshed = await page.evaluate(() => JSON.parse(localStorage.getItem('occ_notam_analysis')));
+  assert.deepEqual(refreshed.QZ646, ['A2001/26', 'A1001/26']);
+  assert.deepEqual(refreshed.QZ999, ['A2001/26']);
+  console.log('PASS stale report rejection and analysis refresh recovery preserving AD, FIR and other flight selections');
   await page.locator('#nav-report').click();
   await page.waitForFunction(() => document.getElementById('report-sum-count').textContent === '1');
   const downloadPromise = page.waitForEvent('download', { timeout: 30000 });

@@ -1,3 +1,5 @@
+import { decodeNotamText } from './notamUtils.js';
+
 // ============================================================================
 // BRIEFING XLSX GENERATION - Native .xlsx output using template-edit approach
 // ----------------------------------------------------------------------------
@@ -272,7 +274,7 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         tafMap[stn] = { raw: t.raw_text || '', issue_time: t.issue_time || '' };
     });
     const orderedStations = [];
-    const enrStations = [];
+    const additionalTafStations = [];
     orderedFlights.forEach(f => {
         const callsign = String(f.callsign || '').trim().toUpperCase();
         const cands = [
@@ -283,6 +285,8 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
             { station: stationCode(f.enr2), label: 'ENR2' },
             { station: stationCode(f.enr3), label: 'ENR3' }
         ];
+        const alternate = stationCode(f.alt);
+        if (alternate) additionalTafStations.push({ label: 'ALTN', station: alternate, flight: callsign });
         cands.forEach(c => {
             if (!c.station) return;
             const existing = orderedStations.find(s => s.station === c.station);
@@ -291,7 +295,7 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
                 if (callsign && !existing.flights.includes(callsign)) existing.flights.push(callsign);
                 if (c.label && !existing.label) { existing.label = c.label; existing.isEnr = true; }
             }
-            if (c.label) enrStations.push({ slotId: c.label + '_' + (callsign || 'FLT'), label: c.label, station: c.station, flight: callsign });
+            if (c.label) additionalTafStations.push({ slotId: c.label + '_' + (callsign || 'FLT'), label: c.label, station: c.station, flight: callsign });
         });
     });
     const analysis = savedNotamAnalysis && typeof savedNotamAnalysis === 'object' ? savedNotamAnalysis : {};
@@ -345,7 +349,8 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         tafs.push({ slot: 'POD' + (i + 1), station: podStn, stationEntered: podStn, time: podTime || (podStn && tafMap[podStn]?.issue_time ? compactTime(tafMap[podStn].issue_time) : ''), forecast: podForecast, flight: callsign });
         tafs.push({ slot: 'POA' + (i + 1), station: poaStn, stationEntered: poaStn, time: poaTime || (poaStn && tafMap[poaStn]?.issue_time ? compactTime(tafMap[poaStn].issue_time) : ''), forecast: poaForecast, flight: callsign });
     }
-    enrStations.forEach(e => {
+    additionalTafStations.forEach(e => {
+        if (tafs.some(taf => taf.station === e.station)) return;
         const raw = tafMap[e.station]?.raw || '';
         tafs.push({ slot: e.label, station: e.station, stationEntered: e.station, time: '', forecast: raw || 'NIL TAF DATA IN DATABASE', flight: e.flight });
     });
@@ -406,6 +411,7 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
 }
 
 async function buildXlsxResponse(context, form) {
+    form = { ...form, notams: (form.notams || []).map(notam => ({ ...notam, text: decodeNotamText(notam?.text) })) };
     if ((form.legs || []).length > 6) throw new RangeError('Template supports at most 6 flights; split the report.');
     if ((form.tafs || []).length > WX_NOTAM_CAPACITY || (form.notams || []).length > WX_NOTAM_CAPACITY) throw new RangeError('Template supports at most 30 weather or NOTAM entries; split the report.');
     const tplUrl = new URL('/briefing-template.xlsx', context.request.url);
@@ -443,7 +449,6 @@ async function buildXlsxResponse(context, form) {
         xml = setInlineCell(xml, 'H' + row, leg.pod || '');
         // STD dan OFP Ref No tidak perlu diisi sesuai permintaan
         xml = setInlineCell(xml, 'K' + row, leg.poa || '');
-        xml = setInlineCell(xml, 'M' + row, leg.sta || '');
         xml = setInlineCell(xml, 'O' + row, leg.alt || '');
         for (const column of ['E', 'F', 'G', 'M', 'O', 'Q']) xml = setInlineCell(xml, column + (30 + index), '');
     }

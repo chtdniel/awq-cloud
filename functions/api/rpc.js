@@ -1,6 +1,6 @@
 import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
 import { fetchLatestTafs } from '../../shared/taf.mjs';
-import { parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
+import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
 
@@ -752,7 +752,7 @@ async function handleAnalyzeNotams(context, args) {
             };
         });
         
-        return Response.json({ data: { data: finalData, timestamp: new Date().toISOString() } });
+        return Response.json({ data: { data: finalData, availableNotamIds: notamRows.map(row => String(row.id)), timestamp: new Date().toISOString() } });
     } catch (e) {
         console.error("NOTAM Analysis Error:", e);
         return Response.json({ error: e.message }, { status: 500 });
@@ -824,6 +824,7 @@ async function handleSaveNotamData(context, args) {
                 }, '');
             }
             
+            fullText = decodeNotamText(fullText);
             if (!location || !notamNum || !fullText) continue;
             if (protectedNotamIds.has(notamNum)) {
                 rowsSkippedProtected++;
@@ -1475,7 +1476,7 @@ async function handleGetActiveNotams(context) {
                 cls: firResolveNotamClass(row),
                 effectiveDate: parsed ? (parsed.effFrom ? parsed.effFrom.toISOString() : null) : (row.valid_from || null),
                 expirationDate: parsed ? (parsed.isContinuous ? 'PERM' : (parsed.effTo ? parsed.effTo.toISOString() : null)) : (row.valid_to || null),
-                text: row.message.slice(0, 400), // Trucate for map marker performance
+                text: decodeNotamText(row.message).slice(0, 400), // Trucate for map marker performance
                 qCode: '',
                 risk: isUnverified ? unverifiedRisk : parsed.priority,
                 lat: lat,
@@ -1774,7 +1775,7 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
             id: row.id,
             location: location,
             number: row.id,
-            text: row.message,
+            text: decodeNotamText(row.message),
             risk: isDirectImpact ? parsed.priority : 'LOW',
             isDirectImpact,
             isIndirectImpact: timeMatch && !isDirectImpact,
@@ -1992,7 +1993,7 @@ async function handleFirGetNotamEditorData(context) {
                 'Issue Date': eff,
                 'Effective Date': eff,
                 'Expiration Date': exp,
-                'NOTAM Text': row.message,
+                'NOTAM Text': decodeNotamText(row.message),
                 updatedAt: row.updated_at || ''
             };
         });
@@ -2086,7 +2087,7 @@ async function handleFirGetNotamResults(context) {
         const now = new Date();
         const lifecycleMap = parseNotamLifecycleMap(dbNotams.map(row => ({
             'NOTAM #': row.id,
-            'NOTAM Text': row.message
+            'NOTAM Text': decodeNotamText(row.message)
         })));
         const results = dbNotams.map(row => {
             const parsed = parseNotamRow(row);
@@ -2107,7 +2108,7 @@ async function handleFirGetNotamResults(context) {
                 'Issue Date': eff,
                 'Effective Date': eff,
                 'Expiration Date': exp,
-                'NOTAM Text': row.message,
+                'NOTAM Text': decodeNotamText(row.message),
                 status,
                 risk,
                 type: 'NEW',
@@ -2151,7 +2152,7 @@ function firValidateNotamPayload(payload) {
     const issue = String(payload['Issue Date'] || '').trim();
     const effective = String(payload['Effective Date'] || '').trim();
     const expiration = String(payload['Expiration Date'] || '').trim();
-    const text = String(payload['NOTAM Text'] || '').trim();
+    const text = decodeNotamText(payload['NOTAM Text']).trim();
     if (!/^[A-Z]{4}$/.test(location)) return { ok: false, error: 'Location must be a 4-letter ICAO code (e.g. WIII).' };
     if (!/^[A-Z]\d{4}\/\d{2}$/i.test(number)) return { ok: false, error: 'NOTAM # must match format like A1234/26.' };
     if (!cls) return { ok: false, error: 'Class is required (e.g. A, B, C, D, E).' };
@@ -2486,7 +2487,7 @@ async function handleAnalyzeFlightBoardNotams(context, args) {
                 ? notams.filter(n => flightFirs.includes(String(n.location || '').trim().toUpperCase()))
                 : notams.filter(n => [f.dep, f.dest].map(s => String(s || '').toUpperCase()).includes(String(n.location || '').trim().toUpperCase()));
             const items = rel
-                .map(n => ({ location: n.location, number: n.id, risk: 'LOW', status: 'ACTIVE', text: n.message }))
+                .map(n => ({ location: n.location, number: n.id, risk: 'LOW', status: 'ACTIVE', text: decodeNotamText(n.message) }))
                 .map(item => ({ notamNum: item.number, airport: item.location, priority: item.risk, status: item.status, matchReason: '', rawText: item.text || '' }));
             const highestPriority = items.some(item => item.priority === 'HIGH') ? 'HIGH'
               : items.some(item => item.priority === 'MEDIUM') ? 'MEDIUM'

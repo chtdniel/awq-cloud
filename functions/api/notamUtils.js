@@ -3,6 +3,17 @@
 // Shared Date parsing and logic
 // ============================================================================
 
+export function decodeNotamText(value) {
+    const named = { apos: "'", quot: '"', amp: '&', lt: '<', gt: '>', nbsp: ' ' };
+    return String(value ?? '').replace(/&(#x[0-9a-f]+|#[0-9]+|apos|quot|amp|lt|gt|nbsp);/gi, (entity, code) => {
+        if (code[0] !== '#') return named[code.toLowerCase()];
+        const point = code[1].toLowerCase() === 'x' ? parseInt(code.slice(2), 16) : Number(code.slice(1));
+        const valid = point === 9 || point === 10 || point === 13 ||
+            (point >= 0x20 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) && point !== 0xfffe && point !== 0xffff);
+        return valid ? String.fromCodePoint(point) : entity;
+    });
+}
+
 export function duParseIcaoDateCode(s) {
     if (!s || s.length < 6) return null;
     const code = s.length >= 10 ? s.slice(0, 10) : s.slice(0, 6);
@@ -43,7 +54,7 @@ export function isAerodromeOnlyNotam(text) {
 
 export function parseNotamRow(row) {
     const notamNum = String(row.id || '').trim();
-    const fullText = String(row.message || '');
+    const fullText = decodeNotamText(row.message);
     if (!notamNum || !fullText) return null;
 
     const bMatch = fullText.match(/(?:^|\s)B\)\s*(\d{10})/i);

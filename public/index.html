@@ -5249,6 +5249,19 @@
 
       let targetedAlertCount = 0;
       let stateModified = false;
+      if (Array.isArray(res.availableNotamIds)) {
+        const availableIds = new Set(res.availableNotamIds);
+        Object.keys(window.savedNotamAnalysis).forEach(key => {
+          const previous = window.savedNotamAnalysis[key];
+          if (!Array.isArray(previous)) return;
+          const current = previous.filter(item => availableIds.has(String(typeof item === 'string' ? item : item?.notamNum || item?.id || '').trim()));
+          if (current.length !== previous.length) {
+            window.savedNotamAnalysis[key] = current;
+            stateModified = true;
+          }
+        });
+      }
+
 
       res.data.forEach((stnObj, idx) => {
         const panelClass = (idx === 0) ? 'active-panel' : '';
@@ -5415,10 +5428,10 @@
            banner.innerHTML = `<div style="display:flex; align-items:center; gap:12px;"><svg class="ic ic-lg" style="color:var(--status-warning);"><use href="#i-warn"/></svg><span>SYS ALERT: <strong>${targetedAlertCount}</strong> highly critical NOTAM(s) overlap with schedule. Auto-selected.</span></div><button onclick="this.parentElement.style.display='none'" aria-label="Dismiss NOTAM alert banner" style="background:none; border:none; color:var(--text-primary); cursor:pointer; opacity:0.7; display:flex; align-items:center; padding:4px;"><svg class="ic"><use href="#i-x"/></svg></button>`;
            banner.style.display = 'flex';
          }
-          if (stateModified) {
-              if (window.safeStorage) window.safeStorage.set('occ_notam_analysis', window.savedNotamAnalysis);
-              google.script.run.syncNotamAnalysisState(JSON.stringify(window.savedNotamAnalysis));
-          }
+      }
+      if (stateModified) {
+          if (window.safeStorage) window.safeStorage.set('occ_notam_analysis', window.savedNotamAnalysis);
+          google.script.run.syncNotamAnalysisState(JSON.stringify(window.savedNotamAnalysis));
       }
 
       res.data.forEach((stnObj, idx) => window.updateTabBadge(`stn-${idx}`));

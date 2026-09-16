@@ -11,7 +11,9 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // briefing-xlsx.js is a Workers ES module but package.json is commonjs → load via temp .mjs copy.
 const bxSrc = path.join(repo, 'functions', 'api', 'briefing-xlsx.js');
 const bxTmp = path.join(os.tmpdir(), 'briefing-xlsx.e2e.mjs');
-(await import('node:fs')).copyFileSync(bxSrc, bxTmp);
+const utilsSource = await readFile(path.join(repo, 'functions', 'api', 'notamUtils.js'), 'utf8');
+const reportSource = (await readFile(bxSrc, 'utf8')).replace("'./notamUtils.js'", JSON.stringify('data:text/javascript;base64,' + Buffer.from(utilsSource).toString('base64')));
+(await import('node:fs')).writeFileSync(bxTmp, reportSource);
 const mod = await import(pathToFileURL(bxTmp).href);
 const tplBytes = await readFile(path.join(repo, 'public', 'briefing-template.xlsx'));
 
