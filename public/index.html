@@ -9254,7 +9254,7 @@
       </div>
     </div>
     <div class="fir-board-scroll" id="fir-flight-list">
-      <div class="fir-empty">No active flights. Click "REFRESH" to load.</div>
+      <div class="fir-empty">Loading active flights...</div>
     </div>
   </div>
 
@@ -9318,7 +9318,9 @@
     hzQuery: '',
     hzRisk: '',
     hzStatus: 'ACTIVE',  // default hanya ACTIVE — pilih 'ALL' untuk tampilkan FUTURE/EXPIRED juga
-    flightDataLoaded: false  // Track if flight data has been loaded
+    flightDataLoaded: false, // Track if flight data has been loaded
+    initialized: false,
+    flightLoadRequest: 0
   };
   // Exposed for FIR NOTAM UI to filter map by selected FIR tab
   window.firSetMapFirFilter = function(loc) {
@@ -10095,7 +10097,9 @@
     }
     
     if (!state.flights.length) {
-      box.innerHTML = '<div class="fir-empty">No active flights. Click "REFRESH" to load.</div>';
+      box.innerHTML = state.flightDataLoaded
+        ? '<div class="fir-empty">No flights on Flight Board.<br><span style="font-size:10px;opacity:.7;">Add flights to the board in FLIGHT tab first.</span></div>'
+        : '<div class="fir-empty">Loading active flights...</div>';
       return;
     }
     
@@ -10188,15 +10192,15 @@
 
   async function loadFlights() {
     const box = document.getElementById('fir-flight-list');
+    const requestId = ++state.flightLoadRequest;
     box.innerHTML = '<div class="fir-empty">Loading flights...</div>';
     
     const boardIds = getActiveBoardRowIds();
     if (!boardIds.length) {
       console.log('[FIR] loadFlights: no flights on Flight Board (occ_active_board empty)');
       state.flights = [];
-      if (state.flightDataLoaded) {
-        box.innerHTML = '<div class="fir-empty">No flights on Flight Board.<br><span style="font-size:10px;opacity:.7;">Add flights to the board in FLIGHT tab first.</span></div>';
-      }
+      state.selected = null;
+      state.flightDataLoaded = true;
       renderFlightList();
       return;
     }
@@ -10209,6 +10213,7 @@
       data = await run('getSelectedFlightsData', boardIds, false);
       console.log('[FIR] getSelectedFlightsData(false) payload:', data);
     }
+    if (requestId !== state.flightLoadRequest) return;
     // Normalize to same shape as before but filtered to board only
     if (data && !data.error && data.flights) {
       // seed route/latlong so map works immediately
@@ -10292,6 +10297,12 @@
   }
 
   function init() {
+    if (state.initialized) {
+      loadFlights();
+      setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 60);
+      return;
+    }
+    state.initialized = true;
     if (typeof L !== 'undefined') { setTimeout(initMap, 0); }
     document.getElementById('fir-toggle-notams').addEventListener('click', toggleNotamLayer);
     const expBtn = document.getElementById('fir-expand-map');
@@ -10321,7 +10332,7 @@
     });
     document.getElementById('fir-analyze-all').addEventListener('click', analyzeAll);
     
-    // Manual refresh remains explicit; first use must also load data.
+    // Manual refresh remains available as an explicit fallback.
     const refreshBtn = document.getElementById('fir-refresh-flights');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', async () => {
@@ -10344,8 +10355,10 @@
     const hzSearch = document.getElementById('fir-hazard-search');
     if (hzSearch) hzSearch.addEventListener('input', (e) => { state.hzQuery = e.target.value; renderHazardChips(); renderHazardList(); });
     
-    // REMOVED: Auto-reload event listeners (occ:boardChanged, storage)
-    // REMOVED: Auto-load flight on init (loadFlights())
+    window.addEventListener('occ:boardChanged', () => {
+      const view = document.getElementById('view-fir');
+      if (view && view.classList.contains('active')) loadFlights();
+    });
     
     window.addEventListener('occ:firNotamsChanged', async () => {
       await loadActiveNotams();
@@ -10354,6 +10367,7 @@
       if (state.selected) await selectFlight(state.selected._rowId);
     });
     loadActiveNotams();
+    loadFlights();
     // The view-section becomes active before this runs, but Leaflet may have
     // measured the map while it was hidden; refresh size once visible.
     setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 60);

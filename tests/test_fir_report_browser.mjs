@@ -165,6 +165,22 @@ try {
   console.log('PASS FIR UI duplicate overwrite, stale preview invalidation and AD preservation');
   seed('A2003/26', 'A', 'MISLABELED AERODROME', 'FIR');
   await page.locator('#nav-fir').click();
+  await page.waitForFunction(() => document.querySelector('#fir-flight-list .fir-callsign')?.textContent === 'QZ646');
+  assert.match(await page.locator('#fir-flight-list').innerText(), /QZ646/);
+  console.log('PASS FIR Flight Board automatically loads active Flights board entries');
+  await page.evaluate(() => {
+    window.activeBoardRowIds = [];
+    localStorage.setItem('occ_active_board', '[]');
+    window.dispatchEvent(new CustomEvent('occ:boardChanged', { detail: { ids: [] } }));
+  });
+  await page.waitForFunction(() => document.getElementById('fir-flight-list')?.textContent.includes('No flights on Flight Board'));
+  await page.evaluate(() => {
+    window.activeBoardRowIds = [1];
+    localStorage.setItem('occ_active_board', '[1]');
+    window.dispatchEvent(new CustomEvent('occ:boardChanged', { detail: { ids: [1] } }));
+  });
+  await page.waitForFunction(() => document.querySelector('#fir-flight-list .fir-callsign')?.textContent === 'QZ646');
+  console.log('PASS FIR Flight Board stays synchronized when the Flights board changes');
   await page.waitForFunction(() => /NOTAM: 1 active \/ 1/.test(document.getElementById('fir-notam-status').textContent));
   await page.screenshot({ path: join(artifactDirectory, 'fir-display.png'), fullPage: true });
   await page.locator('#nav-fir-notam').click();
