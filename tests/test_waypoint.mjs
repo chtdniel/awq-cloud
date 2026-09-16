@@ -47,4 +47,24 @@ try {
   assert.equal((await viewer.rpc('latlongGetPreview', [rawText, 'column'])).status, 200);
   for (const method of ['latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll']) assert.equal((await viewer.rpc(method)).status, 403);
 } finally { viewer.database.close(); }
+
+const orderFixture = await createWaypointFixture();
+try {
+  const twoColumnRoute = 'AAAA N 1 01.0 E 1 01.0 BBBB N 2 02.0 E 2 02.0\nCCCC N 3 03.0 E 3 03.0 DDDD N 4 04.0 E 4 04.0';
+  orderFixture.database.exec(`
+    INSERT INTO latlong (route_id, waypoint, latitude, longitude) VALUES
+      ('ROUTE-COLUMN', 'AAAA', 'N 01 01.0', 'E 001 01.0'),
+      ('ROUTE-COLUMN', 'BBBB', 'N 02 02.0', 'E 002 02.0'),
+      ('ROUTE-COLUMN', 'CCCC', 'N 03 03.0', 'E 003 03.0'),
+      ('ROUTE-COLUMN', 'DDDD', 'N 04 04.0', 'E 004 04.0');
+  `);
+  const saved = await orderFixture.rpc('latlongSaveBulk', [{ rawText: twoColumnRoute, mode: 'merge', routeId: 'ROUTE-COLUMN', orderMode: 'column' }]);
+  assert.equal(saved.status, 200, JSON.stringify(saved));
+  const readBack = await orderFixture.rpc('latlongGetEditorData');
+  assert.deepEqual(
+    readBack.data.rows.filter(row => row.ID === 'ROUTE-COLUMN').map(row => row.Waypoint),
+    ['AAAA', 'CCCC', 'BBBB', 'DDDD'],
+    'MERGE must persist the requested COLUMN scan order, not retain an older row-by-row database order.'
+  );
+} finally { orderFixture.database.close(); }
 console.log('Waypoint preview, save modes, route isolation, validation, delete, clear and authorization passed.');

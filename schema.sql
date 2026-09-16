@@ -156,9 +156,11 @@ CREATE TABLE IF NOT EXISTS latlong (
     route_id TEXT,
     waypoint TEXT,
     latitude TEXT,
-    longitude TEXT
+    longitude TEXT,
+    sequence_order INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_latlong_route ON latlong(route_id);
+CREATE INDEX IF NOT EXISTS idx_latlong_route_order ON latlong(route_id, sequence_order, id);
 
 CREATE TABLE IF NOT EXISTS briefing_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

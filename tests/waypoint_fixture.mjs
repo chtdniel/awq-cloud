@@ -7,7 +7,7 @@ export const { onRequestPost } = await import('data:text/javascript;base64,' + B
 
 export async function createWaypointFixture(role = 'registered') {
   const database = new DatabaseSync(':memory:');
-  database.exec('CREATE TABLE latlong (id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT, waypoint TEXT, latitude TEXT, longitude TEXT)');
+  database.exec('CREATE TABLE latlong (id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT, waypoint TEXT, latitude TEXT, longitude TEXT, sequence_order INTEGER)');
   function statement(sql, values = []) {
     return {
       bind(...parameters) { return statement(sql, parameters); },

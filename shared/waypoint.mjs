@@ -46,24 +46,33 @@ export async function saveWaypoints(DB, payload) {
   if (!routeId) invalid('ROUTE ID required.');
   if (!['replace', 'append', 'merge'].includes(mode)) invalid('Invalid update mode.');
   const parsed = previewWaypoints(rawText, orderMode);
+  const { results: existingRows } = mode === 'replace'
+    ? { results: [] }
+    : await DB.prepare('SELECT route_id, waypoint, latitude, longitude FROM latlong WHERE UPPER(TRIM(route_id)) = ? ORDER BY sequence_order ASC, id ASC')
+      .bind(routeId).all();
   const statements = [];
   if (mode === 'replace') statements.push(DB.prepare('DELETE FROM latlong'));
-  for (const entry of parsed.entries) {
-    if (mode === 'merge') {
-      statements.push(DB.prepare('UPDATE latlong SET latitude = ?, longitude = ? WHERE UPPER(TRIM(route_id)) = ? AND UPPER(TRIM(waypoint)) = ?')
-        .bind(entry.latStr, entry.lonStr, routeId, entry.waypoint));
-      statements.push(DB.prepare(`INSERT INTO latlong (route_id, waypoint, latitude, longitude)
-        SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM latlong WHERE UPPER(TRIM(route_id)) = ? AND UPPER(TRIM(waypoint)) = ?)`)
-        .bind(routeId, entry.waypoint, entry.latStr, entry.lonStr, routeId, entry.waypoint));
-    } else {
-      statements.push(DB.prepare('INSERT INTO latlong (route_id, waypoint, latitude, longitude) VALUES (?, ?, ?, ?)')
-        .bind(routeId, entry.waypoint, entry.latStr, entry.lonStr));
-    }
+  const existingWaypoints = new Set(existingRows.map(row => String(row.waypoint).trim().toUpperCase()));
+  const entries = mode === 'merge'
+    ? [
+        ...parsed.entries,
+        ...existingRows
+          .filter(row => !parsed.entries.some(entry => entry.waypoint === String(row.waypoint).trim().toUpperCase()))
+          .map(row => ({ waypoint: String(row.waypoint).trim().toUpperCase(), latStr: row.latitude, lonStr: row.longitude }))
+      ]
+    : parsed.entries;
+  if (mode === 'merge') {
+    statements.push(DB.prepare('DELETE FROM latlong WHERE UPPER(TRIM(route_id)) = ?').bind(routeId));
+  }
+  const startOrder = mode === 'append' ? existingRows.length : 0;
+  for (const [index, entry] of entries.entries()) {
+    statements.push(DB.prepare('INSERT INTO latlong (route_id, waypoint, latitude, longitude, sequence_order) VALUES (?, ?, ?, ?, ?)')
+      .bind(routeId, entry.waypoint, entry.latStr, entry.lonStr, startOrder + index + 1));
   }
   // D1 batch rolls back the entire update if any statement fails.
   const results = await DB.batch(statements);
   const inserted = mode === 'merge'
-    ? results.filter((_, index) => index % 2 === 1).reduce((sum, result) => sum + result.meta.changes, 0)
+    ? parsed.entries.filter(entry => !existingWaypoints.has(entry.waypoint)).length
     : parsed.count;
   return { ok: true, count: parsed.count, inserted, updated: parsed.count - inserted,
     skipped: parsed.skipped, dupCount: parsed.dupCount, mode, orderMode, routeId };

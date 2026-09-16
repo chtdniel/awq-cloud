@@ -1591,7 +1591,7 @@ async function handleGetActiveFlightList(context) {
 
 async function handleLatlongGetEditorData(context) {
     try {
-        const { results: rows } = await context.env.DB.prepare('SELECT * FROM latlong ORDER BY id ASC').all();
+        const { results: rows } = await context.env.DB.prepare('SELECT * FROM latlong ORDER BY route_id COLLATE NOCASE ASC, sequence_order ASC, id ASC').all();
         const formatted = rows.map(r => ({
             rowId: r.id,
             ID: r.route_id,
