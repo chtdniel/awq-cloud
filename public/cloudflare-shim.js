@@ -9,6 +9,11 @@ window.google.script = window.google.script || {};
   var authState = { user: null, loaded: false };
   var authReady = null;
 
+  function publishAuthenticatedUser() {
+    window.awqAuthUser = authState.user;
+    window.dispatchEvent(new CustomEvent('awq-auth-ready', { detail: authState.user }));
+  }
+
   function csrfToken() {
     var match = document.cookie.match(/(?:^|; )awq_csrf=([^;]+)/);
     return match ? decodeURIComponent(match[1]) : '';
@@ -42,7 +47,7 @@ window.google.script = window.google.script || {};
         authState.loaded = true;
         gate.remove();
         installUserBar();
-        window.dispatchEvent(new CustomEvent('awq-auth-ready', { detail: authState.user }));
+        publishAuthenticatedUser();
       } catch (loginError) {
         error.textContent = 'Invalid email or password.';
       }
@@ -102,6 +107,7 @@ window.google.script = window.google.script || {};
         panel.hidePopover();
         bar.remove();
         authState.user = null;
+        window.awqAuthUser = null;
         showLogin();
       } catch (logoutError) {
         error.textContent = 'Could not sign out. Please try again.';
@@ -145,6 +151,7 @@ window.google.script = window.google.script || {};
         dialog.remove();
         window.alert('Password changed. Please sign in again.');
         authState.user = null;
+        window.awqAuthUser = null;
         var userBar = document.getElementById('awq-user-bar');
         if (userBar) userBar.remove();
         showLogin();
@@ -166,7 +173,7 @@ window.google.script = window.google.script || {};
     authState.user = result && result.user ? { email: result.user, role: result.tier, mustChangePassword: result.mustChangePassword } : null;
     authState.loaded = true;
     if (!authState.user) showLogin();
-    else { installUserBar(); window.dispatchEvent(new CustomEvent('awq-auth-ready', { detail: authState.user })); }
+    else { installUserBar(); publishAuthenticatedUser(); }
     return authState;
   }).catch(function () { authState.loaded = true; showLogin(); return authState; });
 
