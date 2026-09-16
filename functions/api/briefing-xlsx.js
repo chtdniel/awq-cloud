@@ -221,6 +221,29 @@ function compactTime(v) {
     return s;
 }
 
+function formatReportDate(v) {
+    const raw = String(v || '').trim();
+    const digits = raw.replace(/[^0-9]/g, '');
+    let year = 0;
+    let month = 0;
+    let day = 0;
+    if (/^\d{8}$/.test(digits)) {
+        year = Number(digits.slice(0, 4));
+        month = Number(digits.slice(4, 6));
+        day = Number(digits.slice(6, 8));
+    } else {
+        const match = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (match) {
+            year = Number(match[1]);
+            month = Number(match[2]);
+            day = Number(match[3]);
+        }
+    }
+    if (!year || month < 1 || month > 12 || day < 1 || day > 31) return raw;
+    const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    return String(day).padStart(2, '0') + '-' + months[month - 1] + '-' + year;
+}
+
 async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, noSigStationMap) {
     const flightList = (flightInputs || []).map(s => String(s).trim().toUpperCase()).filter(Boolean);
     if (flightList.length === 0) throw new Error('No flights specified');
@@ -315,10 +338,10 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         const poaStn = f ? stationCode(f.dest) : '';
         const podTime = f ? compactTime(f.etd) : '';
         const poaTime = f ? compactTime(f.eta) : '';
-        const podRaw = podStn ? (tafMap[podStn]?.raw || '') : '';
-        const poaRaw = poaStn ? (tafMap[poaStn]?.raw || '') : '';
-        const podForecast = podStn ? (podRaw || 'NIL TAF DATA IN DATABASE') : '';
-        const poaForecast = poaStn ? (poaRaw || 'NIL TAF DATA IN DATABASE') : '';
+        const podRaw = f ? String(f.taf_dep || '').trim() : '';
+        const poaRaw = f ? String(f.taf_arr || '').trim() : '';
+        const podForecast = podStn ? (podRaw || 'NIL TAF DATA IN FLIGHT BOARD') : '';
+        const poaForecast = poaStn ? (poaRaw || 'NIL TAF DATA IN FLIGHT BOARD') : '';
         tafs.push({ slot: 'POD' + (i + 1), station: podStn, stationEntered: podStn, time: podTime || (podStn && tafMap[podStn]?.issue_time ? compactTime(tafMap[podStn].issue_time) : ''), forecast: podForecast, flight: callsign });
         tafs.push({ slot: 'POA' + (i + 1), station: poaStn, stationEntered: poaStn, time: poaTime || (poaStn && tafMap[poaStn]?.issue_time ? compactTime(tafMap[poaStn].issue_time) : ''), forecast: poaForecast, flight: callsign });
     }
@@ -326,17 +349,16 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         const raw = tafMap[e.station]?.raw || '';
         tafs.push({ slot: e.label, station: e.station, stationEntered: e.station, time: '', forecast: raw || 'NIL TAF DATA IN DATABASE', flight: e.flight });
     });
-    const notams = orderedStations.map(entry => {
+    const notams = [];
+    orderedStations.forEach(entry => {
         const key = entry.station;
         const isNoSig = !!(noSigStationMap && noSigStationMap[key]);
         const grouped = notamMap[key] || [];
-        let text = '';
-        if (grouped.length > 0) text = grouped.join('\n\n');
-        else if (isNoSig) text = 'NIL SIGNIFICANT NOTAM';
-        else text = 'NO NOTAM SELECTED';
-        return { station: entry.station, stationEntered: entry.station, flights: entry.flights, enr: entry.isEnr, text };
+        const texts = grouped.length > 0
+            ? grouped
+            : [isNoSig ? 'NIL SIGNIFICANT NOTAM' : 'NO NOTAM SELECTED'];
+        texts.forEach(text => notams.push({ station: entry.station, stationEntered: entry.station, flights: entry.flights, enr: entry.isEnr, text }));
     });
-    const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 16) + 'Z';
     const flightsKey = flightList.join(',');
     let savedFields = {};
     try {
@@ -349,8 +371,8 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         }
     } catch {}
     const fields = {
-        recNo: savedFields.recNo || ('CBR-' + flightList.join('-') + '-' + new Date().toISOString().substring(0, 10).replace(/-/g, '')),
-        formDate: savedFields.formDate || nowUtc,
+        recNo: '',
+        formDate: '',
         pageOf: savedFields.pageOf || '1 of 1',
         dxrName: savedFields.dxrName || '',
         picName: savedFields.picName || ''
@@ -358,7 +380,7 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
     const legsPayload = legs.map((f, idx) => ({
         leg: idx + 1,
         flightNo: String(f.callsign || '').trim().toUpperCase(),
-        date: String(f.dof || ''),
+        date: formatReportDate(f.dof),
         reg: String(f.ac_type || ''),
         pod: stationCode(f.dep),
         std: compactTime(f.etd),
@@ -411,7 +433,7 @@ async function buildXlsxResponse(context, form) {
     xml = setInlineCell(xml, ANCHORS.formDate, 'Date: ' + (fields.formDate || ''));
     xml = setInlineCell(xml, ANCHORS.pageOf, 'Page: ' + (fields.pageOf || '1 of 1'));
     const legs = form.legs || [];
-    const distinctLegValues = key => [...new Set(legs.map(leg => leg[key]).filter(Boolean))].join(' / ');
+    const distinctLegValues = key => [...new Set(legs.map(leg => key === 'date' ? formatReportDate(leg[key]) : leg[key]).filter(Boolean))].join(' / ');
     xml = setInlineCell(xml, 'D7', distinctLegValues('flightNo'));
     xml = setInlineCell(xml, 'D9', distinctLegValues('date'));
     xml = setInlineCell(xml, 'D11', distinctLegValues('reg'));
@@ -445,13 +467,29 @@ async function buildXlsxResponse(context, form) {
         xml = setInlineCell(xml, 'C' + (20 + index), continuation ? 'CONT.' : taf?.stationEntered || taf?.station || '');
         xml = setInlineCell(xml, 'E' + (20 + index), continuation ? 'See WX sheet for all station forecasts.' : taf?.forecast || '');
     }
-    const notamStations = form.notams || [];
+    const notamGroups = [];
+    (form.notams || []).forEach(nt => {
+        const station = nt?.stationEntered || nt?.station || '';
+        let group = notamGroups[notamGroups.length - 1];
+        if (!group || group.station !== station) {
+            group = { station, texts: [] };
+            notamGroups.push(group);
+        }
+        group.texts.push(nt?.text || '');
+    });
+    const cbrNotamRows = [];
+    notamGroups.forEach(group => {
+        for (let i = 0; i < group.texts.length; i += 2) {
+            cbrNotamRows.push({ station: group.station, left: group.texts[i], right: group.texts[i + 1] || '' });
+        }
+    });
     for (let index = 0; index < 7; index++) {
-        const nt = notamStations[index];
-        const continuation = index === 6 && notamStations.length > 7;
+        const item = cbrNotamRows[index];
+        const continuation = index === 6 && cbrNotamRows.length > 7;
         const row = 39 + index;
-        xml = setInlineCell(xml, 'C' + row, continuation ? 'CONT.' : nt?.stationEntered || nt?.station || '');
-        xml = setInlineCell(xml, 'E' + row, continuation ? 'See NOTAM sheet for all selected NOTAMs.' : nt?.text || '');
+        xml = setInlineCell(xml, 'C' + row, continuation ? 'CONT.' : item?.station || '');
+        xml = setInlineCell(xml, 'E' + row, continuation ? 'See NOTAM sheet for all selected NOTAMs.' : item?.left || '');
+        xml = setInlineCell(xml, 'L' + row, continuation ? '' : item?.right || '');
     }
     const sig = form.signatures || {};
     xml = setInlineCell(xml, ANCHORS.dxrName, sig.dxrName || '');

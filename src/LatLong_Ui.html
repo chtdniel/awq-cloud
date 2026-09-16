@@ -186,7 +186,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       h+='<div class="ll-item">'
         +'<div><div class="ll-wpt">'+esc(r.Waypoint)+(hasId && r.ID? ' <span style="color:var(--text-muted); font-weight:600; font-size:10px;">('+esc(r.ID)+')</span>':'')+'</div>'
         +'<div class="ll-coord">'+esc(r.Latitude)+' &nbsp; '+esc(r.Longitude)+'</div></div>'
-        +'<button class="ll-btn ll-delete-btn" style="padding:4px 8px; font-size:9px;" data-waypoint="'+esc(r.Waypoint)+'" title="Delete '+esc(r.Waypoint)+'" aria-label="Delete waypoint '+esc(r.Waypoint)+'"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>'
+        +'<button class="ll-btn ll-delete-btn" style="padding:4px 8px; font-size:9px;" data-row-id="'+esc(r.rowId)+'" data-waypoint="'+esc(r.Waypoint)+'" title="Delete '+esc(r.Waypoint)+'" aria-label="Delete waypoint '+esc(r.Waypoint)+'"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>'
         +'</div>';
     });
     if(list.length>500) h+='<div class="ll-empty">Showing 500 of '+list.length+' — refine search to see more.</div>';
@@ -237,9 +237,9 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     }
   };
 
-  window.latlongDelete = async function(wpt){
+  window.latlongDelete = async function(wpt, rowId){
     if(!confirm('Delete FIX '+wpt+' ?')) return;
-    var res = await run('latlongDeleteWaypoint', wpt);
+    var res = await run('latlongDeleteWaypoint', wpt, rowId);
     if(res && res.ok){ toast('Deleted '+wpt); window.latlongRefresh(); }
     else toast('Error: '+((res&&res.error)||'unknown'));
   };
@@ -251,6 +251,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     var btn=$('ll-preview-btn'); btn.disabled=true; btn.textContent='...';
     var res = await run('latlongGetPreview', raw, order);
     btn.disabled=false; btn.innerHTML='<svg class="ic ic-sm"><use href="#i-search"/></svg> PREVIEW';
+    if(raw !== $('ll-paste').value || order !== $('ll-order').value) return;
     if(res && res.ok){
       renderPreview(res.entries, res);
       toast('Preview: '+res.count+' waypoints ('+res.orderMode+')');
@@ -267,34 +268,41 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     var routeId=$('ll-routeId').value.trim().toUpperCase();
     if(!raw.trim()){ toast('Paste WAYPOINT block first.'); return; }
     if(!routeId){ toast('ROUTE ID required — enter Route ID (e.g. WADDWSSS01) for Variant B.'); $('ll-routeId').focus(); return; }
-    // Auto-preview if not yet
-    if(!state.preview.length){
+    var btn=$('ll-save-btn'); btn.disabled=true; btn.textContent='SAVING...';
+    try {
       var pre = await run('latlongGetPreview', raw, order);
       if(!pre||!pre.ok){ toast('Error: '+((pre&&pre.error)||'unknown')); return; }
+      if(raw !== $('ll-paste').value || order !== $('ll-order').value || routeId !== $('ll-routeId').value.trim().toUpperCase()) {
+        toast('Input changed. Review the new data and save again.'); return;
+      }
       renderPreview(pre.entries, pre);
-    }
-    var count = state.preview.length;
-    if(!count){ toast('No valid waypoints to save.'); return; }
-    var msg = 'Save '+count+' waypoints to sheet LATLONG with mode '+mode.toUpperCase()+' ('+order+')?';
-    if(mode==='replace') msg+='\n\nREPLACE will DELETE existing rows!';
-    if(!confirm(msg)) return;
-    var btn=$('ll-save-btn'); btn.disabled=true; btn.textContent='SAVING...';
-    var res = await run('latlongSaveBulk', { rawText: raw, mode: mode, routeId: routeId, orderMode: order });
-    btn.disabled=false; btn.innerHTML='<svg class="ic ic-sm"><use href="#i-save"/></svg> SAVE TO SHEET';
-    if(res && res.ok){
-      toast('Saved '+res.count+' ('+res.inserted+' inserted, '+res.updated+' updated) — '+res.mode);
-      renderPreview([], null);
-      window.latlongRefresh();
-    } else {
-      toast('Error: '+((res&&res.error)||'unknown'));
+      var count = pre.entries.length;
+      if(!count){ toast('No valid waypoints to save.'); return; }
+      var msg = 'Save '+count+' waypoints to LATLONG with mode '+mode.toUpperCase()+' ('+order+')?';
+      if(mode==='replace') msg+=' REPLACE will DELETE existing rows!';
+      if(!confirm(msg)) return;
+      var res = await run('latlongSaveBulk', { rawText: raw, mode: mode, routeId: routeId, orderMode: order });
+      if(res && res.ok){
+        toast('Saved '+res.count+' ('+res.inserted+' inserted, '+res.updated+' updated) — '+res.mode);
+        renderPreview([], null);
+        await window.latlongRefresh();
+      } else {
+        toast('Error: '+((res&&res.error)||'unknown'));
+      }
+    } finally {
+      btn.disabled=false; btn.innerHTML='<svg class="ic ic-sm"><use href="#i-save"/></svg> SAVE TO SHEET';
     }
   }
 
+  var initialized = false;
   function init(){
+    if(initialized) { window.latlongRefresh(); return; }
+    initialized = true;
     $('ll-preview-btn').addEventListener('click', doPreview);
     $('ll-save-btn').addEventListener('click', doSave);
     $('ll-search').addEventListener('input', function(){ state.filter=$('ll-search').value; renderList(); });
-    $('ll-order').addEventListener('change', renderKpi);
+    $('ll-order').addEventListener('change', function(){ renderPreview([], null); });
+    $('ll-paste').addEventListener('input', function(){ renderPreview([], null); });
     $('ll-clear-btn').addEventListener('click', async function(){
       if(!confirm('Clear ALL FIX data in LATLONG (retain header)?')) return;
       var res = await run('latlongClearAll');
@@ -305,7 +313,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     $('ll-list').addEventListener('click', function(e){
       var btn = e.target.closest('.ll-delete-btn');
       if(!btn) return;
-      window.latlongDelete(btn.dataset.waypoint);
+      window.latlongDelete(btn.dataset.waypoint, Number(btn.dataset.rowId));
     });
     window.latlongRefresh();
   }

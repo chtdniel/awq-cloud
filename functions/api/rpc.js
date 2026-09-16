@@ -1,3 +1,4 @@
+import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
 import { fetchLatestTafs } from '../../shared/taf.mjs';
 import { parseNotamRow, duFormatDateTimeUTC, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
@@ -9,7 +10,7 @@ const REGISTERED_WRITE_METHODS = new Set([
   'saveNotamData', 'saveTafData', 'generateBriefingPackage', 'saveBriefingForm',
   'saveAirportNotes', 'saveFlightData', 'addNewFlightToDb', 'bulkUpdateFlightDof',
   'bulkClearTafColumns', 'bulkClearCgoColumns', 'saveFlightEnr',
-  'persistAnalysisResults'
+  'persistAnalysisResults', 'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll'
 ]);
 
 const ADMIN_ONLY_METHODS = new Set([
@@ -24,7 +25,7 @@ const AUTHENTICATED_READ_METHODS = new Set([
   'getFlightDashboardData', 'getAllRoutes', 'syncNotamAnalysisState', 'analyzeNotams', 'analyzeFlightNotams', 'analyzeFlightList',
   'firGetNotamEditorData', 'firGetNotamResults', 'firBulkPreviewNotams', 'getTafData', 'fetchLatestTafFromApi',
   'getActiveFlightDataForWarning', 'analyzeWxWithManual', 'getFirData', 'getFirGeometry', 'getActiveNotams', 'getSelectedFlightsData',
-  'getActiveFlightList', 'getFlightSummary', 'latlongGetEditorData', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
+  'getActiveFlightList', 'getFlightSummary', 'latlongGetEditorData', 'latlongGetPreview', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
   'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
   'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'syncCgoData', 'getSettingsAccessInfo'
 ]);
@@ -182,6 +183,14 @@ export async function onRequestPost(context) {
       case 'getFlightSummary':
         return await handleGetActiveFlightList(context);
 
+      case 'latlongGetPreview':
+        return Response.json({ data: previewWaypoints(args[0], args[1]) });
+      case 'latlongSaveBulk':
+        return Response.json({ data: await saveWaypoints(context.env.DB, args[0]) });
+      case 'latlongDeleteWaypoint':
+        return Response.json({ data: await deleteWaypoint(context.env.DB, args[0], args[1]) });
+      case 'latlongClearAll':
+        return Response.json({ data: await clearWaypoints(context.env.DB) });
       case 'latlongGetEditorData':
         return await handleLatlongGetEditorData(context);
 

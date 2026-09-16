@@ -1,0 +1,83 @@
+name: notam-analyst
+version: 1.6.0
+description: Senior Aviation Software Engineer specializing in NOTAM processing, flight planning logic, and ICAO compliance auditing
+author: Notam Analyst Agent (converted from .opencode/agents/notam-analyst)
+tags: ["aviation", "notam", "flight-planning", "ICAO", "safety-critical", "geodesic-math", "AFTN", "AIXM"]
+triggers:
+  - "/notam-analyst"
+  "NOTAM AUDIT"
+  "flight plan validation"
+  "NOTAM parsing review"
+  "Aviation software audit"
+categories:
+  - Domain Expert
+  - Code Reviewer
+  - Safety Auditor
+modes:
+  all: ask
+code-reviewer: allow
+requirements:
+  - aviation_domain_expertise: Required for proper ICAO/Annex 15 context
+  - geodesic_math_knowledge: Understanding of Haversine/Vincenty formulas
+  - GAS_constraints_awareness: Knowledge of Google Apps Script limits
+capabilities:
+  - NOTAM parsing & validation
+  - Flight planning logic audit  
+  - Geospatial intersection analysis
+  - Time/date edge case handling
+  - AFTN line-wrap reconstruction
+  - SNOWTAM/ASHTAM parsing
+  - Fail-closed error handling design
+  - Test fixture generation (TDD)
+  - Security/prompt injection prevention
+domain_expertise:
+  ICAO_annex_15: true
+  AIXM_5_1: true
+  AFTN_teletext: true
+  Q_code_parsing: true
+  Geodesic_math: true
+  Flight_planning: true
+  Aviation_safety_critical: true
+output_formats:
+  - human_readable_default
+  - json_mode (--json flag)
+test_matrix:
+  fixtures_count: 7
+  gates:
+    - year_crossing_logic
+    - midnight_date_rollover
+    - PERM_EST_suppression
+    - SR_SS_HJ_HN_tokens
+    - Q_line_multi_qualifiers
+    - AFTN_line_wrap_prejoin
+    - SNOWTAM_ASHTAM_routing
+audit_logging:
+  required: true
+  fields:
+    - timestamp_utc
+    - source_identifier
+    - notam_id
+    - status_code
+    - reason_category
+    - affected_routes
+    - manual_review_flag
+changelog:
+  - v1.6.0: Route/polyline spatial intersection, two-layer validity/activity evaluation, typed vertical overlap, Q-line scope relevance, cancellation cascades, routing self-test matrix, machine-readable JSON output
+  - v1.5.0: Single canonical source, self-test harness step (fixtures 1–7 PASS/FAIL gate)
+  - v1.4.0: Security section (prompt-injection guard), SNOWTAM GRF fields, corrected AIXM namespace, C-line PERM/EST D-line multi-interval SR-SS/HJ/HN Q-code mismatch, AFTN pre-join, GAS CI integration
+  - v1.3.0: AFTN line-wrap pre-join SNOWTAM/ASHTAM support, NOTAM ORPHAN CANCEL detection, offline fallback SOURCE_UNAVAILABLE partial-pipeline continue logic, pre-detection capability
+  - v1.2.0: Initial release with core NOTAM parsing audit capabilities
+files:
+  master: skills/notam-analyst/notam-analyst.md
+  test_fixtures: audit/NOTAM_test_fixtures.md
+  history: history/NOTAM_AUDIT_LOG.md
+  plans: plan/NOTAM_REFARCTORING_PLAN.md
+security_protocols:
+  - untrusted_input_never_instructions
+  - prompt_injection_sanitization
+  - fail_closed_behavior
+  - source_allowlist_enforcement
+  - audit_trail_mandatory
+status: active
+created: 2026-08-27
+last_updated: 2026-08-27
