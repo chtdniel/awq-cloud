@@ -1535,14 +1535,9 @@
       console.log('[SYSTEM] Attempting switch to:', tabName);
       if (tabName === 'settings' && window.isSettingsAdmin === false) {
         console.warn('[SECURITY] Blocked settings access - not admin');
-        // Do not replace the view: the Settings panel renders its own
-        // access-aware locked state, and Settings itself re-checks the role.
-        var lockHost = document.getElementById('settings-account-locked');
-        var adminPanels = document.getElementById('settings-admin-panels');
-        var tabs = document.getElementById('settings-tabs');
-        if (lockHost) lockHost.hidden = false;
-        if (adminPanels) adminPanels.hidden = true;
-        if (tabs) tabs.hidden = true;
+        // Visibility of the Settings panels is owned by Settings_Ui.html alone.
+        // Touching it here raced with settingsRefreshAll() and could show the
+        // locked notice alongside a fully rendered editor.
         if (typeof window.addToast === 'function') window.addToast('Settings is admin-only');
         return;
       }

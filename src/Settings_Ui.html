@@ -61,21 +61,23 @@
 </div>
 
 <div class="settings-note" style="margin-bottom:14px"><b>Access vocabulary:</b> <b>ADMIN</b> means the account can manage users and settings; <b>REGISTERED</b> means the account can view and update operational data; <b>READ ONLY</b> means the account can view data but cannot save changes. Your level comes from your account role, not from an email list.</div>
-<div class="settings-tabs" role="tablist" aria-label="Settings sections" id="settings-tabs">
+<div class="settings-tabs" role="tablist" aria-label="Settings sections" id="settings-tabs" hidden style="display:none">
   <button type="button" class="btn settings-tab" role="tab" aria-selected="true" data-settings-tab="access">Access Control</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="users">Internal Users</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="wx">WX AI</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="system">System</button>
 </div>
 
-<div id="settings-account-locked" class="locked-panel" hidden style="margin-bottom:14px">
+<div id="settings-account-locked" class="locked-panel" hidden style="display:none;margin-bottom:14px">
   <span class="locked-title">🔒 Settings — Administrator Only</span>
   <p style="margin:0;color:var(--text-secondary);line-height:1.6">Akun Anda tidak memiliki izin mengelola Settings. Halaman ini hanya untuk akun ber-role <b>admin</b>. Hubungi administrator bila Anda memang memerlukan akses ini.</p>
   <span class="locked-line" id="settings-locked-access">—</span>
   <p class="settings-hint" style="margin:0">Anda tetap bisa memakai seluruh modul operasional (Flight, NOTAM, TAF, WX, FIR, Report) sesuai izin role akun.</p>
 </div>
 
-<div id="settings-admin-panels">
+<!-- Fail closed: the admin shell starts hidden and is only revealed after the
+     session role is confirmed, so a non-admin never paints the admin layout. -->
+<div id="settings-admin-panels" hidden style="display:none">
 
 <div class="bezel settings-tab-panel" data-settings-panel="access" style="margin-bottom:14px">
   <div class="bezel-inner" style="padding:16px;display:grid;gap:16px">
@@ -382,6 +384,8 @@
     if(legacyList) legacyList.value = allowed.join('\n');
     document.getElementById('settings-locked-note').style.display = 'none';
     state.revision = res.revision === undefined ? null : res.revision;
+    // Applied last: the admin-state render always wins over any earlier paint.
+    setAccessPanels('admin');
   }
 
   window.settingsRevealRaw = function(){
@@ -429,17 +433,29 @@
   }
 
   // The admin-only shell (tabs + every editable panel) is one element, so a
-  // non-admin never sees an empty shell of half-rendered panels.
+  // non-admin never sees an empty shell of half-rendered panels. This function
+  // is the ONLY writer of these three flags: two writers racing (the navbar
+  // gate and this module) once produced a locked notice next to a live editor.
+  var accessMode = null;
+  var accessCopyCurrent = null;
+
   function setAccessPanels(mode, copy){
+    if (mode) {
+      accessMode = mode;
+      if (copy) accessCopyCurrent = copy;
+    }
     var locked = document.getElementById('settings-account-locked');
     var adminPanels = document.getElementById('settings-admin-panels');
     var tabs = document.getElementById('settings-tabs');
-    if (locked) locked.hidden = mode !== 'locked';
-    if (adminPanels) adminPanels.hidden = mode === 'locked';
-    if (tabs) tabs.hidden = mode === 'locked';
-    if (mode === 'locked' && copy){
+    var isLocked = accessMode === 'locked';
+    // Explicit style wins over any [hidden] rule or attribute mutation.
+    var lockedDisplay = isLocked ? '' : 'none';
+    if (locked) { locked.hidden = !isLocked; locked.style.display = lockedDisplay; }
+    if (adminPanels) { adminPanels.hidden = isLocked; adminPanels.style.display = isLocked ? 'none' : ''; }
+    if (tabs) { tabs.hidden = isLocked; tabs.style.display = isLocked ? 'none' : ''; }
+    if (isLocked && accessCopyCurrent){
       var line = document.getElementById('settings-locked-access');
-      if (line) line.textContent = copy.value + ' — ' + copy.sub;
+      if (line) line.textContent = accessCopyCurrent.value + ' — ' + accessCopyCurrent.sub;
       var note = document.getElementById('settings-locked-note');
       if (note) note.style.display = '';
     }
@@ -1065,6 +1081,7 @@
   document.querySelectorAll('#view-settings [data-settings-panel]').forEach(function(panel){ panel.hidden = panel.getAttribute('data-settings-panel') !== 'access'; });
 
   var accessChecked = false;
+  var accessCheckInFlight = false;
 
   window.settingsRefreshAll = function(){
     if(typeof google==='undefined' || !google.script || !google.script.run){
@@ -1075,29 +1092,34 @@
       settingsSystemRefresh();
       return;
     }
+    // One authorization check at a time: overlapping runs used to apply
+    // conflicting panel states.
+    if(accessCheckInFlight) return;
+    accessCheckInFlight = true;
     // Check authorization once before loading anything: an unauthorized
     // account must never fire the admin RPCs, and must never see the empty
     // shell of panels waiting for data it will not receive.
     google.script.run.withSuccessHandler(function(access){
+      accessCheckInFlight = false;
       if(!access || !access.ok || !access.canView){
         accessChecked = true;
         renderLockedAccess(access || {});
         return;
       }
       accessChecked = true;
-      setAccessPanels('admin');
       if(typeof access.user === 'string' && access.user){
         applyAccessCard(access.user, access.role || access.tier);
       }
+      setAccessPanels('admin');
       authUsersRefresh();
       window.settingsAuditRefresh();
       loadSettingsBundle();
     }).withFailureHandler(function(err){
+      accessCheckInFlight = false;
       accessChecked = true;
-      setAccessPanels('locked', {
-        value: 'CHECK FAILED',
-        sub: (err && err.message) ? err.message : 'could not verify your access'
-      });
+      renderLockedAccess({ user: '', role: '' });
+      var line = document.getElementById('settings-locked-access');
+      if(line) line.textContent = 'CHECK FAILED — ' + ((err && err.message) ? err.message : 'could not verify your access');
       var status = document.getElementById('settings-edit-status');
       if(status) status.textContent = (err && err.message) ? err.message : 'Could not verify access';
     }).getSettingsAccessInfo();
