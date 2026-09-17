@@ -63,6 +63,35 @@ function auditRows(env) {
 
 // ---- Authorization per role ----
 
+// canView means "may open the Settings page". It used to be Boolean(user),
+// which let any signed-in account into Settings while every admin RPC replied
+// 403 — the page rendered as an empty shell of placeholders.
+{
+  const registered = await makeEnv('registered');
+  const info = await rpc(registered, 'getSettingsAccessInfo');
+  assert.equal(info.status, 200);
+  assert.equal(info.data.canView, false, 'a registered account must not be told it can open Settings');
+  assert.equal(info.data.isAuthorized, true, 'the account itself is authenticated');
+  assert.equal(info.data.canEdit, true, 'registered accounts may still change operational data');
+  assert.equal(info.data.tier, 'registered');
+  assert.equal(info.data.role, 'registered', 'the role must be exposed without the legacy flag');
+  registered.database.close();
+
+  const readonlyEnv = await makeEnv('readonly');
+  const roInfo = await rpc(readonlyEnv, 'getSettingsAccessInfo');
+  assert.equal(roInfo.data.canView, false, 'readonly accounts must not reach Settings either');
+  assert.equal(roInfo.data.canEdit, false, 'readonly accounts cannot change operational data');
+  readonlyEnv.database.close();
+
+  const adminEnv = await makeEnv('admin');
+  const adminInfo = await rpc(adminEnv, 'getSettingsAccessInfo');
+  assert.equal(adminInfo.data.canView, true, 'admins keep Settings access');
+  assert.equal(adminInfo.data.canEdit, true);
+  assert.equal(adminInfo.data.canManageUsers, true);
+  adminEnv.database.close();
+}
+console.log('Settings: canView is admin-only while canEdit follows the write policy.');
+
 const ADMIN_ONLY = ['getSettingsBundle', 'getOccSettings', 'getSettingsAdminList', 'adminListUsers', 'adminListAudit', 'wxAiSetCatalog'];
 
 for (const role of ['registered', 'readonly']) {

@@ -1535,8 +1535,14 @@
       console.log('[SYSTEM] Attempting switch to:', tabName);
       if (tabName === 'settings' && window.isSettingsAdmin === false) {
         console.warn('[SECURITY] Blocked settings access - not admin');
-        var sv = document.getElementById('view-settings');
-        if (sv) sv.innerHTML = '<div style="padding:40px;text-align:center;font-family:var(--font-mono);color:var(--text-muted);"><div style="font-size:28px;">🔒</div><div style="font-weight:800;margin:8px 0;color:var(--text-primary);">SETTINGS - ADMIN ONLY</div><div>Your account is not listed in SETTINGS_ADMIN_EMAILS.<br>Contact admin for access.</div></div>';
+        // Do not replace the view: the Settings panel renders its own
+        // access-aware locked state, and Settings itself re-checks the role.
+        var lockHost = document.getElementById('settings-account-locked');
+        var adminPanels = document.getElementById('settings-admin-panels');
+        var tabs = document.getElementById('settings-tabs');
+        if (lockHost) lockHost.hidden = false;
+        if (adminPanels) adminPanels.hidden = true;
+        if (tabs) tabs.hidden = true;
         if (typeof window.addToast === 'function') window.addToast('Settings is admin-only');
         return;
       }
@@ -1690,6 +1696,8 @@
       try {
         if (typeof google !== 'undefined' && google.script && google.script.run) {
           google.script.run.withSuccessHandler(function(res) {
+            // canView now answers exactly one question: may this account open
+            // the Settings page? It is admin-only on the server.
             var canView = !!(res && res.ok && res.canView);
             window.isSettingsAdmin = canView;
             var nav = document.getElementById('nav-settings');

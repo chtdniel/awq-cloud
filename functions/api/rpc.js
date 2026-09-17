@@ -3095,8 +3095,12 @@ async function getAccess(context) {
     user: user?.email || '',
     requestUser: user,
     tier,
+    role: tier,
     isAuthorized: Boolean(user),
-    canView: Boolean(user),
+    // canView means "may open the Settings page", which is admin-only. It used
+    // to be Boolean(user), so the navbar gate let any signed-in account into
+    // Settings while every admin RPC answered 403 — an empty shell of a page.
+    canView: tier === 'admin',
     canEdit: tier === 'admin' || tier === 'registered',
     canManageUsers: tier === 'admin',
     mustChangePassword: Boolean(user?.mustChangePassword),

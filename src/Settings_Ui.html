@@ -49,6 +49,10 @@
   #view-settings .settings-tab[aria-selected="true"]{background:var(--accent-primary);color:#fff;border-color:var(--accent-primary)}
   #view-settings .settings-tab-panel[hidden]{display:none}
   #view-settings .settings-invalid{border-color:var(--status-critical)!important}
+  #view-settings .locked-panel{background:var(--bg-panel);border:1px solid var(--border-light);border-left:3px solid var(--status-warning);border-radius:var(--radius-md);box-shadow:var(--shadow-soft);padding:18px 20px;display:grid;gap:10px}
+  #view-settings .locked-title{font:800 14px var(--font-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--text-primary)}
+  #view-settings .locked-line{font:600 12px var(--font-mono);color:var(--text-secondary)}
+  #view-settings .locked-line b{color:var(--text-primary)}
 </style>
 
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -57,12 +61,21 @@
 </div>
 
 <div class="settings-note" style="margin-bottom:14px"><b>Access vocabulary:</b> <b>ADMIN</b> means the account can manage users and settings; <b>REGISTERED</b> means the account can view and update operational data; <b>READ ONLY</b> means the account can view data but cannot save changes. Your level comes from your account role, not from an email list.</div>
-<div class="settings-tabs" role="tablist" aria-label="Settings sections">
+<div class="settings-tabs" role="tablist" aria-label="Settings sections" id="settings-tabs">
   <button type="button" class="btn settings-tab" role="tab" aria-selected="true" data-settings-tab="access">Access Control</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="users">Internal Users</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="wx">WX AI</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="system">System</button>
 </div>
+
+<div id="settings-account-locked" class="locked-panel" hidden style="margin-bottom:14px">
+  <span class="locked-title">🔒 Settings — Administrator Only</span>
+  <p style="margin:0;color:var(--text-secondary);line-height:1.6">Akun Anda tidak memiliki izin mengelola Settings. Halaman ini hanya untuk akun ber-role <b>admin</b>. Hubungi administrator bila Anda memang memerlukan akses ini.</p>
+  <span class="locked-line" id="settings-locked-access">—</span>
+  <p class="settings-hint" style="margin:0">Anda tetap bisa memakai seluruh modul operasional (Flight, NOTAM, TAF, WX, FIR, Report) sesuai izin role akun.</p>
+</div>
+
+<div id="settings-admin-panels">
 
 <div class="bezel settings-tab-panel" data-settings-panel="access" style="margin-bottom:14px">
   <div class="bezel-inner" style="padding:16px;display:grid;gap:16px">
@@ -184,7 +197,7 @@
     <span id="settings-wxai-badge" class="badge badge-warn">—</span>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
-    <div class="settings-note">Katalog model AI halaman WX + master kill-switch. Tersimpan di Script Properties <code>WX_AI_CATALOG</code> / <code>WX_AI_ENABLED</code>. API key tidak pernah disimpan di sini.</div>
+    <div class="settings-note">Katalog model AI halaman WX + master kill-switch. Tersimpan di tabel <code>meta</code> D1 sebagai <code>WX_AI_CATALOG</code> / <code>WX_AI_ENABLED</code>. API key tidak pernah disimpan di sini.</div>
     <label style="display:flex;align-items:center;gap:8px;font:700 12px var(--font-mono);color:var(--text-primary)" for="settings-wxai-enabled">
       <input type="checkbox" id="settings-wxai-enabled" style="width:16px;height:16px"> AI Enabled (master kill-switch)
     </label>
@@ -229,6 +242,7 @@
     </div>
   </div>
 </div>
+</div><!-- /#settings-admin-panels -->
 
 <div id="settings-modal-backdrop" class="modal-backdrop">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
@@ -348,26 +362,8 @@
 
   function apply(res){
     state = res;
-    var role = String(res.accountRole || res.tier || '').toLowerCase();
-    var badge = document.getElementById('settings-mode-badge');
-    // Otorisasi kini dari role akun; badge menjelaskan peran, bukan allowlist.
-    badge.textContent = role ? role.toUpperCase() : 'UNKNOWN ROLE';
-    badge.className = 'badge ' + (role === 'admin' ? 'badge-safe' : (role === 'registered' ? 'badge-warn' : 'badge-crit'));
-    document.getElementById('settings-kpi-user').textContent = res.currentUser || '(anonymous / no login)';
-    document.getElementById('settings-kpi-user').title = res.currentUser || '';
-    document.getElementById('settings-kpi-mode').textContent = role ? role.toUpperCase() : '—';
-    document.getElementById('settings-kpi-mode-sub').textContent = 'authoritative source: D1 session role';
-    // Second card states the permission this page grants, so it does not just
-    // repeat the account role shown next to it.
-    var authEl = document.getElementById('settings-kpi-auth');
-    var accessCopy = {
-      admin: { value: 'FULL', sub: 'can manage users, settings, and audit' },
-      registered: { value: 'UPDATE', sub: 'can change operational data' },
-      readonly: { value: 'VIEW ONLY', sub: 'cannot save changes' }
-    }[role] || { value: 'NONE', sub: 'no account role resolved' };
-    authEl.textContent = accessCopy.value;
-    authEl.parentElement.className = 'kpi-card ' + (role === 'admin' ? 'safe' : (role === 'registered' ? 'info' : 'crit'));
-    document.getElementById('settings-kpi-auth-sub').textContent = accessCopy.sub;
+    applyAccessCard(res.currentUser, String(res.accountRole || res.tier || '').toLowerCase());
+    setAccessPanels('admin');
 
     var chips = document.getElementById('settings-chips');
     var empty = document.getElementById('settings-empty');
@@ -406,6 +402,60 @@
   };
 
   function legacyStatus(text){ var el=document.getElementById('settings-edit-status'); if(el) el.textContent = text || ''; }
+
+  // Shared by the admin bundle and the self-access fallback so the access card
+  // is populated in both cases and never left showing "—".
+  var ROLE_DESCRIPTIONS = {
+    admin: { value: 'FULL', sub: 'can manage users, settings, and audit', card: 'safe' },
+    registered: { value: 'UPDATE', sub: 'can change operational data', card: 'info' },
+    readonly: { value: 'VIEW ONLY', sub: 'cannot save changes', card: 'crit' }
+  };
+
+  function applyAccessCard(email, role){
+    var key = String(role || '').toLowerCase();
+    var copy = ROLE_DESCRIPTIONS[key] || { value: 'NONE', sub: 'no account role resolved', card: 'crit' };
+    document.getElementById('settings-kpi-user').textContent = email || '(anonymous / no login)';
+    document.getElementById('settings-kpi-user').title = email || '';
+    document.getElementById('settings-kpi-mode').textContent = key ? key.toUpperCase() : '—';
+    document.getElementById('settings-kpi-mode-sub').textContent = 'authoritative source: D1 session role';
+    var authEl = document.getElementById('settings-kpi-auth');
+    authEl.textContent = copy.value;
+    authEl.parentElement.className = 'kpi-card ' + copy.card;
+    document.getElementById('settings-kpi-auth-sub').textContent = copy.sub;
+    var badge = document.getElementById('settings-mode-badge');
+    badge.textContent = key ? key.toUpperCase() : 'UNKNOWN ROLE';
+    badge.className = 'badge ' + (key === 'admin' ? 'badge-safe' : (key === 'registered' ? 'badge-warn' : 'badge-crit'));
+    return copy;
+  }
+
+  // The admin-only shell (tabs + every editable panel) is one element, so a
+  // non-admin never sees an empty shell of half-rendered panels.
+  function setAccessPanels(mode, copy){
+    var locked = document.getElementById('settings-account-locked');
+    var adminPanels = document.getElementById('settings-admin-panels');
+    var tabs = document.getElementById('settings-tabs');
+    if (locked) locked.hidden = mode !== 'locked';
+    if (adminPanels) adminPanels.hidden = mode === 'locked';
+    if (tabs) tabs.hidden = mode === 'locked';
+    if (mode === 'locked' && copy){
+      var line = document.getElementById('settings-locked-access');
+      if (line) line.textContent = copy.value + ' — ' + copy.sub;
+      var note = document.getElementById('settings-locked-note');
+      if (note) note.style.display = '';
+    }
+  }
+
+  // Non-admins only reach this by forcing the tab, so answer the useful
+  // question ("what is my access?") and point them at an administrator.
+  function renderLockedAccess(access){
+    var role = String((access && (access.role || access.tier)) || '').toLowerCase();
+    var copy = applyAccessCard(access && access.user, role);
+    setAccessPanels('locked', copy);
+    var count = document.getElementById('settings-count');
+    if (count) count.textContent = '';
+    var status = document.getElementById('settings-edit-status');
+    if (status) status.textContent = '';
+  }
 
   var toastTimer = null;
   window.settingsToast = function(msg){
@@ -1014,15 +1064,46 @@
   });
   document.querySelectorAll('#view-settings [data-settings-panel]').forEach(function(panel){ panel.hidden = panel.getAttribute('data-settings-panel') !== 'access'; });
 
+  var accessChecked = false;
+
   window.settingsRefreshAll = function(){
-    authUsersRefresh();
-    window.settingsAuditRefresh();
     if(typeof google==='undefined' || !google.script || !google.script.run){
+      authUsersRefresh();
+      window.settingsAuditRefresh();
       settingsRefresh(true);
       settingsAdminRefresh();
       settingsSystemRefresh();
       return;
     }
+    // Check authorization once before loading anything: an unauthorized
+    // account must never fire the admin RPCs, and must never see the empty
+    // shell of panels waiting for data it will not receive.
+    google.script.run.withSuccessHandler(function(access){
+      if(!access || !access.ok || !access.canView){
+        accessChecked = true;
+        renderLockedAccess(access || {});
+        return;
+      }
+      accessChecked = true;
+      setAccessPanels('admin');
+      if(typeof access.user === 'string' && access.user){
+        applyAccessCard(access.user, access.role || access.tier);
+      }
+      authUsersRefresh();
+      window.settingsAuditRefresh();
+      loadSettingsBundle();
+    }).withFailureHandler(function(err){
+      accessChecked = true;
+      setAccessPanels('locked', {
+        value: 'CHECK FAILED',
+        sub: (err && err.message) ? err.message : 'could not verify your access'
+      });
+      var status = document.getElementById('settings-edit-status');
+      if(status) status.textContent = (err && err.message) ? err.message : 'Could not verify access';
+    }).getSettingsAccessInfo();
+  };
+
+  function loadSettingsBundle(){
     google.script.run.withSuccessHandler(function(bundle){
       if(!bundle || !bundle.ok){ settingsRefresh(true); settingsAdminRefresh(); settingsSystemRefresh(); return; }
       try {
@@ -1040,8 +1121,7 @@
     }).withFailureHandler(function(){
       settingsRefresh(true); settingsAdminRefresh(); settingsSystemRefresh();
     }).getSettingsBundle();
-  };
-
+  }
   // Auto-load when tab becomes visible (ponytail: observe the view only — body-wide observer re-fires on every class change and loops Loading)
   var settingsWasActive = false;
   var obs = new MutationObserver(function(){
@@ -1184,7 +1264,9 @@
   }
 
   function applyAccess(access){
-    wxAiCanEdit = !!(access && (access.canView || access.canEdit));
+    // The WX AI editor is admin-only on the server, so the client mirrors the
+    // same rule instead of treating a generic "can view" flag as edit rights.
+    wxAiCanEdit = !!access && (access.tier === 'admin' || access.role === 'admin');
     document.getElementById('settings-wxai-save').disabled = !wxAiCanEdit;
     document.getElementById('settings-wxai-enabled').disabled = !wxAiCanEdit;
   }
