@@ -17,7 +17,7 @@ const ADMIN_ONLY_METHODS = new Set([
   'setSettingsAdminEmails', 'setOccAllowedEmails',
   'getSettingsAdminList', 'getOccSettings', 'getOccSystemSettings', 'getSettingsBundle',
   'adminListUsers', 'adminCreateUser', 'adminUpdateUserRole', 'adminSetUserActive', 'adminResetPassword',
-  'adminSaveProfile',
+  'adminSaveProfile', 'adminListAudit',
   'wxAiSetCatalog',
   'latlongGetEditorData', 'latlongGetPreview',
   'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll'
@@ -62,6 +62,9 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'Invalid CSRF token.', code: 'CSRF_INVALID' }, { status: 403 });
     }
     if (ADMIN_ONLY_METHODS.has(method) && access.tier !== 'admin') {
+      // Denied attempts are auditable too: an attacker probing admin RPCs
+      // should leave a trace, not just a 403 in the logs.
+      await audit(context, access.requestUser?.id || null, 'admin_method_denied', null, 'denied', `${method} (tier:${access.tier})`);
       return Response.json({
         error: 'Forbidden: administrator access is required for this operation.',
         code: 'ADMIN_REQUIRED',
@@ -106,6 +109,8 @@ export async function onRequestPost(context) {
         return await handleAdminSetUserActive(context, access.requestUser, args);
       case 'adminResetPassword':
         return await handleAdminResetPassword(context, access.requestUser, args);
+      case 'adminListAudit':
+        return await handleAdminListAudit(context, access.requestUser);
       case 'getFlightDashboardData':
         return await handleGetFlightDashboardData(context);
         
@@ -2676,6 +2681,52 @@ function adminOnly(user) {
   return user && user.role === 'admin';
 }
 
+// Settings editors send back the revision they rendered. A different revision
+// means another admin saved in between, so the write is refused instead of
+// silently overwriting the newer value.
+const SETTINGS_KEYS = {
+  occAllowedEmails: 'OCC_ALLOWED_EMAILS',
+  settingsAdminEmails: 'SETTINGS_ADMIN_EMAILS',
+  wxAiCatalog: 'WX_AI_CATALOG'
+};
+
+// Non-cryptographic (FNV-1a) stamp: it only has to detect "someone saved after
+// me", not resist an attacker who can already write to the settings store.
+function revisionOf(storedValue) {
+  const text = storedValue === null || storedValue === undefined ? '' : String(storedValue);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+// A caller that sends no revision at all is an older client and stays
+// permissive; a caller that sends null is claiming "the value was absent",
+// which is never true once a value exists.
+function revisionMismatch(expected, current) {
+  if (expected === undefined) return false;
+  return expected === null || String(expected) !== String(current);
+}
+
+function staleRevisionResponse(label, currentRevision) {
+  return Response.json({
+    error: `This ${label} changed after you loaded it. Refresh to see the latest version before saving.`,
+    code: 'STALE_REVISION',
+    currentRevision
+  }, { status: 409 });
+}
+
+// Legacy settings retained for cutover evidence only. Authorization now comes
+// from the D1 account role, so these keys must never be writable again.
+function legacySettingsResponse(key) {
+  return Response.json({
+    error: `${key} is legacy: it no longer controls access. Manage access through Internal Users (account roles).`,
+    code: 'LEGACY_SETTING_READ_ONLY'
+  }, { status: 409 });
+}
+
 function roleValue(value) {
   const role = String(value || '').trim().toLowerCase();
   if (!['admin', 'registered', 'readonly'].includes(role)) throw new Error('Invalid role');
@@ -3066,21 +3117,6 @@ function normalizeEmailList(csv) {
     return out;
 }
 
-function parseValidatedEmailList(csv) {
-  const entries = String(csv || '').split(/[,;\n]+/).map(value => String(value || '').trim()).filter(Boolean);
-  const invalid = [];
-  const valid = [];
-  for (const entry of entries) {
-    try { valid.push(normalizeEmail(entry)); } catch { invalid.push(entry); }
-  }
-  if (invalid.length) {
-    const error = new Error(`Invalid email entries: ${invalid.slice(0, 10).join(', ')}`);
-    error.status = 400;
-    throw error;
-  }
-  return normalizeEmailList(valid.join(','));
-}
-
 async function metaGet(context, key) {
     try {
         const row = await context.env.DB.prepare('SELECT value FROM meta WHERE key = ?').bind(key).first();
@@ -3088,23 +3124,51 @@ async function metaGet(context, key) {
     } catch { return ''; }
 }
 
+// { value, revision, present } — `present` distinguishes "never configured"
+// (value legitimately empty) from "configured as empty", which the audit
+// summary needs when reporting one-time seeds.
+// An unset value still gets a deterministic revision (the hash of ""), so an
+// editor that rendered "not configured yet" cannot silently overwrite a value
+// another admin created in the meantime.
+async function metaGetWithRevision(context, key) {
+    const value = await metaGet(context, key);
+    const present = value !== '';
+    return { value, revision: revisionOf(value), present };
+}
+
 async function metaSet(context, key, value) {
     if (!value) {
         await context.env.DB.prepare('DELETE FROM meta WHERE key = ?').bind(key).run();
-        return;
+        return null;
     }
     await context.env.DB.prepare(
         'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
     ).bind(key, value).run();
+    return revisionOf(value);
 }
+
+// ---- Legacy settings (read-only) ----
+// OCC_ALLOWED_EMAILS / SETTINGS_ADMIN_EMAILS no longer grant access: the D1
+// session role does. They stay visible for cutover evidence, and any write is
+// refused so the two sources of truth cannot drift apart again.
 
 async function handleGetSettingsAdminList(context) {
   const access = await getAccess(context);
   if (access.tier !== 'admin') {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
-  const raw = await metaGet(context, 'SETTINGS_ADMIN_EMAILS');
-  return Response.json({ data: { ok: true, raw, admins: normalizeEmailList(raw), currentUser: (await getAccess(context)).user } });
+  const stored = await metaGetWithRevision(context, SETTINGS_KEYS.settingsAdminEmails);
+  return Response.json({
+    data: {
+      ok: true,
+      raw: stored.value,
+      admins: normalizeEmailList(stored.value),
+      currentUser: access.user,
+      revision: stored.revision,
+      legacy: true,
+      readOnly: true
+    }
+  });
 }
 
 async function handleSetSettingsAdminEmails(context, args) {
@@ -3112,12 +3176,8 @@ async function handleSetSettingsAdminEmails(context, args) {
   if (access.tier !== 'admin') {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
-  const [csv] = args;
-  const before = await metaGet(context, 'SETTINGS_ADMIN_EMAILS');
-  const deduped = parseValidatedEmailList(csv);
-  await metaSet(context, 'SETTINGS_ADMIN_EMAILS', deduped.join(', '));
-  await audit(context, access.userId, 'settings_admin_list_updated', null, 'success', `count:${deduped.length}; changed:${before !== deduped.join(', ')}`);
-  return Response.json({ data: await getAccess(context) });
+  await audit(context, access.userId, 'legacy_settings_write_denied', null, 'denied', SETTINGS_KEYS.settingsAdminEmails);
+  return legacySettingsResponse(SETTINGS_KEYS.settingsAdminEmails);
 }
 
 async function handleGetOccSettings(context) {
@@ -3125,10 +3185,22 @@ async function handleGetOccSettings(context) {
   if (access.tier !== 'admin') {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
-  const raw = await metaGet(context, 'OCC_ALLOWED_EMAILS');
-  const allowed = normalizeEmailList(raw);
+  const stored = await metaGetWithRevision(context, SETTINGS_KEYS.occAllowedEmails);
+  const allowed = normalizeEmailList(stored.value);
   return Response.json({
-    data: { ok: true, raw, allowed, currentUser: access.user, isAuthorized: true, isOpen: false, tier: access.tier }
+    data: {
+      ok: true,
+      raw: stored.value,
+      allowed,
+      currentUser: access.user,
+      isAuthorized: true,
+      isOpen: allowed.length === 0,
+      isLegacy: true,
+      readOnly: true,
+      revision: stored.revision,
+      tier: access.tier,
+      accountRole: access.tier
+    }
   });
 }
 
@@ -3137,57 +3209,100 @@ async function handleSetOccAllowedEmails(context, args) {
   if (access.tier !== 'admin') {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
-  const [csv] = args;
-    const before = await metaGet(context, 'OCC_ALLOWED_EMAILS');
-    const deduped = parseValidatedEmailList(csv);
-    await metaSet(context, 'OCC_ALLOWED_EMAILS', deduped.join(', '));
-    await audit(context, access.userId, 'occ_allowlist_updated', null, 'success', `count:${deduped.length}; changed:${before !== deduped.join(', ')}`);
-    return handleGetOccSettings(context);
+  await audit(context, access.userId, 'legacy_settings_write_denied', null, 'denied', SETTINGS_KEYS.occAllowedEmails);
+  return legacySettingsResponse(SETTINGS_KEYS.occAllowedEmails);
 }
 
 const WX_AI_DEFAULT_CATALOG = [
   { id: 'gemini-flash-lite', provider: 'gemini', model: 'gemini-3.5-flash-lite', label: 'Gemini · 3.5-flash-lite', enabled: true }
 ];
 
+// Per-row validation: the error carries `fields` keyed by catalog index so the
+// editor can highlight the offending row instead of failing the whole save.
 function validateWxCatalog(value) {
-  if (!value || typeof value !== 'object' || !Array.isArray(value.catalog) || value.catalog.length > 50) throw new Error('Invalid WX AI catalog');
+  if (!value || typeof value !== 'object' || !Array.isArray(value.catalog) || value.catalog.length > 50) {
+    const error = new Error('WX AI catalog must be a list of at most 50 models.');
+    error.status = 400;
+    error.code = 'WX_CATALOG_INVALID';
+    error.fields = { catalog: 'Catalog must be an array of at most 50 models.' };
+    throw error;
+  }
   const seen = new Set();
-  const catalog = value.catalog.map((item) => {
-    if (!item || typeof item !== 'object') throw new Error('Invalid WX AI catalog row');
+  const fields = {};
+  const catalog = value.catalog.map((item, index) => {
+    if (!item || typeof item !== 'object') {
+      fields[`row${index}.id`] = 'Row is not a valid model entry.';
+      return null;
+    }
     const id = String(item.id || '').trim().toLowerCase();
     const provider = String(item.provider || '').trim().toLowerCase();
     const model = String(item.model || '').trim();
     const label = String(item.label || '').trim();
-    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id) || !['gemini', 'openrouter', 'custom'].includes(provider) || !model || model.length > 160 || !label || label.length > 160 || seen.has(id)) throw new Error(`Invalid WX AI catalog row: ${id || 'missing id'}`);
-    seen.add(id);
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id)) fields[`row${index}.id`] = 'ID must be 2-64 characters: lowercase letters, digits, and dashes.';
+    else if (seen.has(id)) fields[`row${index}.id`] = `Duplicate model ID "${id}".`;
+    if (!['gemini', 'openrouter', 'custom'].includes(provider)) fields[`row${index}.provider`] = 'Provider must be gemini, openrouter, or custom.';
+    if (!model || model.length > 160) fields[`row${index}.model`] = 'Model value is required and must be at most 160 characters.';
+    if (!label || label.length > 160) fields[`row${index}.label`] = 'Label is required and must be at most 160 characters.';
+    if (id) seen.add(id);
     return { id, provider, model, label, enabled: item.enabled !== false };
   });
+  if (Object.keys(fields).length) {
+    const error = new Error(`Invalid WX AI catalog: ${Object.keys(fields).length} field(s) need attention.`);
+    error.status = 400;
+    error.code = 'WX_CATALOG_INVALID';
+    error.fields = fields;
+    throw error;
+  }
   return { enabled: value.enabled !== false, catalog };
 }
 
 async function handleWxAiGetCatalog(context) {
-  const raw = await metaGet(context, 'WX_AI_CATALOG');
+  const stored = await metaGetWithRevision(context, SETTINGS_KEYS.wxAiCatalog);
   const enabledRaw = await metaGet(context, 'WX_AI_ENABLED');
-  if (!raw) return Response.json({ data: { ok: true, enabled: enabledRaw !== 'false', catalog: WX_AI_DEFAULT_CATALOG, source: 'default' } });
+  if (!stored.present) {
+    return Response.json({
+      data: { ok: true, enabled: enabledRaw !== 'false', catalog: WX_AI_DEFAULT_CATALOG, source: 'default', revision: stored.revision }
+    });
+  }
   try {
-    const parsed = validateWxCatalog(JSON.parse(raw));
-    return Response.json({ data: { ok: true, ...parsed, source: 'property' } });
+    const parsed = validateWxCatalog(JSON.parse(stored.value));
+    return Response.json({ data: { ok: true, ...parsed, source: 'property', revision: stored.revision } });
   } catch {
-    return Response.json({ data: { ok: true, enabled: false, catalog: [], source: 'fail-closed', warning: 'WX AI catalog is invalid; AI is disabled until an admin saves a valid catalog.' } });
+    return Response.json({
+      data: {
+        ok: true, enabled: false, catalog: [], source: 'fail-closed',
+        revision: stored.revision,
+        warning: 'WX AI catalog is invalid; AI is disabled until an admin saves a valid catalog.'
+      }
+    });
   }
 }
 
 async function handleWxAiSetCatalog(context, user, args) {
   if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
-  const payload = validateWxCatalog(Array.isArray(args) ? args[0] : null);
-  await metaSet(context, 'WX_AI_CATALOG', JSON.stringify(payload));
+  const input = Array.isArray(args) ? args[0] : null;
+  const current = await metaGetWithRevision(context, SETTINGS_KEYS.wxAiCatalog);
+  const expectedRevision = input && input.expectedRevision !== undefined ? input.expectedRevision : undefined;
+  if (revisionMismatch(expectedRevision, current.revision)) return staleRevisionResponse('WX AI catalog', current.revision);
+  const payload = validateWxCatalog(input);
+  const nextRevision = await metaSet(context, SETTINGS_KEYS.wxAiCatalog, JSON.stringify(payload));
   await metaSet(context, 'WX_AI_ENABLED', payload.enabled ? 'true' : 'false');
   await audit(context, user.id, 'wx_ai_catalog_updated', null, 'success', `enabled:${payload.enabled}; count:${payload.catalog.length}`);
-  return Response.json({ data: { ok: true, ...payload, source: 'property' } });
+  return Response.json({ data: { ok: true, ...payload, source: 'property', revision: nextRevision } });
 }
 
 function getOpenSystemSettings() {
-    return { ok: true, spreadsheetId: '', spreadsheetName: 'D1 (Cloudflare)', timezone: 'Asia/Makassar', occFirLink: '', occFirLinkDeprecated: true };
+    return {
+      ok: true,
+      dataSource: 'Cloudflare D1 (awq-db)',
+      spreadsheetId: '',
+      spreadsheetName: 'D1 (Cloudflare)',
+      timezone: 'Asia/Makassar',
+      occFirLink: '',
+      occFirLinkDeprecated: true,
+      revision: null,
+      serverTime: new Date().toISOString()
+    };
 }
 
 async function handleGetSettingsBundle(context) {
@@ -3196,7 +3311,76 @@ async function handleGetSettingsBundle(context) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
   const settings = (await handleGetOccSettings(context).then(r => r.json())).data;
-    const adminsRes = await handleGetSettingsAdminList(context).then(r => r.json());
-    const wx = (await handleWxAiGetCatalog(context).then(r => r.json())).data;
-    return Response.json({ data: { ok: true, access, settings, admins: adminsRes.data, system: getOpenSystemSettings(), wx } });
+  const adminsRes = (await handleGetSettingsAdminList(context).then(r => r.json())).data;
+  const wx = (await handleWxAiGetCatalog(context).then(r => r.json())).data;
+  return Response.json({
+    data: {
+      ok: true,
+      access,
+      settings,
+      admins: adminsRes,
+      system: getOpenSystemSettings(),
+      wx,
+      legacySettings: {
+        occAllowedEmails: { key: SETTINGS_KEYS.occAllowedEmails, readOnly: true },
+        settingsAdminEmails: { key: SETTINGS_KEYS.settingsAdminEmails, readOnly: true }
+      }
+    }
+  });
+}
+
+// ---- Audit log (read-only) ----
+
+// Retention: keep the newest entries, bounded by both age and row count. The
+// audit table has no natural key to expire on, so pruning is opportunistic —
+// it runs when an admin opens the log and when a fresh entry is appended.
+const AUDIT_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
+const AUDIT_MAX_ROWS = 5000;
+const AUDIT_LIST_LIMIT = 100;
+
+async function auditPrune(context) {
+  const cutoff = new Date(Date.now() - AUDIT_MAX_AGE_MS).toISOString();
+  let pruned = 0;
+  try {
+    const byAge = await context.env.DB.prepare('DELETE FROM auth_audit_log WHERE created_at < ?').bind(cutoff).run();
+    pruned += Number(byAge.meta?.changes || 0);
+    const byCount = await context.env.DB.prepare(
+      'DELETE FROM auth_audit_log WHERE id NOT IN (SELECT id FROM auth_audit_log ORDER BY id DESC LIMIT ?)'
+    ).bind(AUDIT_MAX_ROWS).run();
+    pruned += Number(byCount.meta?.changes || 0);
+  } catch (error) {
+    console.warn('[AUTH] audit prune skipped:', error.message);
+  }
+  return pruned;
+}
+
+async function handleAdminListAudit(context, user) {
+  if (!adminOnly(user)) {
+    await audit(context, null, 'admin_method_denied', null, 'denied', 'adminListAudit');
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  const pruned = await auditPrune(context);
+  const { results } = await context.env.DB.prepare(
+    `SELECT a.id, a.action, a.result, a.change_summary AS changeSummary,
+            a.request_id AS requestId, a.created_at AS createdAt,
+            actor.email_display AS actorEmail, target.email_display AS targetEmail,
+            a.target_user_id AS targetUserId
+       FROM auth_audit_log a
+       LEFT JOIN auth_users actor ON actor.id = a.actor_user_id
+       LEFT JOIN auth_users target ON target.id = a.target_user_id
+      ORDER BY a.id DESC LIMIT ?`
+  ).bind(AUDIT_LIST_LIMIT).all();
+  return Response.json({
+    data: {
+      ok: true,
+      entries: results || [],
+      limit: AUDIT_LIST_LIMIT,
+      pruned,
+      retention: {
+        maxAgeDays: AUDIT_MAX_AGE_MS / (24 * 60 * 60 * 1000),
+        maxRows: AUDIT_MAX_ROWS,
+        redaction: 'Audit entries never contain passwords, session tokens, or full sensitive payloads.'
+      }
+    }
+  });
 }

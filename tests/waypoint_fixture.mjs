@@ -32,7 +32,7 @@ export async function createWaypointFixture(role = 'admin') {
     }
   };
   const authHeaders = await seedAuthUser(database, DB, role);
-  database.exec('ALTER TABLE auth_audit_log ADD COLUMN change_summary TEXT');
+  // change_summary already comes from rpc_auth_fixture (migration 009 shape).
   async function rpc(method, args = [], headers = authHeaders) {
     const response = await onRequestPost({ env: { DB }, request: new Request('http://localhost/api/rpc', {
       method: 'POST', headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', ...headers },

@@ -1,5 +1,7 @@
 # AWQ OCC Settings Improvement Execution Plan
 
+Status: ✅ APPROVED 2026-09-18 — dieksekusi 2026-09-18 (lihat "Execution Result").
+
 ## Objective
 
 Make the Settings page easier to understand and safer to operate, while preserving the existing access-control model and admin-only protections.
@@ -106,3 +108,35 @@ Make the Settings page easier to understand and safer to operate, while preservi
 4. Email masking and accessibility polish.
 5. Server-side audit events and security tests.
 6. Final role-based manual QA and release review.
+
+## Execution Result (2026-09-18)
+
+Approved by the product owner in-session. Scope additions confirmed: audit log read/retention, accessible Role & Reset Password modals, browser-side WX AI row validation, and Settings authorization tests.
+
+### Delivered
+
+| Item | Where |
+|---|---|
+| Four tabs (Access Control / Internal Users / WX AI / System); Access Control now explains role-based access | `src/Settings_Ui.html` |
+| `OCC_ALLOWED_EMAILS` and `SETTINGS_ADMIN_EMAILS` demoted to read-only legacy, with the reason stated in the UI | `src/Settings_Ui.html`, `functions/api/rpc.js` (`legacySettingsResponse`) |
+| Legacy writes refused with `409 LEGACY_SETTING_READ_ONLY` and audited as `legacy_settings_write_denied` | `functions/api/rpc.js` |
+| Revision stamp (FNV-1a) on every settings value; `expectedRevision` required on WX AI saves, `409 STALE_REVISION` on conflict, shared stale-revision dialog in the UI | `functions/api/rpc.js`, `src/Settings_Ui.html` |
+| Audit trail: retention 180 days / 5000 rows, opportunistic pruning, `adminListAudit` reader, read-only Audit Log panel in Internal Users | `functions/api/rpc.js`, `src/Settings_Ui.html` |
+| Denied admin RPC attempts audited as `admin_method_denied` with the actor and tier | `functions/api/rpc.js` |
+| `window.prompt` removed for Change Role and Reset Password; both are accessible modals with focus management, Escape, and server field errors | `src/Settings_Ui.html` |
+| WX AI rows validated in the browser before Save, with per-row messages and disabled Save | `src/Settings_Ui.html` |
+| Per-field WX AI validation on the server (`400 WX_CATALOG_INVALID`, `fields['rowN.field']`) | `functions/api/rpc.js` |
+| System tab: D1 data source, timezone, last refresh, configuration status, legacy fields behind a toggle | `src/Settings_Ui.html` |
+| Settings authorization/conflict/validation tests, wired into `npm test` | `tests/test_settings_rpc.mjs` |
+
+### Verification
+
+- `npm test` → 15/15 pass (includes the new `tests/test_settings_rpc.mjs`).
+- `node build.js` → `public/index.html` rebuilt from `src/` and verified to contain the new panels.
+- Not covered by automated tests: live WX AI model calls and manual keyboard/AT walkthrough in the deployed surface.
+
+### Known follow-ups
+
+- `isAuthorized`/`isOpen` on `getOccSettings` are now only informational; the authoritative tier lives on `access`/`accountRole`.
+- The revision stamp is a change detector, not a security control: it assumes an authorised writer.
+

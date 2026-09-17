@@ -18,7 +18,8 @@ export async function seedAuthUser(database, DB, role = 'registered') {
     );
     CREATE TABLE auth_audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, actor_user_id INTEGER, action TEXT,
-      target_user_id INTEGER, request_id TEXT, result TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      target_user_id INTEGER, request_id TEXT, result TEXT, change_summary TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
   const encoded = await hashPassword('correct horse battery staple');

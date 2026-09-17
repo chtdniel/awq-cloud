@@ -12837,10 +12837,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
   <span class="eyebrow">Security — Access Control (ADMIN ONLY)</span>
-  <span class="settings-hint">Script Property • ANYONE_ANONYMOUS + allowlist</span>
+  <span class="settings-hint">Akses ditentukan oleh role akun (D1 auth_users), bukan allowlist</span>
 </div>
 
-<div class="settings-note" style="margin-bottom:14px"><b>Access vocabulary:</b> <b>RESTRICTED</b> means the allowlist is enforced; <b>AUTHORIZED</b> means your signed-in account may perform the displayed action; <b>READ ONLY</b> means you can view data but cannot save changes.</div>
+<div class="settings-note" style="margin-bottom:14px"><b>Access vocabulary:</b> <b>ADMIN</b> means the account can manage users and settings; <b>REGISTERED</b> means the account can view and update operational data; <b>READ ONLY</b> means the account can view data but cannot save changes. Your level comes from your account role, not from an email list.</div>
 <div class="settings-tabs" role="tablist" aria-label="Settings sections">
   <button type="button" class="btn settings-tab" role="tab" aria-selected="true" data-settings-tab="access">Access Control</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="users">Internal Users</button>
@@ -12852,14 +12852,14 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   <div class="bezel-inner" style="padding:16px;display:grid;gap:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div>
-        <div style="font:700 18px var(--font-display);letter-spacing:.02em">Registered Users</div>
-        <div class="settings-hint" style="margin-top:4px">Property: <code style="font-family:var(--font-mono)">OCC_ALLOWED_EMAILS</code> — listed emails are registered users with update/edit access</div>
+        <div style="font:700 18px var(--font-display);letter-spacing:.02em">Your Access</div>
+        <div class="settings-hint" style="margin-top:4px">Sumber otorisasi tunggal: role akun pada sesi login D1</div>
       </div>
       <span id="settings-mode-badge" class="badge badge-warn">Loading…</span>
     </div>
     <div class="kpi-grid" id="settings-kpis">
-      <div class="kpi-card info"><span class="kpi-label">Current user</span><span class="kpi-val" id="settings-kpi-user">—</span><span class="kpi-sub">Session.getActiveUser().getEmail()</span></div>
-      <div class="kpi-card info"><span class="kpi-label">Mode</span><span class="kpi-val" id="settings-kpi-mode">—</span><span class="kpi-sub" id="settings-kpi-mode-sub">—</span></div>
+      <div class="kpi-card info"><span class="kpi-label">Current user</span><span class="kpi-val" id="settings-kpi-user">—</span><span class="kpi-sub">signed-in account</span></div>
+      <div class="kpi-card info"><span class="kpi-label">Account role</span><span class="kpi-val" id="settings-kpi-mode">—</span><span class="kpi-sub" id="settings-kpi-mode-sub">—</span></div>
       <div class="kpi-card info"><span class="kpi-label">Your access</span><span class="kpi-val" id="settings-kpi-auth">—</span><span class="kpi-sub" id="settings-kpi-auth-sub">—</span></div>
     </div>
   </div>
@@ -12867,61 +12867,65 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
 <div class="settings-panel settings-tab-panel" data-settings-panel="access" style="margin-bottom:14px">
   <div class="settings-head">
-    <span class="settings-title">Registered User List</span>
+    <span class="settings-title">Legacy Registered-User List</span>
     <span class="settings-hint" id="settings-count">—</span>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
+    <div class="settings-note" style="border-style:solid">Daftar ini <b>tidak dipakai untuk otorisasi</b> sejak login internal aktif. Email di bawah hanya disimpan sebagai bukti migrasi dari Script Property lama.</div>
     <div id="settings-chips" class="settings-chips"></div>
-    <div id="settings-empty" class="settings-note" style="display:none"><b>No registered users</b> — unregistered users can view the app, but only admins and registered users can update data.</div>
+    <div id="settings-empty" class="settings-note" style="display:none"><b>Daftar legacy kosong</b> — tidak ada email lama yang perlu ditampilkan.</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn" id="settings-reveal-raw" onclick="settingsRevealRaw()" aria-pressed="false">Reveal email values</button>
-      <button class="btn" id="settings-copy-raw" onclick="settingsCopyRaw()" aria-label="Copy raw allowlist" disabled>⎘ Copy Raw</button>
+      <button class="btn" id="settings-copy-raw" onclick="settingsCopyRaw()" aria-label="Copy raw legacy allowlist" disabled>⎘ Copy Raw</button>
       <span class="settings-hint">Raw: <code id="settings-raw" style="font-family:var(--font-mono)">(masked)</code></span>
-      <button class="btn" onclick="settingsRefresh()" style="margin-left:auto" aria-label="Refresh allowlist">⟳ Refresh</button>
+      <button class="btn" onclick="settingsRefresh(true)" style="margin-left:auto" aria-label="Refresh legacy list">⟳ Refresh</button>
     </div>
   </div>
 </div>
 
 <div class="settings-panel settings-tab-panel" data-settings-panel="access" id="settings-edit-panel">
   <div class="settings-head">
-    <span class="settings-title">Manage Registered Users</span>
-    <span id="settings-auth-badge" class="badge badge-safe">—</span>
+    <span class="settings-title">Legacy Registered-User List — Read Only</span>
+    <span class="badge badge-depr">LEGACY</span>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
-    <label style="display:grid;gap:6px" for="settings-edit">
-       <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Registered emails — one per line or comma</span>
-      <textarea id="settings-edit" class="in" placeholder="ops@airasia.com&#10;supervisor@airasia.com&#10;chtdniel@gmail.com"></textarea>
-       <span class="settings-hint">Registered users can view and update data. Unregistered users are read-only. Duplicates and spaces are normalized, invalid emails are rejected.</span>
-       <span id="settings-own-warn" class="settings-hint" style="color:var(--status-critical);display:none">⚠ You are removing your own email (<span id="settings-own-email"></span>) — you will become unregistered after save.</span>
+    <div class="settings-note">
+      <b>Tidak lagi mengatur akses.</b> Sejak login internal aktif, izin ditentukan oleh <b>role akun</b> di tab Internal Users
+      (<code>admin</code> / <code>registered</code> / <code>readonly</code>). Daftar di bawah hanya disimpan sebagai bukti migrasi
+      dan tidak bisa diubah lagi dari sini — ini mencegah dua sumber kebenaran yang bisa berbeda.
+    </div>
+    <label style="display:grid;gap:6px" for="settings-legacy-list">
+      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Legacy registered emails (OCC_ALLOWED_EMAILS, di tabel meta)</span>
+      <textarea id="settings-legacy-list" class="in" readonly aria-readonly="true" style="min-height:76px"></textarea>
+      <span class="settings-hint">Read-only. Untuk memberi akses, buat atau ubah role akun di tab <b>Internal Users</b>.</span>
     </label>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button id="settings-save" class="btn primary" onclick="settingsSave()" aria-label="Save OCC allowlist">💾 Save</button>
-      <button class="btn" onclick="settingsCancel()" aria-label="Revert OCC allowlist edits">↩ Cancel</button>
+      <button class="btn" onclick="settingsRefresh(true)" aria-label="Refresh legacy list">⟳ Refresh</button>
       <span id="settings-edit-status" class="settings-hint" style="align-self:center" role="status" aria-live="polite"></span>
     </div>
-    <div id="settings-locked-note" class="settings-note" style="display:none;border-color:var(--status-critical);background:var(--status-critical-bg);color:var(--status-critical)"><b>Not authorized</b> — your email is not in the allowlist. Save is blocked. Ask a listed admin to update, or edit via GAS editor → Project Settings → Script properties manually.</div>
+    <div id="settings-locked-note" class="settings-note" style="display:none;border-color:var(--status-critical);background:var(--status-critical-bg);color:var(--status-critical)"><b>Not authorized</b> — halaman Settings hanya untuk administrator.</div>
   </div>
 </div>
 
 <div class="settings-panel settings-tab-panel" data-settings-panel="access" id="settings-admin-panel" style="margin-bottom:14px">
   <div class="settings-head">
-    <span class="settings-title">Settings Admins</span>
-    <span id="settings-admin-badge" class="badge badge-warn">—</span>
+    <span class="settings-title">Legacy Settings-Admin List — Read Only</span>
+    <span class="badge badge-depr">LEGACY</span>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
-    <div class="settings-note">Controls who can <b>view this page</b> and manage <code>SETTINGS_ADMIN_EMAILS</code>. Admins have full access; registered users can update data; unregistered users are read-only.</div>
-    <div id="settings-admin-chips" class="settings-chips"></div>
-    <label style="display:grid;gap:6px" for="settings-admin-edit">
-      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Admin emails — one per line or comma</span>
-      <textarea id="settings-admin-edit" class="in" placeholder="admin@airasia.com&#10;supervisor@airasia.com"></textarea>
-       <span class="settings-hint">Leave empty to lock the Settings page. Duplicates and spaces are normalized, invalid emails are rejected.</span>
-       <span id="settings-admin-own-warn" class="settings-hint" style="color:var(--status-critical);display:none">⚠ You are removing your own email (<span id="settings-admin-own-email"></span>) — you will lose admin access after save.</span>
+    <div class="settings-note">
+      <b>Tidak lagi mengatur siapa yang boleh membuka halaman ini.</b> Akses Settings mengikuti role <code>admin</code> pada akun.
+      Daftar <code>SETTINGS_ADMIN_EMAILS</code> di bawah hanya bukti migrasi dan tidak bisa diubah dari sini.
+    </div>
+    <div id="settings-admin-chips" class="settings-chips" aria-readonly="true"></div>
+    <label style="display:grid;gap:6px" for="settings-legacy-admin-list">
+      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Legacy admin emails (SETTINGS_ADMIN_EMAILS, di tabel meta)</span>
+      <textarea id="settings-legacy-admin-list" class="in" readonly aria-readonly="true" style="min-height:60px"></textarea>
+      <span class="settings-hint">Read-only. Ubah role akun di tab <b>Internal Users</b> untuk menambah atau mencabut admin.</span>
     </label>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button id="settings-admin-save" class="btn primary" onclick="settingsAdminSave()" aria-label="Save admin list">💾 Save Admins</button>
-      <button class="btn" onclick="settingsAdminCancel()" aria-label="Revert admin list edits">↩ Cancel</button>
+      <button class="btn" onclick="settingsAdminRefresh()" aria-label="Refresh legacy admin list">⟳ Refresh</button>
       <span id="settings-admin-status" class="settings-hint" style="align-self:center" role="status" aria-live="polite"></span>
-      <button class="btn" onclick="settingsAdminRefresh()" style="margin-left:auto" aria-label="Refresh admin list">⟳ Refresh</button>
     </div>
   </div>
 </div>
@@ -12931,7 +12935,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     <span class="settings-title">Internal Auth Users</span>
     <button type="button" class="btn" onclick="authUsersRefresh()">⟳ Refresh</button>
   </div>
-  <div class="settings-note">Manage internal login accounts. Temporary passwords must be changed after the first login.</div>
+  <div class="settings-note">Kelola akun login internal. Role menentukan akses: <b>admin</b> (kelola user + settings), <b>registered</b> (lihat + ubah data operasional), <b>readonly</b> (hanya lihat). Password sementara wajib diganti saat login pertama.</div>
   <div id="auth-users-list" style="display:grid;gap:8px;margin:12px 0"></div>
   <div style="display:grid;grid-template-columns:2fr 1fr 2fr auto;gap:8px;align-items:end">
     <label class="settings-hint">Email<input id="auth-user-email" class="in" type="email" autocomplete="off"></label>
@@ -12940,6 +12944,22 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     <button type="button" class="btn primary" onclick="authUserCreate()">+ Create</button>
   </div>
   <span id="auth-users-status" class="settings-hint" role="status" aria-live="polite"></span>
+</div>
+
+<div class="settings-panel settings-tab-panel" data-settings-panel="users" id="settings-audit-panel" style="margin-bottom:14px">
+  <div class="settings-head">
+    <span class="settings-title">Audit Log — Security-Sensitive Changes</span>
+    <span class="settings-hint" id="settings-audit-retention">—</span>
+    <button type="button" class="btn" onclick="settingsAuditRefresh()" aria-label="Refresh audit log">⟳ Refresh</button>
+  </div>
+  <div style="padding:14px;display:grid;gap:10px">
+    <div class="settings-note">
+      Read-only. Setiap perubahan allowlist legacy, role, status aktif, reset password, profil, dan konfigurasi WX AI dicatat beserta aktor,
+      hasil, dan ringkasan yang sudah diredaksi. Password dan token tidak pernah masuk ke log ini.
+    </div>
+    <div id="settings-audit-list" style="display:grid;gap:6px;max-height:340px;overflow:auto" role="region" aria-label="Audit log entries" tabindex="0"></div>
+    <span id="settings-audit-status" class="settings-hint" role="status" aria-live="polite">—</span>
+  </div>
 </div>
 
 <div class="settings-panel settings-tab-panel" data-settings-panel="wx" id="settings-wxai-panel" style="margin-bottom:14px">
@@ -12973,12 +12993,20 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
     <div class="sys-grid">
-      <div class="sys-item"><span class="sys-key">Spreadsheet</span><span class="sys-val" id="settings-sys-sheet">—</span></div>
-      <div class="sys-item"><span class="sys-key">Spreadsheet ID</span><span class="sys-val" id="settings-sys-sheetid">—</span></div>
+      <div class="sys-item"><span class="sys-key">Data source</span><span class="sys-val" id="settings-sys-source">—</span></div>
       <div class="sys-item"><span class="sys-key">Timezone</span><span class="sys-val" id="settings-sys-tz">—</span></div>
+      <div class="sys-item"><span class="sys-key">Last refresh</span><span class="sys-val" id="settings-sys-refreshed">—</span></div>
+      <div class="sys-item"><span class="sys-key">Configuration status</span><span class="sys-val" id="settings-sys-health">—</span></div>
+    </div>
+    <div class="sys-grid" style="display:none" id="settings-sys-legacy-grid">
+      <div class="sys-item"><span class="sys-key">Spreadsheet (legacy)</span><span class="sys-val" id="settings-sys-sheet">—</span></div>
+      <div class="sys-item"><span class="sys-key">Spreadsheet ID (legacy)</span><span class="sys-val" id="settings-sys-sheetid">—</span></div>
       <div class="sys-item"><span class="sys-key">OCC_FIR_LINK <span class="badge badge-depr" style="margin-left:4px">deprecated</span></span><span class="sys-val" id="settings-sys-firlink">—</span></div>
     </div>
-    <div class="settings-note">FIR uses the integrated internal view — <code>OCC_FIR_LINK</code> is not used by navigation. Change spreadsheet/timezone via Script Properties in the GAS editor.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="settings-sys-legacy-toggle" onclick="settingsSystemToggleLegacy()" aria-pressed="false" aria-controls="settings-sys-legacy-grid">Show legacy fields</button>
+    </div>
+    <div class="settings-note">Data operasional tersimpan di <b>Cloudflare D1</b> (<code>awq-db</code>), bukan lagi Google Spreadsheet. Field legacy di atas hanya ditampilkan bila diperlukan untuk pemeriksaan migrasi.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" onclick="settingsSystemRefresh()" aria-label="Refresh system info">⟳ Refresh</button>
       <button id="settings-firlink-clear" class="btn" onclick="settingsFirLinkClear()" style="display:none" aria-label="Clear legacy FIR link">Clear legacy link</button>
@@ -12990,9 +13018,55 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
     <div class="modal-title" id="settings-modal-title">Confirm</div>
     <div class="modal-body" id="settings-modal-body"></div>
+    <p class="settings-hint" id="settings-modal-error" role="alert" style="color:var(--status-critical);min-height:14px;margin:0"></p>
     <div class="modal-actions">
       <button class="btn" id="settings-modal-cancel" aria-label="Cancel action">Cancel</button>
       <button class="btn primary" id="settings-modal-ok" aria-label="Confirm action">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="auth-role-backdrop" class="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-role-title">
+    <div class="modal-title" id="auth-role-title">Change role</div>
+    <div class="modal-body">
+      <div class="settings-note" id="auth-role-target"></div>
+      <label class="settings-hint" style="display:block;margin-top:10px">New role
+        <select id="auth-role-select" class="in">
+          <option value="readonly">readonly — view only</option>
+          <option value="registered">registered — view and update data</option>
+          <option value="admin">admin — manage users and settings</option>
+        </select>
+      </label>
+      <p class="settings-hint" id="auth-role-impact" style="min-height:14px;margin:6px 0 0"></p>
+      <p class="settings-hint" id="auth-role-status" role="status" aria-live="polite" style="min-height:14px"></p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="auth-role-cancel" type="button" aria-label="Cancel role change">Cancel</button>
+      <button class="btn primary" id="auth-role-save" type="button" aria-label="Save role" disabled>Save role</button>
+    </div>
+  </div>
+</div>
+
+<div id="auth-reset-backdrop" class="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-reset-title">
+    <div class="modal-title" id="auth-reset-title">Reset password</div>
+    <div class="modal-body">
+      <div class="settings-note" id="auth-reset-target"></div>
+      <label class="settings-hint" style="display:block;margin-top:10px">Temporary password (minimum 12 characters)
+        <input id="auth-reset-password" class="in" type="password" autocomplete="new-password" aria-describedby="auth-reset-password-error">
+      </label>
+      <p class="settings-hint" id="auth-reset-password-error" role="alert" style="color:var(--status-critical);min-height:14px;margin:2px 0 0"></p>
+      <label class="settings-hint" style="display:block">Confirm temporary password
+        <input id="auth-reset-confirm" class="in" type="password" autocomplete="new-password" aria-describedby="auth-reset-confirm-error">
+      </label>
+      <p class="settings-hint" id="auth-reset-confirm-error" role="alert" style="color:var(--status-critical);min-height:14px;margin:2px 0 0"></p>
+      <p class="settings-hint" style="margin:4px 0 0">Akun akan dipaksa mengganti password saat login berikutnya, dan semua sesi aktifnya dicabut. Password sementara tidak pernah ditampilkan lagi setelah disimpan dan tidak masuk audit log.</p>
+      <p class="settings-hint" id="auth-reset-status" role="status" aria-live="polite" style="min-height:14px"></p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="auth-reset-cancel" type="button" aria-label="Cancel password reset">Cancel</button>
+      <button class="btn primary" id="auth-reset-save" type="button" aria-label="Reset password" disabled>Reset password</button>
     </div>
   </div>
 </div>
@@ -13038,7 +13112,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     if(typeof google==='undefined' || !google.script || !google.script.run){
       // Mock for local preview
       setTimeout(function(){
-        var mock = {ok:true, raw:'chtdniel@gmail.com, ops@airasia.com', allowed:['chtdniel@gmail.com','ops@airasia.com'], currentUser:'chtdniel@gmail.com', isAuthorized:true, isOpen:false};
+        var mock = {ok:true, raw:'chtdniel@gmail.com, ops@airasia.com', allowed:['chtdniel@gmail.com','ops@airasia.com'], currentUser:'chtdniel@gmail.com', accountRole:'admin', tier:'admin', readOnly:true, isLegacy:true, revision:'0f1e2d3c'};
         apply(mock); if(btn) btn.textContent='Loaded (mock)';
         refreshInFlight = false;
       }, 400);
@@ -13058,40 +13132,39 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
   function apply(res){
     state = res;
+    var role = String(res.accountRole || res.tier || '').toLowerCase();
     var badge = document.getElementById('settings-mode-badge');
-    badge.textContent = res.isOpen ? 'OPEN — NO RESTRICTION' : 'RESTRICTED — ' + res.allowed.length + ' EMAILS';
-    badge.className = 'badge ' + (res.isOpen ? 'badge-warn' : res.isAuthorized ? 'badge-safe' : 'badge-crit');
+    // Otorisasi kini dari role akun; badge menjelaskan peran, bukan allowlist.
+    badge.textContent = role ? role.toUpperCase() : 'UNKNOWN ROLE';
+    badge.className = 'badge ' + (role === 'admin' ? 'badge-safe' : (role === 'registered' ? 'badge-warn' : 'badge-crit'));
     document.getElementById('settings-kpi-user').textContent = res.currentUser || '(anonymous / no login)';
     document.getElementById('settings-kpi-user').title = res.currentUser || '';
-    document.getElementById('settings-kpi-mode').textContent = res.isOpen ? 'OPEN' : 'RESTRICTED';
-    document.getElementById('settings-kpi-mode-sub').textContent = res.isOpen ? 'allowlist empty' : 'allowlist enforced';
+    document.getElementById('settings-kpi-mode').textContent = role ? role.toUpperCase() : '—';
+    document.getElementById('settings-kpi-mode-sub').textContent = role === 'admin'
+      ? 'can manage users + settings'
+      : (role === 'registered' ? 'can update operational data' : 'view only');
     var authEl = document.getElementById('settings-kpi-auth');
-    authEl.textContent = res.isAuthorized ? 'AUTHORIZED' : 'NOT AUTHORIZED';
-    authEl.parentElement.className = 'kpi-card ' + (res.isAuthorized ? 'safe' : 'crit');
-    document.getElementById('settings-kpi-auth-sub').textContent = res.isAuthorized ? 'can save' : 'view only';
+    authEl.textContent = 'ADMIN';
+    authEl.parentElement.className = 'kpi-card safe';
+    document.getElementById('settings-kpi-auth-sub').textContent = res.readOnly ? 'read-only page for legacy data' : 'can manage settings';
 
     var chips = document.getElementById('settings-chips');
     var empty = document.getElementById('settings-empty');
     var count = document.getElementById('settings-count');
-    if(res.allowed.length===0){
-       chips.innerHTML=''; empty.style.display=''; count.textContent='0 registered users';
+    var allowed = res.allowed || [];
+    if(allowed.length===0){
+       chips.innerHTML=''; empty.style.display=''; count.textContent='tidak ada entri legacy';
     } else {
       empty.style.display='none';
-      chips.innerHTML = res.allowed.map(function(e){ return '<span class="settings-chip"><b>'+esc(rawRevealed ? e : maskEmail(e))+'</b></span>'; }).join('');
-      count.textContent = res.allowed.length + ' emails';
+      chips.innerHTML = allowed.map(function(e){ return '<span class="settings-chip"><b>'+esc(rawRevealed ? e : maskEmail(e))+'</b></span>'; }).join('');
+      count.textContent = allowed.length + ' entri (legacy)';
     }
     document.getElementById('settings-raw').textContent = rawRevealed ? (res.raw || '(empty)') : '(masked)';
     document.getElementById('settings-copy-raw').disabled = !rawRevealed;
-    document.getElementById('settings-edit').value = res.allowed.join('\n');
-    document.getElementById('settings-own-email').textContent = res.currentUser || '';
-    var isAuth = !!res.isAuthorized;
-    var authBadge = document.getElementById('settings-auth-badge');
-    authBadge.textContent = isAuth ? 'YOU: AUTHORIZED' : 'YOU: NOT AUTHORIZED';
-    authBadge.className = 'badge ' + (isAuth ? 'badge-safe' : 'badge-crit');
-    setDirtyButton('settings-save', false, isAuth);
-    document.getElementById('settings-edit').disabled = !isAuth;
-    document.getElementById('settings-locked-note').style.display = isAuth ? 'none' : '';
-    checkOwn();
+    var legacyList = document.getElementById('settings-legacy-list');
+    if(legacyList) legacyList.value = allowed.join('\n');
+    document.getElementById('settings-locked-note').style.display = 'none';
+    state.revision = res.revision === undefined ? null : res.revision;
   }
 
   window.settingsRevealRaw = function(){
@@ -13111,22 +13184,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     }
   };
 
-  function checkOwn(){
-    if(!state) return;
-    var txt = document.getElementById('settings-edit').value;
-    var list = txt.split(/[\n,]+/).map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
-    var own = String(state.currentUser||'').toLowerCase();
-    var warn = list.length>0 && own && list.indexOf(own)===-1;
-    document.getElementById('settings-own-warn').style.display = warn ? '' : 'none';
-  }
-  document.getElementById('settings-edit').addEventListener('input', checkOwn);
-  document.getElementById('settings-edit').addEventListener('input', function(){
-    var invalid=invalidEmails(this.value);
-    this.classList.toggle('settings-invalid', invalid.length > 0);
-    var status=document.getElementById('settings-edit-status');
-    if(invalid.length) status.textContent='Invalid email: '+invalid.slice(0,3).join(', ');
-    setDirtyButton('settings-save', !!state && !sameEmails(this.value, (state.allowed || []).join('\n')), invalid.length === 0 && !!(state && state.isAuthorized));
-  });
+  function legacyStatus(text){ var el=document.getElementById('settings-edit-status'); if(el) el.textContent = text || ''; }
 
   var toastTimer = null;
   window.settingsToast = function(msg){
@@ -13138,25 +13196,51 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2000);
   };
 
-  // Inline confirm modal (replaces blocking confirm()).
+  // ---- Shared confirm modal ----
+  // Accessible dialog: Escape closes, Tab cycles inside, and focus returns to
+  // the control that opened it. body may be plain text or HTML.
   var modalOkCb = null;
+  var modalLastFocus = null;
   function settingsModal(title, body, okLabel, cb){
+    var backdrop = document.getElementById('settings-modal-backdrop');
     document.getElementById('settings-modal-title').textContent = title;
-    document.getElementById('settings-modal-body').textContent = body;
+    var bodyEl = document.getElementById('settings-modal-body');
+    if(body instanceof Node) { bodyEl.innerHTML = ''; bodyEl.appendChild(body); }
+    else if(/<[a-z][\s\S]*>/i.test(String(body || ''))) bodyEl.innerHTML = String(body);
+    else bodyEl.textContent = String(body || '');
     document.getElementById('settings-modal-ok').textContent = okLabel || 'Confirm';
+    var errorEl = document.getElementById('settings-modal-error');
+    if(errorEl) errorEl.textContent = '';
     modalOkCb = cb;
-    document.getElementById('settings-modal-backdrop').classList.add('open');
+    modalLastFocus = document.activeElement;
+    backdrop.classList.add('open');
     document.getElementById('settings-modal-ok').focus();
   }
   window.settingsModal = settingsModal;
+
   function settingsModalClose(){
     document.getElementById('settings-modal-backdrop').classList.remove('open');
     modalOkCb = null;
+    if(modalLastFocus && typeof modalLastFocus.focus === 'function'){ try { modalLastFocus.focus(); } catch (e) { /* element gone */ } }
+    modalLastFocus = null;
   }
+
+  function modalFocusables(){
+    var backdrop = document.getElementById('settings-modal-backdrop');
+    return Array.prototype.filter.call(
+      backdrop.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+      function(el){ return !el.disabled && el.offsetParent !== null; }
+    );
+  }
+
+  function settingsModalShowError(message){
+    var errorEl = document.getElementById('settings-modal-error');
+    if(errorEl) errorEl.textContent = message || '';
+  }
+
   document.getElementById('settings-modal-cancel').addEventListener('click', function(){
     settingsModalClose();
-    var status = document.getElementById('settings-edit-status');
-    if(status) status.textContent = 'Cancelled';
+    legacyStatus('Cancelled');
   });
   document.getElementById('settings-modal-ok').addEventListener('click', function(){
     var cb = modalOkCb;
@@ -13166,103 +13250,71 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   document.getElementById('settings-modal-backdrop').addEventListener('click', function(e){
     if(e.target === this) settingsModalClose();
   });
+  document.getElementById('settings-modal-backdrop').addEventListener('keydown', function(e){
+    if(e.key === 'Escape'){ e.preventDefault(); settingsModalClose(); return; }
+    if(e.key !== 'Tab') return;
+    var items = modalFocusables();
+    if(!items.length) return;
+    var first = items[0], last = items[items.length - 1];
+    if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+  });
 
-  window.settingsSave = function(){
-    var status = document.getElementById('settings-edit-status');
-    var txt = document.getElementById('settings-edit').value;
-    if(!state || !state.isAuthorized){ status.textContent='Not authorized'; settingsToast('Not authorized'); return; }
-    var invalid = invalidEmails(txt);
-    if(invalid.length){ status.textContent='Invalid email: '+invalid.slice(0,3).join(', '); return; }
-    var trimmed = txt.trim();
-    var doSave = function(){ settingsSaveCommit(txt, status); };
-    if(!trimmed){
-       settingsModal('Remove registered users?', 'This removes all registered users. They remain unregistered and read-only. Continue?', 'Remove & Save', doSave);
-      return;
-    }
-    settingsModal('Save registered-user access?', 'Apply the edited registered-user list. This changes who can update operational data.', 'Save access', doSave);
+  // ---- Stale-revision handling (shared by every Settings mutation) ----
+  function isStaleRevision(err){
+    return !!err && (err.code === 'STALE_REVISION' || /changed after you loaded it/i.test(err.message || ''));
+  }
+
+  // A save that lost the race is reported, not silently retried: the older
+  // editor must reload and re-apply its intent.
+  window.settingsStaleRevisionModal = function(what, refresh){
+    settingsModal('Perubahan lebih baru terdeteksi', 'Another admin saved ' + what + ' after you loaded this page. Your edit was not applied. Refresh to see the latest version, then apply your change again.', 'Refresh now', function(){
+      if(refresh) refresh();
+    });
   };
 
-  function settingsSaveCommit(txt, status){
-    status.textContent='Saving…';
-    if(typeof google==='undefined' || !google.script || !google.script.run){
-      status.textContent='Saved (mock)';
-      return;
-    }
-    // Send as comma-separated to backend (backend also handles newlines)
-    var csv = txt.split(/[\n]+/).join(', ');
-    google.script.run.withSuccessHandler(function(res){
-      if(!res || !res.ok){ status.textContent = res && res.error ? res.error : 'Save failed'; return; }
-      apply(res); status.textContent='Saved';
-      setTimeout(function(){ status.textContent=''; },1500);
-    }).withFailureHandler(function(err){
-      status.textContent = (err && err.message) ? err.message : String(err);
-    }).setOccAllowedEmails(csv);
+  window.settingsSystemToggleLegacy = function(){
+    var grid = document.getElementById('settings-sys-legacy-grid');
+    var button = document.getElementById('settings-sys-legacy-toggle');
+    if(!grid || !button) return;
+    var show = grid.style.display === 'none';
+    grid.style.display = show ? '' : 'none';
+    button.textContent = show ? 'Hide legacy fields' : 'Show legacy fields';
+    button.setAttribute('aria-pressed', String(show));
   };
 
-  window.settingsCancel = function(){
-    if(state) document.getElementById('settings-edit').value = state.allowed.join('\n');
-    document.getElementById('settings-edit-status').textContent='Reverted';
-    settingsToast('Reverted');
-    checkOwn();
-    setDirtyButton('settings-save', false, !!(state && state.isAuthorized));
-  };
-
-  // ---- Settings admin allowlist (SETTINGS_ADMIN_EMAILS) ----
+  // ---- Legacy Settings-admin list (SETTINGS_ADMIN_EMAILS) — read only ----
   var adminState = null;
   window.settingsAdminRefresh = function(){
     var status = document.getElementById('settings-admin-status');
     if(status) status.textContent = 'Loading…';
     if(typeof google==='undefined' || !google.script || !google.script.run){
       setTimeout(function(){
-        var mock = {ok:true, user:'chtdniel@gmail.com', canView:true, canEdit:true};
-        applyAdmin(mock, ['chtdniel@gmail.com']);
+        applyAdminList(['chtdniel@gmail.com']);
         if(status) status.textContent = 'Loaded (mock)';
       }, 300);
       return;
     }
-    google.script.run.withSuccessHandler(function(access){
-      if(!access || !access.ok){ if(status) status.textContent = access && access.error ? access.error : 'Failed to load'; return; }
+    google.script.run.withSuccessHandler(function(list){
+      if(!list || !list.ok){ if(status) status.textContent = list && list.error ? list.error : 'Failed to load'; return; }
       try {
-        var isAdmin = !!(access.canView || access.canEdit);
-        adminState = { isAdmin: isAdmin, user: access.user || '' };
-        var badge = document.getElementById('settings-admin-badge');
-        badge.textContent = isAdmin ? 'YOU: ADMIN' : 'YOU: NOT ADMIN';
-        badge.className = 'badge ' + (isAdmin ? 'badge-safe' : 'badge-crit');
-        document.getElementById('settings-admin-own-email').textContent = adminState.user || '';
-        document.getElementById('settings-admin-save').disabled = !isAdmin;
-        document.getElementById('settings-admin-edit').disabled = !isAdmin;
-        google.script.run.withSuccessHandler(function(list){
-          if(!list || !list.ok){ if(status) status.textContent = list && list.error ? list.error : 'Failed to load'; return; }
-          applyAdminList(list.admins || []);
-          if(status) status.textContent = '';
-        }).withFailureHandler(function(err){
-          if(status) status.textContent = (err && err.message) ? err.message : String(err);
-        }).getSettingsAdminList();
-      } catch (e) { if(status) status.textContent = 'Render error: ' + (e && e.message || e); return; }
+        applyAdminList(list.admins || []);
+        adminState = { user: list.currentUser || '', list: (list.admins || []).slice(), revision: list.revision === undefined ? null : list.revision };
+        if(status) status.textContent = '';
+      } catch (e) { if(status) status.textContent = 'Render error: ' + (e && e.message || e); }
     }).withFailureHandler(function(err){
       if(status) status.textContent = (err && err.message) ? err.message : String(err);
-    }).getSettingsAccessInfo();
+    }).getSettingsAdminList();
   };
 
   function applyAdminList(list){
     if(adminState) adminState.list = list.slice();
     var chips = document.getElementById('settings-admin-chips');
-    chips.innerHTML = list.map(function(e){ return '<span class="settings-chip"><b>'+esc(e)+'</b></span>'; }).join('');
-    document.getElementById('settings-admin-edit').value = list.join('\n');
-    setDirtyButton('settings-admin-save', false, !!(adminState && adminState.isAdmin));
-    checkAdminOwn();
-  }
-
-  function applyAdmin(res, mockList){
-    var isAdmin = !!(res.canView || res.canEdit);
-    adminState = { isAdmin: isAdmin, user: res.user || '' };
-    var badge = document.getElementById('settings-admin-badge');
-    badge.textContent = isAdmin ? 'YOU: ADMIN' : 'YOU: NOT ADMIN';
-    badge.className = 'badge ' + (isAdmin ? 'badge-safe' : 'badge-crit');
-    applyAdminList(mockList || []);
-    document.getElementById('settings-admin-own-email').textContent = adminState.user || '';
-    document.getElementById('settings-admin-save').disabled = !isAdmin;
-    document.getElementById('settings-admin-edit').disabled = !isAdmin;
+    if(chips) chips.innerHTML = list.length
+      ? list.map(function(e){ return '<span class="settings-chip"><b>'+esc(e)+'</b></span>'; }).join('')
+      : '<span class="settings-hint">Tidak ada entri legacy.</span>';
+    var listBox = document.getElementById('settings-legacy-admin-list');
+    if(listBox) listBox.value = list.join('\n');
   }
 
   var authUsersState = [];
@@ -13422,18 +13474,162 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   }
   window.authUsersRefresh = authUsersRefresh;
   window.authUserCreate = authUserCreate;
+
+  // ---- Role change modal ----
+  var authRoleTarget = null;
+  var ROLE_LABELS = { readonly: 'READ ONLY (view only)', registered: 'REGISTERED (view + update)', admin: 'ADMIN (manage users + settings)' };
+
+  function currentRoleFor(email){
+    var lower = String(email || '').toLowerCase();
+    for (var i = 0; i < authUsersState.length; i++) {
+      if (String(authUsersState[i].email || '').toLowerCase() === lower) return String(authUsersState[i].role || '').toLowerCase();
+    }
+    return '';
+  }
+
+  function refreshAuthRoleSave() {
+    if (!authRoleTarget) return;
+    var selected = document.getElementById('auth-role-select').value;
+    var before = currentRoleFor(authRoleTarget);
+    var impact = document.getElementById('auth-role-impact');
+    impact.textContent = before
+      ? 'Akses saat ini: ' + (ROLE_LABELS[before] || before) + '. Perubahan berlaku pada login berikutnya akun tersebut.'
+      : 'Role akun saat ini tidak diketahui — refresh daftar user lalu coba lagi.';
+    var save = document.getElementById('auth-role-save');
+    if (save) save.disabled = !selected || selected === before;
+  }
+
+  function openAuthRole(email) {
+    if (!currentRoleFor(email)) { authUsersStatus('User tidak ditemukan di daftar. Refresh lalu coba lagi.'); return; }
+    authRoleTarget = email;
+    document.getElementById('auth-role-target').textContent = 'Akun: ' + email;
+    document.getElementById('auth-role-select').value = currentRoleFor(email);
+    document.getElementById('auth-role-status').textContent = '';
+    document.getElementById('auth-role-backdrop').classList.add('open');
+    document.getElementById('auth-role-select').focus();
+    refreshAuthRoleSave();
+  }
+
+  function closeAuthRole() {
+    document.getElementById('auth-role-backdrop').classList.remove('open');
+    authRoleTarget = null;
+    document.getElementById('auth-role-status').textContent = '';
+  }
+
+  window.authRoleSave = function() {
+    var email = authRoleTarget;
+    var role = document.getElementById('auth-role-select').value;
+    if (!email || !role) return;
+    var status = document.getElementById('auth-role-status');
+    var save = document.getElementById('auth-role-save');
+    status.textContent = 'Menyimpan…';
+    if (save) save.disabled = true;
+    google.script.run.withSuccessHandler(function(){
+      closeAuthRole();
+      authUsersRefresh('Role ' + email + ' diubah ke ' + role + '.');
+    }).withFailureHandler(function(error){
+      status.textContent = (error && error.message) || 'Tidak bisa mengubah role.';
+      refreshAuthRoleSave();
+    }).adminUpdateUserRole(email, role);
+  };
+
+  // ---- Reset password modal ----
+  var authResetTarget = null;
+
+  function authResetValidation() {
+    var password = document.getElementById('auth-reset-password').value || '';
+    var confirmValue = document.getElementById('auth-reset-confirm').value || '';
+    var errors = {};
+    if (password.length < 12 || password.length > 256) errors.password = 'Password sementara harus 12-256 karakter.';
+    if (confirmValue !== password) errors.confirm = 'Konfirmasi password tidak sama.';
+    return { ok: Object.keys(errors).length === 0, errors: errors };
+  }
+
+  function refreshAuthResetSave() {
+    var validation = authResetValidation();
+    document.getElementById('auth-reset-password-error').textContent = validation.errors.password || '';
+    document.getElementById('auth-reset-confirm-error').textContent = validation.errors.confirm || '';
+    var password = document.getElementById('auth-reset-password').value || '';
+    var confirmValue = document.getElementById('auth-reset-confirm').value || '';
+    // Do not block on an untouched form; only surface errors once typing started.
+    if (!password && !confirmValue) {
+      document.getElementById('auth-reset-password-error').textContent = '';
+      document.getElementById('auth-reset-confirm-error').textContent = '';
+    }
+    var save = document.getElementById('auth-reset-save');
+    if (save) save.disabled = !validation.ok;
+  }
+
+  function openAuthReset(email) {
+    authResetTarget = email;
+    document.getElementById('auth-reset-target').textContent = 'Reset password untuk: ' + email;
+    document.getElementById('auth-reset-password').value = '';
+    document.getElementById('auth-reset-confirm').value = '';
+    document.getElementById('auth-reset-password-error').textContent = '';
+    document.getElementById('auth-reset-confirm-error').textContent = '';
+    document.getElementById('auth-reset-status').textContent = '';
+    document.getElementById('auth-reset-save').disabled = true;
+    document.getElementById('auth-reset-backdrop').classList.add('open');
+    document.getElementById('auth-reset-password').focus();
+  }
+
+  function closeAuthReset() {
+    document.getElementById('auth-reset-backdrop').classList.remove('open');
+    authResetTarget = null;
+    // Never keep a temporary password in memory after the dialog closes.
+    document.getElementById('auth-reset-password').value = '';
+    document.getElementById('auth-reset-confirm').value = '';
+    document.getElementById('auth-reset-status').textContent = '';
+  }
+
+  window.authResetSave = function() {
+    var email = authResetTarget;
+    var validation = authResetValidation();
+    if (!email || !validation.ok) { refreshAuthResetSave(); return; }
+    var password = document.getElementById('auth-reset-password').value;
+    var status = document.getElementById('auth-reset-status');
+    var save = document.getElementById('auth-reset-save');
+    status.textContent = 'Menyimpan…';
+    if (save) save.disabled = true;
+    google.script.run.withSuccessHandler(function(){
+      closeAuthReset();
+      authUsersRefresh('Password ' + email + ' direset. Semua sesi aktif dicabut.');
+    }).withFailureHandler(function(error){
+      status.textContent = (error && error.message) || 'Tidak bisa mereset password.';
+      refreshAuthResetSave();
+    }).adminResetPassword(email, password);
+  };
+
   document.getElementById('auth-users-list').addEventListener('click', function(event){
     var button=event.target.closest('button'); if(!button) return;
     var email=button.getAttribute('data-auth-profile') || button.getAttribute('data-auth-role') || button.getAttribute('data-auth-active') || button.getAttribute('data-auth-reset');
     if(button.hasAttribute('data-auth-profile')){
       openAuthProfile(email);
     } else if(button.hasAttribute('data-auth-role')){
-      var role=window.prompt('New role: readonly, registered, or admin'); if(role) settingsModal('Change role?', 'Change '+email+' role to '+role+'. This changes what the account can access.', 'Change role', function(){ google.script.run.withSuccessHandler(function(){ authUsersRefresh('Role updated successfully.'); }).withFailureHandler(function(error){authUsersStatus(error && error.message || 'Unable to update role');}).adminUpdateUserRole(email, role); });
+      openAuthRole(email);
     } else if(button.hasAttribute('data-auth-active')) {
       var active=button.getAttribute('data-active') !== '1'; settingsModal(active ? 'Enable user?' : 'Disable user?', (active ? 'Enable ' : 'Disable ') + email + (active ? '.' : '. Active sessions will be revoked.'), active ? 'Enable' : 'Disable', function(){ google.script.run.withSuccessHandler(function(){ authUsersRefresh(active ? 'User enabled successfully.' : 'User disabled successfully.'); }).withFailureHandler(function(error){authUsersStatus(error && error.message || 'Unable to update status');}).adminSetUserActive(email, active); });
     } else {
-      var password=window.prompt('Temporary password (minimum 12 characters):'); if(password) settingsModal('Reset password?', 'Reset '+email+' password and revoke active sessions. The temporary password is never stored in the audit log.', 'Reset password', function(){ google.script.run.withSuccessHandler(function(){ authUsersRefresh('Password reset successfully.'); }).withFailureHandler(function(error){authUsersStatus(error && error.message || 'Unable to reset password');}).adminResetPassword(email, password); });
+      openAuthReset(email);
     }
+  });
+
+  // Role / reset modal wiring
+  document.getElementById('auth-role-cancel').addEventListener('click', closeAuthRole);
+  document.getElementById('auth-role-save').addEventListener('click', function(){ window.authRoleSave(); });
+  document.getElementById('auth-role-select').addEventListener('change', refreshAuthRoleSave);
+  document.getElementById('auth-role-backdrop').addEventListener('click', function(e){ if(e.target === this) closeAuthRole(); });
+  document.getElementById('auth-reset-cancel').addEventListener('click', closeAuthReset);
+  document.getElementById('auth-reset-save').addEventListener('click', function(){ window.authResetSave(); });
+  document.getElementById('auth-reset-password').addEventListener('input', refreshAuthResetSave);
+  document.getElementById('auth-reset-confirm').addEventListener('input', refreshAuthResetSave);
+  document.getElementById('auth-reset-backdrop').addEventListener('click', function(e){ if(e.target === this) closeAuthReset(); });
+  [['auth-role-backdrop', closeAuthRole], ['auth-reset-backdrop', closeAuthReset]].forEach(function(pair){
+    document.getElementById(pair[0]).addEventListener('keydown', function(e){
+      if(e.key !== 'Escape') return;
+      e.preventDefault();
+      pair[1]();
+    });
   });
   
   // Profile modal handlers
@@ -13485,62 +13681,13 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     });
   });
 
-  function checkAdminOwn(){
-    var warn = document.getElementById('settings-admin-own-warn');
-    if(!warn || !adminState) return;
-    var txt = document.getElementById('settings-admin-edit').value;
-    var list = txt.split(/[\n,]+/).map(function(x){return x.trim().toLowerCase();}).filter(Boolean);
-    var own = String(adminState.user || '').toLowerCase();
-    warn.style.display = (list.length >= 0 && own && list.indexOf(own) === -1) ? '' : 'none';
-  }
-
-  window.settingsAdminSave = function(){
-    var status = document.getElementById('settings-admin-status');
-    var txt = document.getElementById('settings-admin-edit').value;
-    if(!adminState || !adminState.isAdmin){ status.textContent = 'Not authorized'; settingsToast('Not authorized'); return; }
-    var invalid = invalidEmails(txt);
-    if(invalid.length){ status.textContent = 'Invalid email: '+invalid.slice(0,3).join(', '); return; }
-    var doSave = function(){
-      status.textContent = 'Saving…';
-      if(typeof google==='undefined' || !google.script || !google.script.run){
-        status.textContent = 'Saved (mock)';
-        settingsToast('Saved (mock)');
-        var list = txt.split(/[\n,]+/).map(function(x){return x.trim();}).filter(Boolean);
-        document.getElementById('settings-admin-chips').innerHTML = list.map(function(e){ return '<span class="settings-chip"><b>'+esc(e)+'</b></span>'; }).join('');
-        checkAdminOwn();
-        return;
-      }
-      var csv = txt.split(/[\n]+/).join(', ');
-      google.script.run.withSuccessHandler(function(res){
-        if(!res || !res.ok){ status.textContent = res && res.error ? res.error : 'Save failed'; settingsToast(status.textContent); return; }
-        status.textContent = 'Saved';
-        settingsToast('Admins saved');
-        setTimeout(function(){ status.textContent = ''; }, 1500);
-        settingsAdminRefresh();
-      }).withFailureHandler(function(err){
-        status.textContent = (err && err.message) ? err.message : String(err);
-        settingsToast(status.textContent);
-      }).setSettingsAdminEmails(csv);
-    };
-    if(!txt.trim()){
-      settingsModal('Lock settings page?', 'Empty admin list locks this page for everyone. Continue?', 'Lock & Save', doSave);
-      return;
-    }
-    settingsModal('Save Settings admins?', 'Apply the edited admin list. This changes who can open and manage Settings.', 'Save admins', doSave);
-  };
-
-  window.settingsAdminCancel = function(){
-    settingsAdminRefresh();
-    settingsToast('Reverted');
-  };
-
   // ---- System panel (read-only, getOccSystemSettings) ----
   window.settingsSystemRefresh = function(){
     var status = document.getElementById('settings-system-status');
     if(status) status.textContent = 'Loading…';
     if(typeof google==='undefined' || !google.script || !google.script.run){
       setTimeout(function(){
-        applySystem({ok:true, spreadsheetId:'1PAV7…(mock)', spreadsheetName:'AWQ OCC (mock)', timezone:'Asia/Makassar', occFirLink:'', occFirLinkDeprecated:true});
+        applySystem({ok:true, dataSource:'Cloudflare D1 (mock)', timezone:'Asia/Makassar', spreadsheetId:'—', spreadsheetName:'—', occFirLink:'', occFirLinkDeprecated:true});
         if(status) status.textContent = 'Loaded (mock)';
       }, 300);
       return;
@@ -13555,10 +13702,17 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   };
 
   function applySystem(res){
-    document.getElementById('settings-sys-sheet').textContent = res.spreadsheetName || '(unknown)';
+    document.getElementById('settings-sys-source').textContent = res.dataSource || 'Cloudflare D1 (awq-db)';
+    document.getElementById('settings-sys-tz').textContent = res.timezone || '—';
+    document.getElementById('settings-sys-refreshed').textContent = new Date().toLocaleString();
+    // Configuration status: whether the legacy spreadsheet/FIR keys still exist.
+    var hasLegacy = !!(res.spreadsheetId || res.occFirLink);
+    var health = document.getElementById('settings-sys-health');
+    health.textContent = hasLegacy ? 'OK — legacy values present' : 'OK — no legacy values';
+    health.className = 'sys-val';
+    document.getElementById('settings-sys-sheet').textContent = res.spreadsheetName || '(not set)';
     document.getElementById('settings-sys-sheetid').textContent = res.spreadsheetId || '(not set)';
     document.getElementById('settings-sys-sheetid').title = res.spreadsheetId || '';
-    document.getElementById('settings-sys-tz').textContent = res.timezone || '—';
     document.getElementById('settings-sys-firlink').textContent = res.occFirLink || '(empty)';
     document.getElementById('settings-firlink-clear').style.display = res.occFirLink ? '' : 'none';
   }
@@ -13580,12 +13734,55 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     });
   };
 
-  document.getElementById('settings-admin-edit').addEventListener('input', checkAdminOwn);
-  document.getElementById('settings-admin-edit').addEventListener('input', function(){
-    var invalid=invalidEmails(this.value);
-    this.classList.toggle('settings-invalid', invalid.length > 0);
-    setDirtyButton('settings-admin-save', !!(adminState && !sameEmails(this.value, (adminState.list || []).join('\n'))), invalid.length === 0 && !!(adminState && adminState.isAdmin));
-  });
+  // ---- Audit log (read-only) ----
+  function auditResultBadge(result){
+    var value = String(result || '').toLowerCase();
+    if(value === 'denied' || value === 'failure') return 'badge badge-crit';
+    return 'badge badge-safe';
+  }
+
+  window.settingsAuditRefresh = function(){
+    var status = document.getElementById('settings-audit-status');
+    var box = document.getElementById('settings-audit-list');
+    if(status) status.textContent = 'Loading…';
+    if(typeof google==='undefined' || !google.script || !google.script.run){
+      if(box) box.innerHTML = '<div class="settings-note">Preview: audit log tidak tersedia tanpa backend.</div>';
+      if(status) status.textContent = '—';
+      return;
+    }
+    google.script.run.withSuccessHandler(function(res){
+      if(!res || !res.ok){ if(status) status.textContent = res && res.error ? res.error : 'Failed to load audit log'; return; }
+      try { applyAudit(res); } catch (e) { if(status) status.textContent = 'Render error: ' + (e && e.message || e); }
+    }).withFailureHandler(function(err){
+      if(status) status.textContent = (err && err.message) ? err.message : String(err);
+    }).adminListAudit();
+  };
+
+  function applyAudit(res){
+    var box = document.getElementById('settings-audit-list');
+    var status = document.getElementById('settings-audit-status');
+    var entries = res.entries || [];
+    if(!entries.length){
+      box.innerHTML = '<div class="settings-note">Belum ada aktivitas tercatat.</div>';
+    } else {
+      box.innerHTML = entries.map(function(entry){
+        var when = String(entry.createdAt || '').replace('T', ' ').replace(/\.\d+Z?$/, '');
+        var who = entry.actorEmail || '(sistem)';
+        var target = entry.targetEmail || (entry.targetUserId ? '#' + entry.targetUserId : '—');
+        return '<div class="settings-chip" style="display:grid;grid-template-columns:150px 170px 1fr 90px;gap:8px;align-items:center;border-radius:var(--radius-sm)">'
+          + '<span style="color:var(--text-muted)">' + esc(when) + '</span>'
+          + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(entry.action) + '">' + esc(entry.action) + '</span>'
+          + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(entry.changeSummary || '') + '">' + esc(who) + ' → ' + esc(target) + (entry.changeSummary ? ' · ' + esc(entry.changeSummary) : '') + '</span>'
+          + '<span class="' + auditResultBadge(entry.result) + '">' + esc(String(entry.result || '').toUpperCase()) + '</span>'
+          + '</div>';
+      }).join('');
+    }
+    var retention = res.retention || {};
+    document.getElementById('settings-audit-retention').textContent = res.pruned
+      ? 'retensi ' + (retention.maxAgeDays || 180) + ' hari / ' + (retention.maxRows || 5000) + ' baris · ' + res.pruned + ' entri lama dibersihkan'
+      : 'retensi ' + (retention.maxAgeDays || 180) + ' hari / ' + (retention.maxRows || 5000) + ' baris';
+    status.textContent = entries.length + ' entri terakhir' + (res.limit ? ' (maks ' + res.limit + ')' : '');
+  }
 
   document.querySelectorAll('#view-settings [data-settings-tab]').forEach(function(tab){
     tab.addEventListener('click', function(){
@@ -13598,6 +13795,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
   window.settingsRefreshAll = function(){
     authUsersRefresh();
+    window.settingsAuditRefresh();
     if(typeof google==='undefined' || !google.script || !google.script.run){
       settingsRefresh(true);
       settingsAdminRefresh();
@@ -13609,13 +13807,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       try {
         if(bundle.settings) apply(bundle.settings);
         if(bundle.admins && bundle.admins.admins) {
-          adminState = { isAdmin: !!(bundle.access && (bundle.access.canView || bundle.access.canEdit)), user: (bundle.access && bundle.access.user) || '' };
-          var badge = document.getElementById('settings-admin-badge');
-          badge.textContent = adminState.isAdmin ? 'YOU: ADMIN' : 'YOU: NOT ADMIN';
-          badge.className = 'badge ' + (adminState.isAdmin ? 'badge-safe' : 'badge-crit');
-          document.getElementById('settings-admin-own-email').textContent = adminState.user || '';
-          document.getElementById('settings-admin-save').disabled = !adminState.isAdmin;
-          document.getElementById('settings-admin-edit').disabled = !adminState.isAdmin;
+          adminState = { user: bundle.admins.currentUser || '', list: (bundle.admins.admins || []).slice(), revision: bundle.admins.revision === undefined ? null : bundle.admins.revision };
           applyAdminList(bundle.admins.admins || []);
           document.getElementById('settings-admin-status').textContent = '';
         }
@@ -13681,12 +13873,17 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
       + '<input class="in" data-f="label" value="'+esc(m.label)+'" placeholder="Label tampil" aria-label="Model label">'
       + '<input class="in" data-f="model" value="'+esc(m.model)+'" placeholder="model-id" aria-label="Model id value">'
-      + '</div></div>';
+      + '</div>'
+      + '<p class="settings-hint" data-wxerror="'+i+'" role="alert" style="color:var(--status-critical);min-height:14px;margin:0"></p>'
+      + '</div>';
   }
 
   function render(list){
     var box = document.getElementById('settings-wxai-rows');
-    if(!list.length){ box.innerHTML = '<div class="settings-note">Katalog kosong — hanya Auto (default server) yang tampil di WX.</div>'; return; }
+    if(!list.length){
+      box.innerHTML = '<div class="settings-note">Katalog kosong — AI akan memakai fallback default, dan tombol Save hanya menyimpan master switch.</div>';
+      return;
+    }
     box.innerHTML = list.map(rowHtml).join('');
   }
 
@@ -13705,8 +13902,44 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     return out;
   }
 
+  // Same rules as validateWxCatalog() on the server. The browser check exists so
+  // a malformed row is flagged before the request, not after a failed save.
+  function wxRowErrors(row){
+    var errors = [];
+    var id = String(row.id || '').trim().toLowerCase();
+    var model = String(row.model || '').trim();
+    var label = String(row.label || '').trim();
+    if(!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id)) errors.push('ID harus 2-64 karakter: huruf kecil, angka, dan tanda hubung.');
+    if(['gemini','openrouter','custom'].indexOf(row.provider) === -1) errors.push('Provider harus gemini, openrouter, atau custom.');
+    if(!model || model.length > 160) errors.push('Model wajib diisi, maksimal 160 karakter.');
+    if(!label || label.length > 160) errors.push('Label wajib diisi, maksimal 160 karakter.');
+    return errors;
+  }
+
+  function validateBrowserRows(){
+    var rows = collect();
+    var seen = {};
+    var problems = [];
+    var total = 0;
+    document.querySelectorAll('#settings-wxai-rows [data-wxrow]').forEach(function(rowEl, index){
+      var errors = wxRowErrors(rows[index] || {});
+      var id = String((rows[index] || {}).id || '').trim().toLowerCase();
+      if(id){
+        if(seen[id]) errors.push('ID duplikat: "' + id + '".');
+        else seen[id] = true;
+      }
+      var errorEl = rowEl.querySelector('[data-wxerror="'+index+'"]');
+      if(errorEl) errorEl.textContent = errors.join(' ');
+      rowEl.classList.toggle('settings-invalid', errors.length > 0);
+      rowEl.setAttribute('aria-invalid', errors.length ? 'true' : 'false');
+      if(errors.length){ total += errors.length; problems.push('baris ' + (index + 1) + ': ' + errors[0]); }
+    });
+    if(rows.length > 50){ problems.unshift('Maksimal 50 model.'); total += 1; }
+    return { ok: total === 0, messages: problems, count: total };
+  }
+
   function applyWxAi(res){
-    wxAiState = { enabled: !!res.enabled, catalog: clone(res.catalog || []) };
+    wxAiState = { enabled: !!res.enabled, catalog: clone(res.catalog || []), revision: res.revision === undefined ? null : res.revision };
     document.getElementById('settings-wxai-enabled').checked = wxAiState.enabled;
     document.getElementById('settings-wxai-enabled').disabled = !wxAiCanEdit;
     render(wxAiState.catalog);
@@ -13721,9 +13954,12 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   function updateSaveState(){
     if(!wxAiState) return;
     var current = { enabled: document.getElementById('settings-wxai-enabled').checked, catalog: collect() };
-    var dirty = JSON.stringify(current) !== JSON.stringify(wxAiState);
+    var dirty = JSON.stringify(current) !== JSON.stringify({ enabled: wxAiState.enabled, catalog: wxAiState.catalog });
     var save = document.getElementById('settings-wxai-save');
-    if(save) save.disabled = !wxAiCanEdit || !dirty;
+    // Row errors are surfaced as you type, but they must not block the master
+    // kill-switch; only a genuinely invalid catalog blocks Save.
+    var problems = validateBrowserRows();
+    if(save) save.disabled = !wxAiCanEdit || !dirty || !problems.ok;
   }
 
   function applyAccess(access){
@@ -13794,7 +14030,17 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
   window.wxAiSave = function(){
     if(!wxAiCanEdit){ status('Not authorized'); toast('Not authorized'); return; }
-    var payload = { enabled: document.getElementById('settings-wxai-enabled').checked, catalog: collect() };
+    var problems = validateBrowserRows();
+    if(!problems.ok){
+      status('Perbaiki dulu: ' + problems.messages.slice(0, 2).join('; '));
+      toast('Katalog belum valid');
+      return;
+    }
+    var payload = {
+      enabled: document.getElementById('settings-wxai-enabled').checked,
+      catalog: collect(),
+      expectedRevision: wxAiState ? wxAiState.revision : null
+    };
     window.settingsModal('Save WX AI configuration?', (payload.enabled ? 'Enable' : 'Disable') + ' the WX AI master switch and save '+payload.catalog.length+' model entries.', 'Save configuration', function(){ wxAiSaveCommit(payload); });
   };
 
@@ -13817,8 +14063,15 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       if(saveButton){ saveButton.textContent='💾 Save'; saveButton.removeAttribute('aria-busy'); }
       setTimeout(function(){ status(''); }, 1500);
     }).withFailureHandler(function(err){
+      if(saveButton){ saveButton.textContent='💾 Save'; saveButton.removeAttribute('aria-busy'); }
+      // Lost the race against another admin: reload instead of retrying blindly.
+      if(err && err.code === 'STALE_REVISION'){
+        status('Konflik: katalog berubah di tempat lain.');
+        if(window.settingsStaleRevisionModal) window.settingsStaleRevisionModal('the WX AI catalog', function(){ window.wxAiRefresh(); });
+        return;
+      }
       status((err && err.message) ? err.message : String(err));
-      if(saveButton){ saveButton.textContent='💾 Save'; saveButton.removeAttribute('aria-busy'); updateSaveState(); }
+      updateSaveState();
     }).wxAiSetCatalog(payload);
   };
 
