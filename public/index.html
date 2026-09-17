@@ -1221,6 +1221,7 @@
       }
 
       function loadReadiness() {
+        if (!window.awqAuthUser) return;
         resetChecks();
         statusEl.textContent = 'Loading operational data…';
         statusEl.style.display = 'block';
@@ -1300,8 +1301,15 @@
       window.occRefreshReadiness = loadReadiness;
       window.occBuildAckKey = buildAckKey;
       // Dialog opens only after payload arrives (success/failure handlers).
-      // No pre-payload showModal: avoids empty flash on startup.
-      loadReadiness();
+      // No pre-payload showModal: readiness starts only after authentication.
+      function startReadinessForAuthenticatedUser() {
+        loadReadiness();
+      }
+      window.addEventListener('awq-auth-ready', function(event) {
+        if (event && event.detail) startReadinessForAuthenticatedUser();
+      });
+      // The authentication event can finish before this inline script is parsed.
+      if (window.awqAuthUser) startReadinessForAuthenticatedUser();
       dialog.addEventListener('close', function() {
         var fallback = document.getElementById('nav-flight') || lastFocus;
         if (fallback && typeof fallback.focus === 'function') try { fallback.focus(); } catch (e) {}
@@ -4665,12 +4673,19 @@
 
   // Final Initialization Trigger
   (function() {
-    console.log('[SYSTEM] Script block reached EOF. Triggering init...');
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-      requestAnimationFrame(()=>setTimeout(runInitSequence, 50));
-    } else {
-      window.addEventListener('load', runInitSequence);
+    var appInitStarted = false;
+    function startAuthenticatedApp(event) {
+      if (appInitStarted || (event && !event.detail)) return;
+      appInitStarted = true;
+      console.log('[SYSTEM] Authentication confirmed. Triggering init...');
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        requestAnimationFrame(()=>setTimeout(runInitSequence, 50));
+      } else {
+        window.addEventListener('load', runInitSequence, { once: true });
+      }
     }
+    window.addEventListener('awq-auth-ready', startAuthenticatedApp);
+    if (window.awqAuthUser) startAuthenticatedApp({ detail: window.awqAuthUser });
   })();
 
 </script>
