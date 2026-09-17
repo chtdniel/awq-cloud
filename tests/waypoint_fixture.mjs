@@ -5,7 +5,7 @@ import { seedAuthUser } from './rpc_auth_fixture.mjs';
 const bundle = await build({ entryPoints: ['functions/api/rpc.js'], bundle: true, platform: 'node', format: 'esm', write: false });
 export const { onRequestPost } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text + String.fromCharCode(10) + '//# sourceURL=waypoint-rpc-test.mjs').toString('base64'));
 
-export async function createWaypointFixture(role = 'registered') {
+export async function createWaypointFixture(role = 'admin') {
   const database = new DatabaseSync(':memory:');
   database.exec('CREATE TABLE latlong (id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT, waypoint TEXT, latitude TEXT, longitude TEXT, sequence_order INTEGER)');
   function statement(sql, values = []) {

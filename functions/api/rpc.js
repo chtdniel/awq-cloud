@@ -10,14 +10,16 @@ const REGISTERED_WRITE_METHODS = new Set([
   'saveNotamData', 'saveTafData', 'generateBriefingPackage', 'saveBriefingForm',
   'saveAirportNotes', 'saveFlightData', 'addNewFlightToDb', 'bulkUpdateFlightDof',
   'bulkClearTafColumns', 'bulkClearCgoColumns', 'saveFlightEnr',
-  'persistAnalysisResults', 'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll'
+  'persistAnalysisResults'
 ]);
 
 const ADMIN_ONLY_METHODS = new Set([
   'setSettingsAdminEmails', 'setOccAllowedEmails',
   'getSettingsAdminList', 'getOccSettings', 'getOccSystemSettings', 'getSettingsBundle',
   'adminListUsers', 'adminCreateUser', 'adminUpdateUserRole', 'adminSetUserActive', 'adminResetPassword',
-  'wxAiSetCatalog'
+  'wxAiSetCatalog',
+  'latlongGetEditorData', 'latlongGetPreview',
+  'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll'
 ]);
 
 const AUTH_METHODS = new Set(['authLogin', 'authLogout', 'authMe', 'authBootstrap']);
@@ -25,7 +27,7 @@ const AUTHENTICATED_READ_METHODS = new Set([
   'getFlightDashboardData', 'getAllRoutes', 'syncNotamAnalysisState', 'analyzeNotams', 'analyzeFlightNotams', 'analyzeFlightList',
   'firGetNotamEditorData', 'firGetNotamResults', 'firBulkPreviewNotams', 'getTafData', 'fetchLatestTafFromApi',
   'getActiveFlightDataForWarning', 'analyzeWxWithManual', 'getFirData', 'getFirGeometry', 'getActiveNotams', 'getSelectedFlightsData',
-  'getActiveFlightList', 'getFlightSummary', 'latlongGetEditorData', 'latlongGetPreview', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
+  'getActiveFlightList', 'getFlightSummary', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
   'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
   'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'syncCgoData', 'getSettingsAccessInfo'
 ]);

@@ -44,9 +44,17 @@ try {
 } finally { database.close(); }
 const viewer = await createWaypointFixture('readonly');
 try {
-  assert.equal((await viewer.rpc('latlongGetPreview', [rawText, 'column'])).status, 200);
-  for (const method of ['latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll']) assert.equal((await viewer.rpc(method)).status, 403);
+  for (const method of ['latlongGetPreview', 'latlongGetEditorData', 'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll']) {
+    assert.equal((await viewer.rpc(method, method === 'latlongGetPreview' ? [rawText, 'column'] : [])).status, 403, method + ' must be admin-only');
+  }
 } finally { viewer.database.close(); }
+
+const registered = await createWaypointFixture('registered');
+try {
+  for (const method of ['latlongGetPreview', 'latlongGetEditorData', 'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll']) {
+    assert.equal((await registered.rpc(method, method === 'latlongGetPreview' ? [rawText, 'column'] : [])).status, 403, method + ' must be admin-only');
+  }
+} finally { registered.database.close(); }
 
 const orderFixture = await createWaypointFixture();
 try {

@@ -1530,6 +1530,7 @@
     }
 
     window.isSettingsAdmin = null;
+    window.isAdmin = null;
     window.switchTab = function(tabName) {
       console.log('[SYSTEM] Attempting switch to:', tabName);
       if (tabName === 'settings' && window.isSettingsAdmin === false) {
@@ -1537,6 +1538,13 @@
         var sv = document.getElementById('view-settings');
         if (sv) sv.innerHTML = '<div style="padding:40px;text-align:center;font-family:var(--font-mono);color:var(--text-muted);"><div style="font-size:28px;">🔒</div><div style="font-weight:800;margin:8px 0;color:var(--text-primary);">SETTINGS - ADMIN ONLY</div><div>Your account is not listed in SETTINGS_ADMIN_EMAILS.<br>Contact admin for access.</div></div>';
         if (typeof window.addToast === 'function') window.addToast('Settings is admin-only');
+        return;
+      }
+
+      if (tabName === 'waypoint' && window.isAdmin === false) {
+        console.warn('[SECURITY] Blocked WAYPOINT MANAGER access - not admin');
+        if (typeof window.addToast === 'function') window.addToast('WAYPOINT MANAGER is admin-only — access denied');
+        window.dispatchEvent(new CustomEvent('occ:accessDenied', { detail: { tab: 'waypoint', reason: 'admin-only' } }));
         return;
       }
 
@@ -1686,10 +1694,17 @@
             window.isSettingsAdmin = canView;
             var nav = document.getElementById('nav-settings');
             if (nav && !canView) nav.style.display = 'none';
+            var isAdmin = !!(res && res.ok && res.tier === 'admin');
+            window.isAdmin = isAdmin;
+            var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
+            if (wpItem && !isAdmin) wpItem.style.display = 'none';
           }).withFailureHandler(function() {
             window.isSettingsAdmin = false;
             var nav2 = document.getElementById('nav-settings');
             if (nav2) nav2.style.display = 'none';
+            window.isAdmin = false;
+            var wpItem2 = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
+            if (wpItem2) wpItem2.style.display = 'none';
           }).getSettingsAccessInfo();
         }
       } catch (e) { console.warn('[SECURITY] settings gate failed', e); }

@@ -296,6 +296,12 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
   var initialized = false;
   function init(){
+    if(window.isAdmin === false){
+      var denied = $('ll-list');
+      if(denied) denied.innerHTML='<div class="ll-empty">WAYPOINT MANAGER is admin-only.<br><span style="font-size:10px;opacity:.7;">Your account does not have administrator access.</span></div>';
+      toast('WAYPOINT MANAGER is admin-only — access denied');
+      return;
+    }
     if(initialized) { window.latlongRefresh(); return; }
     initialized = true;
     $('ll-preview-btn').addEventListener('click', doPreview);
