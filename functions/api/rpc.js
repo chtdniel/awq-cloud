@@ -3193,8 +3193,8 @@ async function handleGetOccSettings(context) {
       raw: stored.value,
       allowed,
       currentUser: access.user,
-      isAuthorized: true,
-      isOpen: allowed.length === 0,
+      // No isAuthorized/isOpen here: those used to claim an allowlist that is
+      // no longer consulted. The only authority is the session role below.
       isLegacy: true,
       readOnly: true,
       revision: stored.revision,

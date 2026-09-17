@@ -100,6 +100,11 @@ console.log('Settings: admin calls without a CSRF token are rejected.');
   assert.equal(bundleResult.status, 200);
   assert.equal(bundleResult.data.settings.isLegacy, true);
   assert.equal(bundleResult.data.settings.readOnly, true);
+  // The legacy read used to answer with a hard-coded isAuthorized/isOpen that
+  // implied an allowlist which is no longer consulted.
+  assert.equal('isAuthorized' in bundleResult.data.settings, false, 'legacy read must not claim authorization');
+  assert.equal('isOpen' in bundleResult.data.settings, false, 'legacy read must not claim an allowlist mode');
+  assert.equal(bundleResult.data.settings.accountRole, 'admin', 'the session role is the stated authority');
   // Legacy entries keep their stored casing but are ordered case-insensitively.
   assert.deepEqual(bundleResult.data.settings.allowed, ['Legacy@Example.com', 'ops@example.com']);
   assert.ok(bundleResult.data.settings.revision, 'the allowlist read must carry a revision');

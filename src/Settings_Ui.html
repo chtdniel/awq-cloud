@@ -356,13 +356,18 @@
     document.getElementById('settings-kpi-user').textContent = res.currentUser || '(anonymous / no login)';
     document.getElementById('settings-kpi-user').title = res.currentUser || '';
     document.getElementById('settings-kpi-mode').textContent = role ? role.toUpperCase() : '—';
-    document.getElementById('settings-kpi-mode-sub').textContent = role === 'admin'
-      ? 'can manage users + settings'
-      : (role === 'registered' ? 'can update operational data' : 'view only');
+    document.getElementById('settings-kpi-mode-sub').textContent = 'authoritative source: D1 session role';
+    // Second card states the permission this page grants, so it does not just
+    // repeat the account role shown next to it.
     var authEl = document.getElementById('settings-kpi-auth');
-    authEl.textContent = 'ADMIN';
-    authEl.parentElement.className = 'kpi-card safe';
-    document.getElementById('settings-kpi-auth-sub').textContent = res.readOnly ? 'read-only page for legacy data' : 'can manage settings';
+    var accessCopy = {
+      admin: { value: 'FULL', sub: 'can manage users, settings, and audit' },
+      registered: { value: 'UPDATE', sub: 'can change operational data' },
+      readonly: { value: 'VIEW ONLY', sub: 'cannot save changes' }
+    }[role] || { value: 'NONE', sub: 'no account role resolved' };
+    authEl.textContent = accessCopy.value;
+    authEl.parentElement.className = 'kpi-card ' + (role === 'admin' ? 'safe' : (role === 'registered' ? 'info' : 'crit'));
+    document.getElementById('settings-kpi-auth-sub').textContent = accessCopy.sub;
 
     var chips = document.getElementById('settings-chips');
     var empty = document.getElementById('settings-empty');

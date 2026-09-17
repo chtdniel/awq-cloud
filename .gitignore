@@ -14,6 +14,11 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# Local QA artifacts (Playwright screenshots/traces) and scratch workspace.
+# Repo is PUBLIC — these can contain production data captured during QA.
+test-results/
+scratch/
+
 # D1 database dumps (repo is PUBLIC; dumps contain password hashes + PII).
 # Files are still exported locally to docs/backups/ — just never committed.
 docs/backups/*.sql
