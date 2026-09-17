@@ -1221,7 +1221,6 @@
       }
 
       function loadReadiness() {
-        if (!window.awqAuthUser) return;
         resetChecks();
         statusEl.textContent = 'Loading operational data…';
         statusEl.style.display = 'block';
@@ -1301,15 +1300,8 @@
       window.occRefreshReadiness = loadReadiness;
       window.occBuildAckKey = buildAckKey;
       // Dialog opens only after payload arrives (success/failure handlers).
-      // No pre-payload showModal: readiness starts only after authentication.
-      function startReadinessForAuthenticatedUser() {
-        loadReadiness();
-      }
-      window.addEventListener('awq-auth-ready', function(event) {
-        if (event && event.detail) startReadinessForAuthenticatedUser();
-      });
-      // The authentication event can finish before this inline script is parsed.
-      if (window.awqAuthUser) startReadinessForAuthenticatedUser();
+      // No pre-payload showModal: avoids empty flash on startup.
+      loadReadiness();
       dialog.addEventListener('close', function() {
         var fallback = document.getElementById('nav-flight') || lastFocus;
         if (fallback && typeof fallback.focus === 'function') try { fallback.focus(); } catch (e) {}
@@ -4673,19 +4665,12 @@
 
   // Final Initialization Trigger
   (function() {
-    var appInitStarted = false;
-    function startAuthenticatedApp(event) {
-      if (appInitStarted || (event && !event.detail)) return;
-      appInitStarted = true;
-      console.log('[SYSTEM] Authentication confirmed. Triggering init...');
-      if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        requestAnimationFrame(()=>setTimeout(runInitSequence, 50));
-      } else {
-        window.addEventListener('load', runInitSequence, { once: true });
-      }
+    console.log('[SYSTEM] Script block reached EOF. Triggering init...');
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      requestAnimationFrame(()=>setTimeout(runInitSequence, 50));
+    } else {
+      window.addEventListener('load', runInitSequence);
     }
-    window.addEventListener('awq-auth-ready', startAuthenticatedApp);
-    if (window.awqAuthUser) startAuthenticatedApp({ detail: window.awqAuthUser });
   })();
 
 </script>
@@ -10197,10 +10182,16 @@
     return [];
   }
 
-  async function loadFlights() {
+  async function loadFlights(force) {
     const box = document.getElementById('fir-flight-list');
     const requestId = ++state.flightLoadRequest;
-    box.innerHTML = '<div class="fir-empty">Loading flights...</div>';
+    // Only blank the board when there is nothing to show — avoids the "reload" flash on tab switch
+    if (force || !state.flightDataLoaded || !state.flights.length) {
+      box.innerHTML = '<div class="fir-empty">Loading flights...</div>';
+    }
+    // Preserve the flight the user was inspecting across refreshes
+    const prevRowId = state.selected ? Number(state.selected._rowId) : null;
+
     
     const boardIds = getActiveBoardRowIds();
     if (!boardIds.length) {
@@ -10247,7 +10238,10 @@
       console.log(`[FIR] Successfully loaded ${state.flights.length} flight(s) from board`);
       
       renderFlightList();
-      if (state.flights.length) { await selectFlight(Number(state.flights[0]._rowId)); }
+      if (state.flights.length) {
+        const stillThere = prevRowId != null && state.flights.some(f => Number(f._rowId) === prevRowId);
+        await selectFlight(stillThere ? prevRowId : Number(state.flights[0]._rowId));
+      }
     } else {
       console.error('[FIR] Failed to load flights, full payload:', data);
       const hint = (data && data.error && String(data.error).includes('null')) ? '<br><span style="font-size:10px;opacity:.7;">Hint: Apps Script deployment is stale - redeploy as New Version, then hard-reload.</span>' : '';
@@ -10303,9 +10297,11 @@
     }
   }
 
-  function init() {
+  function init(force) {
     if (state.initialized) {
-      loadFlights();
+      // don't auto-reload when switching pages — reuse cache, refetch only on explicit refresh
+      if (force || !state.flightDataLoaded) loadFlights(force);
+      else if (state.selected) renderFlightList();
       setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 60);
       return;
     }
@@ -10346,7 +10342,7 @@
         console.log('[FIR] User triggered manual refresh');
         refreshBtn.disabled = true;
         try {
-          await Promise.all([loadFlights(), loadActiveNotams()]);
+          await Promise.all([loadFlights(true), loadActiveNotams()]);
           renderHazardChips();
           renderHazardList();
           addToast('Flights and FIR NOTAMs refreshed');

@@ -1517,10 +1517,16 @@
     return [];
   }
 
-  async function loadFlights() {
+  async function loadFlights(force) {
     const box = document.getElementById('fir-flight-list');
     const requestId = ++state.flightLoadRequest;
-    box.innerHTML = '<div class="fir-empty">Loading flights...</div>';
+    // Only blank the board when there is nothing to show — avoids the "reload" flash on tab switch
+    if (force || !state.flightDataLoaded || !state.flights.length) {
+      box.innerHTML = '<div class="fir-empty">Loading flights...</div>';
+    }
+    // Preserve the flight the user was inspecting across refreshes
+    const prevRowId = state.selected ? Number(state.selected._rowId) : null;
+
     
     const boardIds = getActiveBoardRowIds();
     if (!boardIds.length) {
@@ -1567,7 +1573,10 @@
       console.log(`[FIR] Successfully loaded ${state.flights.length} flight(s) from board`);
       
       renderFlightList();
-      if (state.flights.length) { await selectFlight(Number(state.flights[0]._rowId)); }
+      if (state.flights.length) {
+        const stillThere = prevRowId != null && state.flights.some(f => Number(f._rowId) === prevRowId);
+        await selectFlight(stillThere ? prevRowId : Number(state.flights[0]._rowId));
+      }
     } else {
       console.error('[FIR] Failed to load flights, full payload:', data);
       const hint = (data && data.error && String(data.error).includes('null')) ? '<br><span style="font-size:10px;opacity:.7;">Hint: Apps Script deployment is stale - redeploy as New Version, then hard-reload.</span>' : '';
@@ -1623,9 +1632,11 @@
     }
   }
 
-  function init() {
+  function init(force) {
     if (state.initialized) {
-      loadFlights();
+      // don't auto-reload when switching pages — reuse cache, refetch only on explicit refresh
+      if (force || !state.flightDataLoaded) loadFlights(force);
+      else if (state.selected) renderFlightList();
       setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 60);
       return;
     }
@@ -1666,7 +1677,7 @@
         console.log('[FIR] User triggered manual refresh');
         refreshBtn.disabled = true;
         try {
-          await Promise.all([loadFlights(), loadActiveNotams()]);
+          await Promise.all([loadFlights(true), loadActiveNotams()]);
           renderHazardChips();
           renderHazardList();
           addToast('Flights and FIR NOTAMs refreshed');
