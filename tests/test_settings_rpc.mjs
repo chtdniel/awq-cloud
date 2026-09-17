@@ -176,18 +176,28 @@ console.log('Settings: a malformed legacy write is still denied rather than part
   const first = await rpc(env, 'wxAiGetCatalog');
   assert.equal(first.status, 200);
   assert.equal(typeof first.data.revision, 'string', 'an unset catalog still yields a revision sentinel');
+  assert.equal(first.data.updatedAt, null, 'a catalog never saved has no change timestamp');
 
   const catalogA = [{ id: 'kl-hy3', provider: 'custom', model: 'kl/hy3', label: 'CIZ-AI hy3' }];
   const created = await rpc(env, 'wxAiSetCatalog', [{ enabled: true, catalog: catalogA, expectedRevision: first.data.revision }]);
   assert.equal(created.status, 200, 'create with the rendered revision must succeed');
   assert.ok(created.data.revision, 'the saved catalog must return its new revision');
   assert.notEqual(created.data.revision, first.data.revision, 'creating the catalog must change the revision');
+  // The timestamp only advances on an accepted save, so it also tells an editor
+  // whether the copy in front of them predates someone else's change.
+  assert.ok(created.data.updatedAt, 'an accepted save must stamp the change time');
+  assert.ok(!Number.isNaN(Date.parse(created.data.updatedAt)), 'the timestamp must be a parseable ISO date');
+  const afterCreate = await rpc(env, 'wxAiGetCatalog');
+  assert.equal(afterCreate.data.updatedAt, created.data.updatedAt, 'the stamp must be readable back');
 
   // A second editor still holding the pre-change revision must be refused.
   const stale = await rpc(env, 'wxAiSetCatalog', [{ enabled: false, catalog: catalogA, expectedRevision: first.data.revision }]);
   assert.equal(stale.status, 409, 'a stale editor must not overwrite a newer catalog');
   assert.equal(stale.body.code, 'STALE_REVISION');
   assert.equal(stale.body.currentRevision, created.data.revision);
+  const afterStale = await rpc(env, 'wxAiGetCatalog');
+  assert.equal(afterStale.data.updatedAt, created.data.updatedAt, 'a refused save must not advance the change stamp');
+  assert.equal(afterStale.data.revision, created.data.revision, 'a refused save must not change the revision');
 
   // An editor that rendered "created by someone else" is equally stale.
   const alsoStale = await rpc(env, 'wxAiSetCatalog', [{ enabled: false, catalog: catalogA, expectedRevision: null }]);

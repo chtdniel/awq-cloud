@@ -2687,7 +2687,8 @@ function adminOnly(user) {
 const SETTINGS_KEYS = {
   occAllowedEmails: 'OCC_ALLOWED_EMAILS',
   settingsAdminEmails: 'SETTINGS_ADMIN_EMAILS',
-  wxAiCatalog: 'WX_AI_CATALOG'
+  wxAiCatalog: 'WX_AI_CATALOG',
+  wxAiCatalogUpdatedAt: 'WX_AI_CATALOG_UPDATED_AT'
 };
 
 // Non-cryptographic (FNV-1a) stamp: it only has to detect "someone saved after
@@ -3263,19 +3264,24 @@ function validateWxCatalog(value) {
 async function handleWxAiGetCatalog(context) {
   const stored = await metaGetWithRevision(context, SETTINGS_KEYS.wxAiCatalog);
   const enabledRaw = await metaGet(context, 'WX_AI_ENABLED');
+  // Present only after an accepted save, so it doubles as "has this ever been
+  // changed from the shipped default?" — the revision hash alone cannot say
+  // that, because an empty catalog and an unset catalog hash identically.
+  const updatedAt = (await metaGet(context, SETTINGS_KEYS.wxAiCatalogUpdatedAt)) || null;
   if (!stored.present) {
     return Response.json({
-      data: { ok: true, enabled: enabledRaw !== 'false', catalog: WX_AI_DEFAULT_CATALOG, source: 'default', revision: stored.revision }
+      data: { ok: true, enabled: enabledRaw !== 'false', catalog: WX_AI_DEFAULT_CATALOG, source: 'default', revision: stored.revision, updatedAt }
     });
   }
   try {
     const parsed = validateWxCatalog(JSON.parse(stored.value));
-    return Response.json({ data: { ok: true, ...parsed, source: 'property', revision: stored.revision } });
+    return Response.json({ data: { ok: true, ...parsed, source: 'property', revision: stored.revision, updatedAt } });
   } catch {
     return Response.json({
       data: {
         ok: true, enabled: false, catalog: [], source: 'fail-closed',
         revision: stored.revision,
+        updatedAt,
         warning: 'WX AI catalog is invalid; AI is disabled until an admin saves a valid catalog.'
       }
     });
@@ -3289,10 +3295,13 @@ async function handleWxAiSetCatalog(context, user, args) {
   const expectedRevision = input && input.expectedRevision !== undefined ? input.expectedRevision : undefined;
   if (revisionMismatch(expectedRevision, current.revision)) return staleRevisionResponse('WX AI catalog', current.revision);
   const payload = validateWxCatalog(input);
+  const savedAt = new Date().toISOString();
   const nextRevision = await metaSet(context, SETTINGS_KEYS.wxAiCatalog, JSON.stringify(payload));
   await metaSet(context, 'WX_AI_ENABLED', payload.enabled ? 'true' : 'false');
+  // Stamped only on an accepted save, so it never advances on a rejected one.
+  await metaSet(context, SETTINGS_KEYS.wxAiCatalogUpdatedAt, savedAt);
   await audit(context, user.id, 'wx_ai_catalog_updated', null, 'success', `enabled:${payload.enabled}; count:${payload.catalog.length}`);
-  return Response.json({ data: { ok: true, ...payload, source: 'property', revision: nextRevision } });
+  return Response.json({ data: { ok: true, ...payload, source: 'property', revision: nextRevision, updatedAt: savedAt } });
 }
 
 function getOpenSystemSettings() {

@@ -12984,6 +12984,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
     <div class="settings-note">Katalog model AI halaman WX + master kill-switch. Tersimpan di tabel <code>meta</code> D1 sebagai <code>WX_AI_CATALOG</code> / <code>WX_AI_ENABLED</code>. API key tidak pernah disimpan di sini.</div>
+    <span class="settings-hint" id="settings-wxai-saved">Terakhir diubah: —</span>
     <label style="display:flex;align-items:center;gap:8px;font:700 12px var(--font-mono);color:var(--text-primary)" for="settings-wxai-enabled">
       <input type="checkbox" id="settings-wxai-enabled" style="width:16px;height:16px"> AI Enabled (master kill-switch)
     </label>
@@ -14072,11 +14073,40 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     return { ok: total === 0, messages: problems, count: total };
   }
 
+  // Shows when the catalog was last changed so an editor can tell whether the
+  // copy in front of them is stale without guessing.
+  function formatSavedAt(value){
+    if(!value) return null;
+    var parsed = new Date(value);
+    if(isNaN(parsed.getTime())) return String(value);
+    var stamp = parsed.toLocaleString();
+    var ageMinutes = Math.round((Date.now() - parsed.getTime()) / 60000);
+    if(ageMinutes < 1) stamp += ' (baru saja)';
+    else if(ageMinutes < 60) stamp += ' (' + ageMinutes + ' menit lalu)';
+    else if(ageMinutes < 60 * 24) stamp += ' (' + Math.round(ageMinutes / 60) + ' jam lalu)';
+    else stamp += ' (' + Math.round(ageMinutes / (60 * 24)) + ' hari lalu)';
+    return stamp;
+  }
+
+  function renderSavedAt(value){
+    var el = document.getElementById('settings-wxai-saved');
+    if(!el) return;
+    var text = formatSavedAt(value);
+    el.textContent = text ? 'Terakhir diubah: ' + text : 'Terakhir diubah: belum pernah disimpan sejak default';
+    el.title = value ? String(value) : '';
+  }
+
   function applyWxAi(res){
-    wxAiState = { enabled: !!res.enabled, catalog: clone(res.catalog || []), revision: res.revision === undefined ? null : res.revision };
+    wxAiState = {
+      enabled: !!res.enabled,
+      catalog: clone(res.catalog || []),
+      revision: res.revision === undefined ? null : res.revision,
+      updatedAt: res.updatedAt || null
+    };
     document.getElementById('settings-wxai-enabled').checked = wxAiState.enabled;
     document.getElementById('settings-wxai-enabled').disabled = !wxAiCanEdit;
     render(wxAiState.catalog);
+    renderSavedAt(wxAiState.updatedAt);
     var badge = document.getElementById('settings-wxai-badge');
     badge.textContent = (wxAiState.enabled ? 'AI ON' : 'AI OFF') + ' — ' + wxAiState.catalog.length + ' MODELS'
       + (res.source && res.source !== 'property' ? ' (' + res.source + ')' : '');
