@@ -9,6 +9,7 @@
 // ============================================================================
 
 import { getRequestUser } from './api/auth.js';
+import { qrPngDataUri } from '../shared/qr.mjs';
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -227,6 +228,17 @@ export async function onRequest(context) {
         }
 
         const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 16) + 'Z';
+
+        let dxrQrDataUri = '';
+        try {
+            const dxrForQr = sv('dxrName', dxrProfilePrefill);
+            dxrQrDataUri = await qrPngDataUri(
+                'AWQ OCC | DXR: ' + dxrForQr + ' | ' + sv('formDate', nowUtc) + ' | REF: ' + flightsKey,
+                { scale: 4, border: 2 }
+            );
+        } catch (qrErr) {
+            console.warn('[briefing-form] QR render skipped:', qrErr.message);
+        }
 
         // --- TAF slot model -------------------------------------------------
         // CSV R30-35: left column POD1,POA1,POD2,POA2,POD3,POA3 and right
@@ -622,6 +634,7 @@ export async function onRequest(context) {
             letter-spacing: 0.5px;
         }
         .sign-line { border-bottom: 1px solid #64748b; margin-top: 6px; }
+        .sign-qr { display: block; width: 96px; height: 96px; margin: 8px 0 0 auto; image-rendering: pixelated; }
         /* ---- Footer ---- */
         .form-footer {
             display: flex;
@@ -759,6 +772,7 @@ export async function onRequest(context) {
                 <div class="sign-sub">NAME / SIGN</div>
                 <input type="text" class="editable sign-line" name="dxrName" data-field="dxrName"
                     placeholder="Dispatcher name" value="${escapeHtml(sv('dxrName', dxrProfilePrefill))}">
+                ${dxrQrDataUri ? `<img class="sign-qr" src="${dxrQrDataUri}" alt="DXR signature QR">` : ''}
             </div>
             <div class="sign-box">
                 <div class="sign-role">PIC</div>

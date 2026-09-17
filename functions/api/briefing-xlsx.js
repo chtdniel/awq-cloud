@@ -1,4 +1,5 @@
 import { decodeNotamText } from './notamUtils.js';
+import { qrEncode, qrPngBytes } from '../../shared/qr.mjs';
 
 // ============================================================================
 // BRIEFING XLSX GENERATION - Native .xlsx output using template-edit approach
@@ -527,6 +528,39 @@ async function buildXlsxResponse(context, form) {
             ntXml = setInlineCell(ntXml, 'B26', sig.dxrName || '');
             ntSheet.text = ntXml;
         }
+    }
+    try {
+        const qrFlights = (form.legs || []).filter(l => l && l.flightNo).map(l => l.flightNo).join(',');
+        const qrDate = (form.fields && form.fields.formDate) || form.date || '';
+        const qrText = 'AWQ OCC | DXR: ' + (sig.dxrName || '') + ' | ' + qrDate + ' | REF: ' + qrFlights;
+        const qrPng = await qrPngBytes(qrEncode(qrText, { errorCorrectionLevel: 'M' }).modules, { scale: 4, border: 2 });
+
+        const usedNumbers = files.map(file => Number((file.name.match(/^xl\/media\/image(\d+)\.png$/) || [])[1] || 0));
+        const qrImageName = 'xl/media/image' + (Math.max(0, ...usedNumbers) + 1) + '.png';
+
+        const cbrRels = get('xl/worksheets/_rels/' + cbrFile.split('/').pop() + '.rels');
+        const drawingRel = cbrRels && cbrRels.text ? (cbrRels.text.match(/Target="([^"]*drawings\/[^"]+)"/) || [])[1] : null;
+        if (drawingRel) {
+            const drawingPath = 'xl/' + drawingRel.replace(/^\.\.\//, '');
+            const drawingFile = get(drawingPath);
+            const drawingRels = get('xl/drawings/_rels/' + drawingPath.split('/').pop() + '.rels');
+            if (drawingFile && drawingFile.text !== null && drawingRels && drawingRels.text !== null) {
+                const relId = 'rId' + (Math.max(0, ...[...drawingRels.text.matchAll(/Id="rId(\d+)"/g)].map(m => Number(m[1]))) + 1);
+                const shapeId = Math.max(0, ...[...drawingFile.text.matchAll(/<xdr:cNvPr id="(\d+)"/g)].map(m => Number(m[1]))) + 1;
+                const emu = 800000;
+                const anchor = '<xdr:oneCellAnchor><xdr:from><xdr:col>6</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>46</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>'
+                    + '<xdr:ext cx="' + emu + '" cy="' + emu + '"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="' + shapeId + '" name="qr.png" title="QR"/>'
+                    + '<xdr:cNvPicPr preferRelativeResize="0"/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="' + relId + '" cstate="print"/>'
+                    + '<a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + emu + '" cy="' + emu + '"/></a:xfrm>'
+                    + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></xdr:spPr></xdr:pic><xdr:clientData fLocksWithSheet="0"/></xdr:oneCellAnchor>';
+                drawingFile.text = drawingFile.text.replace('</xdr:wsDr>', anchor + '</xdr:wsDr>');
+                drawingRels.text = drawingRels.text.replace('</Relationships>',
+                    '<Relationship Id="' + relId + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/' + qrImageName.split('/').pop() + '"/></Relationships>');
+                files.push({ name: qrImageName, nameBytes: enc.encode(qrImageName), text: null, bin: qrPng, method: 0 });
+            }
+        }
+    } catch (qrErr) {
+        console.error('[XLSX] QR embed skipped:', qrErr.message);
     }
     const retainedSheets = new Set([cbrFile, wxFile, notamFile]);
     const removedFiles = new Set(files.filter(file => /^xl\/worksheets\/(?:_rels\/)?sheet\d+\.xml(?:\.rels)?$/.test(file.name) && !retainedSheets.has(file.name.replace('/_rels/', '/').replace(/\.rels$/, ''))).map(file => file.name));
