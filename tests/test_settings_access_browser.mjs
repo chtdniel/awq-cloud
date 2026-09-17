@@ -72,18 +72,34 @@ async function scenario(tier, options = {}) {
   // The navbar gate resolves asynchronously before the tab is safe to open.
   if (options.waitForGate) await page.waitForFunction(() => window.isSettingsAdmin !== null).catch(() => {});
 
-  // Activate the Settings view the way the app does, twice, to expose races.
-  await page.evaluate(() => {
-    document.getElementById('view-settings').classList.add('active');
-    if (typeof window.settingsRefreshAll === 'function') window.settingsRefreshAll();
-  });
-  await page.evaluate(() => {
-    if (typeof window.settingsRefreshAll === 'function') window.settingsRefreshAll();
-  });
-  await page.waitForTimeout(400);
+  if (options.activateThenReactivate) {
+    // Reported flow: the authorization check resolves BEFORE the Settings view
+    // is activated, so a later activation must still paint the locked state.
+    await page.waitForTimeout(600);
+    await page.evaluate(() => {
+      document.getElementById('view-settings').classList.add('active');
+      if (typeof window.settingsRefreshAll === 'function') window.settingsRefreshAll();
+    });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      document.getElementById('view-settings').classList.remove('active');
+      if (typeof window.settingsRefreshAll === 'function') window.settingsRefreshAll();
+    });
+    await page.waitForTimeout(250);
+  } else {
+    // Activate the Settings view the way the app does, twice, to expose races.
+    await page.evaluate(() => {
+      document.getElementById('view-settings').classList.add('active');
+      if (typeof window.settingsRefreshAll === 'function') window.settingsRefreshAll();
+    });
+    await page.evaluate(() => {
+      if (typeof window.settingsRefreshAll === 'function') window.settingsRefreshAll();
+    });
+    await page.waitForTimeout(400);
+  }
 
   const state = await page.evaluate(visibleState);
-  await page.screenshot({ path: `test-results/settings-access/${tier}.png` });
+  await page.screenshot({ path: `test-results/settings-access/${tier}${options.activateThenReactivate ? '-reactivated' : ''}.png` });
   await browser.close();
   return { state, errors, adminMethodCalls };
 }
@@ -110,6 +126,19 @@ for (const tier of ['registered', 'readonly']) {
   assert.equal(state.tabs, true, 'admin: the tab strip must be visible');
   assert.equal(state.cardAccess, 'FULL', 'admin: the access card must report FULL');
   console.log('PASS admin: panels and tabs visible, locked notice hidden.');
+}
+
+// Regression: check resolves first, then the view is activated and deactivated.
+// The old in-flight guard returned early on the second call, so the locked
+// notice never appeared even though access was denied.
+for (const tier of ['registered', 'readonly']) {
+  const { state, errors, adminMethodCalls } = await scenario(tier, { activateThenReactivate: true });
+  assert.deepEqual(errors, [], `${tier}: no uncaught page errors after re-activation`);
+  assert.equal(state.locked, true, `${tier}: locked notice must be repainted after re-activation`);
+  assert.equal(state.adminPanels, false, `${tier}: admin panels must stay hidden`);
+  assert.ok(/UPDATE|VIEW ONLY/.test(state.lockedLine), `${tier}: locked line must be filled, got "${state.lockedLine}"`);
+  assert.deepEqual(adminMethodCalls, [], `${tier}: still no admin RPC after re-activation`);
+  console.log(`PASS ${tier}: locked notice repainted after the check resolved first.`);
 }
 
 // The gate must not be the one painting the locked panel.

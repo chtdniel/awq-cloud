@@ -13866,6 +13866,31 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
   var accessChecked = false;
   var accessCheckInFlight = false;
+  // Last resolved authorization + how it was rendered. A later call replays
+  // this instead of returning early: the first check often resolves before the
+  // Settings view is activated, so its result would otherwise never be painted.
+  var accessState = null;
+
+  function applyAccessState(){
+    if(!accessState) return;
+    if(accessState.kind === 'locked'){
+      renderLockedAccess(accessState.access || {});
+      return;
+    }
+    if(accessState.kind === 'failed'){
+      renderLockedAccess({ user: '', role: '' });
+      var line = document.getElementById('settings-locked-access');
+      if(line) line.textContent = 'CHECK FAILED — ' + accessState.message;
+      var status = document.getElementById('settings-edit-status');
+      if(status) status.textContent = accessState.message;
+      return;
+    }
+    var access = accessState.access || {};
+    if(typeof access.user === 'string' && access.user){
+      applyAccessCard(access.user, access.role || access.tier);
+    }
+    setAccessPanels('admin');
+  }
 
   window.settingsRefreshAll = function(){
     if(typeof google==='undefined' || !google.script || !google.script.run){
@@ -13876,36 +13901,38 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       settingsSystemRefresh();
       return;
     }
-    // One authorization check at a time: overlapping runs used to apply
-    // conflicting panel states.
-    if(accessCheckInFlight) return;
+    // Already resolved: re-apply, and only re-query when nothing is known yet.
+    if(accessState){
+      applyAccessState();
+      if(accessState.kind !== 'admin') return;
+      authUsersRefresh();
+      window.settingsAuditRefresh();
+      loadSettingsBundle();
+      return;
+    }
+    if(accessCheckInFlight) return; // first check will paint when it lands
     accessCheckInFlight = true;
     // Check authorization once before loading anything: an unauthorized
     // account must never fire the admin RPCs, and must never see the empty
     // shell of panels waiting for data it will not receive.
     google.script.run.withSuccessHandler(function(access){
       accessCheckInFlight = false;
-      if(!access || !access.ok || !access.canView){
-        accessChecked = true;
-        renderLockedAccess(access || {});
-        return;
-      }
       accessChecked = true;
-      if(typeof access.user === 'string' && access.user){
-        applyAccessCard(access.user, access.role || access.tier);
+      if(!access || !access.ok || !access.canView){
+        accessState = { kind: 'locked', access: access || {} };
+      } else {
+        accessState = { kind: 'admin', access };
       }
-      setAccessPanels('admin');
+      applyAccessState();
+      if(accessState.kind !== 'admin') return;
       authUsersRefresh();
       window.settingsAuditRefresh();
       loadSettingsBundle();
     }).withFailureHandler(function(err){
       accessCheckInFlight = false;
       accessChecked = true;
-      renderLockedAccess({ user: '', role: '' });
-      var line = document.getElementById('settings-locked-access');
-      if(line) line.textContent = 'CHECK FAILED — ' + ((err && err.message) ? err.message : 'could not verify your access');
-      var status = document.getElementById('settings-edit-status');
-      if(status) status.textContent = (err && err.message) ? err.message : 'Could not verify access';
+      accessState = { kind: 'failed', message: (err && err.message) ? err.message : 'Could not verify access' };
+      applyAccessState();
     }).getSettingsAccessInfo();
   };
 
