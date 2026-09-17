@@ -19,6 +19,9 @@ Thumbs.db
 test-results/
 scratch/
 
+# Local working notes (may quote production data or credentials during debugging)
+.debug-journal.md
+
 # D1 database dumps (repo is PUBLIC; dumps contain password hashes + PII).
 # Files are still exported locally to docs/backups/ — just never committed.
 docs/backups/*.sql
