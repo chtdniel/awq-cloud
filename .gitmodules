@@ -1,0 +1,6 @@
+[submodule "skills/senior-engineering-partner"]
+	path = skills/senior-engineering-partner
+	url = https://github.com/bjgreenberg/senior-engineering-partner.git
+[submodule "skills/tdd"]
+	path = skills/tdd
+	url = https://github.com/mfranzon/tdd.git
