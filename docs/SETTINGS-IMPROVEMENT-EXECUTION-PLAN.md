@@ -132,11 +132,25 @@ Approved by the product owner in-session. Scope additions confirmed: audit log r
 ### Verification
 
 - `npm test` → 15/15 pass (includes the new `tests/test_settings_rpc.mjs`).
+- `node tests/test_settings_access_browser.mjs` → 6/6 scenarios pass (admin, registered, readonly, re-activation, blocked switchTab). Kept out of `npm test` because it drives a real browser, matching the repo convention for browser QA.
 - `node build.js` → `public/index.html` rebuilt from `src/` and verified to contain the new panels.
-- Not covered by automated tests: live WX AI model calls and manual keyboard/AT walkthrough in the deployed surface.
+- Deployed and exercised against production: legacy write refused with `409 LEGACY_SETTING_READ_ONLY` plus two `legacy_settings_write_denied` audit entries; a registered account sees only the locked notice, the navbar keeps SETTINGS hidden, and no admin RPC is issued.
+- Not covered by automated tests: live WX AI model calls and a manual keyboard/AT walkthrough in the deployed surface.
+
+### Defects found during deployed QA
+
+The manual pass as a non-admin account surfaced three real defects that neither the unit tests nor code review had caught. All are fixed, and each has a regression guard.
+
+| Defect | Impact | Fix |
+|---|---|---|
+| `getAccess().canView` returned `Boolean(user)` ("has an account") while the navbar gate read it as "may open Settings" | Any signed-in account was let into Settings; the page then rendered an empty shell because every admin RPC answered `403 ADMIN_REQUIRED` | `canView: tier === 'admin'`, plus a `role` field so callers need not interpret `tier` |
+| Two independent writers set panel visibility (the navbar gate and the Settings module), and the admin shell was visible by default in the HTML | A non-admin could see the locked notice and the live WX AI editor at the same time; a slow or blocked script painted the admin layout | `setAccessPanels()` is the only writer; `switchTab` no longer touches the DOM; the admin shell and tab strip start hidden (fail-closed) |
+| The in-flight guard in `settingsRefreshAll()` returned early once the first check resolved | When authorization resolved before the view was activated, the locked notice never appeared at all | The resolved result is cached and re-applied on every later call, so a repeat activation always repaints |
+
+Lesson recorded for future UI work: authorization UI must be verified by opening the page **as an account that fails the check**, not only as an admin. An empty shell and a correct denial look identical to the admin performing the test.
 
 ### Known follow-ups
 
-- `isAuthorized`/`isOpen` on `getOccSettings` are now only informational; the authoritative tier lives on `access`/`accountRole`.
 - The revision stamp is a change detector, not a security control: it assumes an authorised writer.
+- `getAccess()` still exposes `canEdit` for registered accounts; that is intentional (they may write operational data) and is not a Settings permission.
 
