@@ -2,7 +2,7 @@ import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from 
 import { fetchLatestTafs } from '../../shared/taf.mjs';
 import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
-import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
+import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
 
 const REGISTERED_WRITE_METHODS = new Set([
   'saveFlightEdit', 'saveFlightRoute', 'deleteRoute', 'setActiveFlightRoute',
@@ -17,12 +17,14 @@ const ADMIN_ONLY_METHODS = new Set([
   'setSettingsAdminEmails', 'setOccAllowedEmails',
   'getSettingsAdminList', 'getOccSettings', 'getOccSystemSettings', 'getSettingsBundle',
   'adminListUsers', 'adminCreateUser', 'adminUpdateUserRole', 'adminSetUserActive', 'adminResetPassword',
+  'adminSaveProfile',
   'wxAiSetCatalog',
   'latlongGetEditorData', 'latlongGetPreview',
   'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll'
 ]);
 
 const AUTH_METHODS = new Set(['authLogin', 'authLogout', 'authMe', 'authBootstrap']);
+const SELF_WRITE_METHODS = new Set(['authChangePassword', 'profileSave']);
 const AUTHENTICATED_READ_METHODS = new Set([
   'getFlightDashboardData', 'getAllRoutes', 'syncNotamAnalysisState', 'analyzeNotams', 'analyzeFlightNotams', 'analyzeFlightList',
   'firGetNotamEditorData', 'firGetNotamResults', 'firBulkPreviewNotams', 'getTafData', 'fetchLatestTafFromApi',
@@ -55,7 +57,7 @@ export async function onRequestPost(context) {
     if (!AUTH_METHODS.has(method) && !access.user) {
       return Response.json({ error: 'Authentication required.', code: 'AUTH_REQUIRED' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
     }
-    const stateChangingMethod = REGISTERED_WRITE_METHODS.has(method) || ADMIN_ONLY_METHODS.has(method) || method === 'authChangePassword' || method.startsWith('admin');
+    const stateChangingMethod = REGISTERED_WRITE_METHODS.has(method) || ADMIN_ONLY_METHODS.has(method) || method === 'authChangePassword' || SELF_WRITE_METHODS.has(method) || method.startsWith('admin');
     if (stateChangingMethod && requireCsrf(context)) {
       return Response.json({ error: 'Invalid CSRF token.', code: 'CSRF_INVALID' }, { status: 403 });
     }
@@ -90,6 +92,10 @@ export async function onRequestPost(context) {
         return await handleAuthChangePassword(context, access.requestUser, args);
       case 'authBootstrap':
         return await handleAuthBootstrap(context, args);
+      case 'profileSave':
+        return await handleProfileSave(context, access.requestUser, args);
+      case 'adminSaveProfile':
+        return await handleAdminSaveProfile(context, access.requestUser, args);
       case 'adminListUsers':
         return await handleAdminListUsers(context, access.requestUser);
       case 'adminCreateUser':
@@ -290,7 +296,10 @@ export async function onRequestPost(context) {
     }
   } catch (error) {
     console.error('[RPC] Error:', error);
-    return Response.json({ error: error.message }, { status: Number(error.status) >= 400 ? Number(error.status) : 500 });
+    const body = { error: error.message };
+    if (error.fields) body.fields = error.fields;
+    if (error.code) body.code = error.code;
+    return Response.json(body, { status: Number(error.status) >= 400 ? Number(error.status) : 500 });
   }
 }
 
@@ -2688,7 +2697,15 @@ async function handleAuthBootstrap(context, args) {
 
 async function handleAdminListUsers(context, user) {
   if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
-  const { results } = await context.env.DB.prepare('SELECT id, email_display AS email, role, is_active AS isActive, must_change_password AS mustChangePassword, failed_login_count AS failedLoginCount, locked_until AS lockedUntil, created_at AS createdAt, updated_at AS updatedAt, last_login_at AS lastLoginAt FROM auth_users ORDER BY email_normalized').all();
+  const { results } = await context.env.DB.prepare(
+    `SELECT u.id, u.email_display AS email, u.role, u.is_active AS isActive,
+            u.must_change_password AS mustChangePassword, u.failed_login_count AS failedLoginCount,
+            u.locked_until AS lockedUntil, u.created_at AS createdAt, u.updated_at AS updatedAt,
+            u.last_login_at AS lastLoginAt,
+            p.full_name AS fullName, p.iaa_id AS iaaId, p.lic_no AS licNo
+       FROM auth_users u LEFT JOIN user_profiles p ON p.user_id = u.id
+      ORDER BY u.email_normalized`
+  ).all();
   return authResponse({ users: results });
 }
 
@@ -2755,9 +2772,273 @@ async function handleAdminResetPassword(context, user, args) {
   return authResponse({ ok: true });
 }
 
+function maskIdValue(value) {
+  const raw = String(value === null || value === undefined ? '' : value).trim();
+  if (!raw) return '';
+  // keep prefix + last 2 digits, mask every other digit as '*'
+  const dash = raw.indexOf('-');
+  if (dash < 0) return raw.length <= 2 ? raw : '**' + raw.slice(-2);
+  const prefix = raw.slice(0, dash + 1);
+  const digits = raw.slice(dash + 1);
+  if (digits.length <= 2) return prefix + digits;
+  return prefix + '**' + digits.slice(-2);
+}
+
+function buildProfileSummary(previous, next) {
+  const parts = [];
+  const prevName = previous ? (previous.full_name || null) : null;
+  const nextName = next.fullName;
+  if (prevName !== nextName) {
+    if (nextName) parts.push('name:set');
+    else parts.push('name:clear');
+  }
+  const prevIaa = previous ? (previous.iaa_id || null) : null;
+  const nextIaa = next.iaaId;
+  if (prevIaa !== nextIaa) {
+    if (nextIaa) parts.push('iaa:' + maskIdValue(nextIaa));
+    else parts.push('iaa:clear');
+  }
+  const prevLic = previous ? (previous.lic_no || null) : null;
+  const nextLic = next.licNo;
+  if (prevLic !== nextLic) {
+    if (nextLic) parts.push('lic:' + maskIdValue(nextLic));
+    else parts.push('lic:clear');
+  }
+  return parts.join('; ');
+}
+
+async function handleProfileSave(context, user, args) {
+  if (!user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
+  const [fields] = Array.isArray(args) ? args : [];
+  const input = fields || {};
+
+  let fullName, iaaId, licNo;
+  try {
+    fullName = normalizeFullName(input.fullName);
+    iaaId = normalizeIaaId(input.iaaId);
+    licNo = normalizeLicNo(input.licNo);
+  } catch (error) {
+    if (error.field) {
+      return Response.json(
+        { error: error.message, code: 'VALIDATION_ERROR', fields: { [error.field]: error.message } },
+        { status: 400 }
+      );
+    }
+    throw error;
+  }
+
+  // Uniqueness pre-check (exclude own row)
+  try {
+    if (iaaId) {
+      const dup = await context.env.DB.prepare(
+        'SELECT user_id FROM user_profiles WHERE iaa_id = ? AND user_id <> ?'
+      ).bind(iaaId, user.id).first();
+      if (dup) {
+        return Response.json(
+          { error: 'IAA ID is already used by another user.', code: 'PROFILE_CONFLICT', fields: { iaaId: 'IAA ID is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+    }
+    if (licNo) {
+      const dup = await context.env.DB.prepare(
+        'SELECT user_id FROM user_profiles WHERE lic_no = ? AND user_id <> ?'
+      ).bind(licNo, user.id).first();
+      if (dup) {
+        return Response.json(
+          { error: 'LIC No. is already used by another user.', code: 'PROFILE_CONFLICT', fields: { licNo: 'LIC No. is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+    }
+  } catch (error) {
+    console.warn('[RPC] profileSave uniqueness pre-check failed:', error.message);
+  }
+
+  // Read previous row for audit
+  let previous = null;
+  try {
+    previous = await context.env.DB.prepare(
+      'SELECT full_name, iaa_id, lic_no FROM user_profiles WHERE user_id = ?'
+    ).bind(user.id).first();
+  } catch {
+    previous = null;
+  }
+
+  try {
+    await context.env.DB.prepare(
+      `INSERT INTO user_profiles (user_id, full_name, iaa_id, lic_no, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET
+         full_name = excluded.full_name,
+         iaa_id = excluded.iaa_id,
+         lic_no = excluded.lic_no,
+         updated_by = excluded.updated_by,
+         updated_at = CURRENT_TIMESTAMP`
+    ).bind(user.id, fullName, iaaId, licNo, user.id).run();
+  } catch (error) {
+    const message = String(error.message || '');
+    if (message.includes('UNIQUE')) {
+      if (message.includes('iaa_id')) {
+        return Response.json(
+          { error: 'IAA ID is already used by another user.', code: 'PROFILE_CONFLICT', fields: { iaaId: 'IAA ID is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+      if (message.includes('lic_no')) {
+        return Response.json(
+          { error: 'LIC No. is already used by another user.', code: 'PROFILE_CONFLICT', fields: { licNo: 'LIC No. is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+    }
+    throw error;
+  }
+
+  const row = await context.env.DB.prepare(
+    'SELECT full_name, iaa_id, lic_no, updated_at FROM user_profiles WHERE user_id = ?'
+  ).bind(user.id).first();
+  const profile = {
+    fullName: row?.full_name || null,
+    iaaId: row?.iaa_id || null,
+    licNo: row?.lic_no || null,
+    updatedAt: row?.updated_at || null
+  };
+
+  const summary = buildProfileSummary(previous, { fullName, iaaId, licNo });
+  await audit(context, user.id, 'profile_save', user.id, 'success', summary || null);
+
+  return authResponse({ ok: true, profile });
+}
+
+async function handleAdminSaveProfile(context, user, args) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const [email, fields] = Array.isArray(args) ? args : [];
+  const input = fields || {};
+
+  const target = await findUserByEmail(context, email);
+  if (!target) return Response.json({ error: 'User not found.' }, { status: 404 });
+
+  let fullName, iaaId, licNo;
+  try {
+    fullName = normalizeFullName(input.fullName);
+    iaaId = normalizeIaaId(input.iaaId);
+    licNo = normalizeLicNo(input.licNo);
+  } catch (error) {
+    if (error.field) {
+      return Response.json(
+        { error: error.message, code: 'VALIDATION_ERROR', fields: { [error.field]: error.message } },
+        { status: 400 }
+      );
+    }
+    throw error;
+  }
+
+  // Uniqueness pre-check (exclude target row)
+  try {
+    if (iaaId) {
+      const dup = await context.env.DB.prepare(
+        'SELECT user_id FROM user_profiles WHERE iaa_id = ? AND user_id <> ?'
+      ).bind(iaaId, target.id).first();
+      if (dup) {
+        return Response.json(
+          { error: 'IAA ID is already used by another user.', code: 'PROFILE_CONFLICT', fields: { iaaId: 'IAA ID is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+    }
+    if (licNo) {
+      const dup = await context.env.DB.prepare(
+        'SELECT user_id FROM user_profiles WHERE lic_no = ? AND user_id <> ?'
+      ).bind(licNo, target.id).first();
+      if (dup) {
+        return Response.json(
+          { error: 'LIC No. is already used by another user.', code: 'PROFILE_CONFLICT', fields: { licNo: 'LIC No. is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+    }
+  } catch (error) {
+    console.warn('[RPC] adminSaveProfile uniqueness pre-check failed:', error.message);
+  }
+
+  let previous = null;
+  try {
+    previous = await context.env.DB.prepare(
+      'SELECT full_name, iaa_id, lic_no FROM user_profiles WHERE user_id = ?'
+    ).bind(target.id).first();
+  } catch {
+    previous = null;
+  }
+
+  try {
+    await context.env.DB.prepare(
+      `INSERT INTO user_profiles (user_id, full_name, iaa_id, lic_no, updated_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(user_id) DO UPDATE SET
+         full_name = excluded.full_name,
+         iaa_id = excluded.iaa_id,
+         lic_no = excluded.lic_no,
+         updated_by = excluded.updated_by,
+         updated_at = CURRENT_TIMESTAMP`
+    ).bind(target.id, fullName, iaaId, licNo, user.id).run();
+  } catch (error) {
+    const message = String(error.message || '');
+    if (message.includes('UNIQUE')) {
+      if (message.includes('iaa_id')) {
+        return Response.json(
+          { error: 'IAA ID is already used by another user.', code: 'PROFILE_CONFLICT', fields: { iaaId: 'IAA ID is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+      if (message.includes('lic_no')) {
+        return Response.json(
+          { error: 'LIC No. is already used by another user.', code: 'PROFILE_CONFLICT', fields: { licNo: 'LIC No. is already used by another user.' } },
+          { status: 409 }
+        );
+      }
+    }
+    throw error;
+  }
+
+  const row = await context.env.DB.prepare(
+    'SELECT full_name, iaa_id, lic_no, updated_at FROM user_profiles WHERE user_id = ?'
+  ).bind(target.id).first();
+  const profile = {
+    fullName: row?.full_name || null,
+    iaaId: row?.iaa_id || null,
+    licNo: row?.lic_no || null,
+    updatedAt: row?.updated_at || null
+  };
+
+  const summary = buildProfileSummary(previous, { fullName, iaaId, licNo });
+  await audit(context, user.id, 'admin_profile_save', target.id, 'success', summary || null);
+
+  return authResponse({ ok: true, profile });
+}
+
 async function getAccess(context) {
   const user = await getRequestUser(context);
   const tier = user?.role || 'anonymous';
+  let profile = null;
+  if (user) {
+    try {
+      const row = await context.env.DB.prepare(
+        'SELECT full_name, iaa_id, lic_no, updated_at FROM user_profiles WHERE user_id = ?'
+      ).bind(user.id).first();
+      if (row) {
+        profile = {
+          fullName: row.full_name || null,
+          iaaId: row.iaa_id || null,
+          licNo: row.lic_no || null,
+          updatedAt: row.updated_at || null
+        };
+      }
+    } catch (error) {
+      console.warn('[RPC] getAccess profile lookup failed:', error.message);
+      profile = null;
+    }
+  }
   return {
     ok: Boolean(user),
     user: user?.email || '',
@@ -2768,7 +3049,8 @@ async function getAccess(context) {
     canEdit: tier === 'admin' || tier === 'registered',
     canManageUsers: tier === 'admin',
     mustChangePassword: Boolean(user?.mustChangePassword),
-    userId: user?.id || null
+    userId: user?.id || null,
+    profile
   };
 }
 

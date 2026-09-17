@@ -52,10 +52,10 @@ try {
   await page.screenshot({path:`test-results/account-menu/${local?'local':'deployed'}-${width}-open.png`});
   await page.keyboard.press('Escape'); await panel.waitFor({state:'hidden'});
   await toggle.focus(); await page.keyboard.press('Enter'); await panel.waitFor();
-  await page.keyboard.press('Tab'); assert.equal(await page.locator('#awq-change-password').evaluate(el=>el===document.activeElement),true);
-  await page.keyboard.press('Enter'); await page.locator('#awq-change-password-dialog').waitFor();
+  await page.keyboard.press('Tab'); assert.equal(await page.locator('#awq-profile').evaluate(el=>el===document.activeElement),true);
+  await page.keyboard.press('Enter'); await page.locator('#awq-profile-dialog').waitFor();
   assert.equal(await panel.isVisible(),false);
-  await page.locator('#awq-cancel-password').click();
+  await page.locator('#awq-profile-cancel').click();
   await toggle.click(); await panel.waitFor();
   await page.setViewportSize({width,height:780}); await panel.waitFor({state:'hidden'});
   await page.setViewportSize({width,height:800});

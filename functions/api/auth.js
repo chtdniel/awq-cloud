@@ -128,4 +128,33 @@ export async function audit(context, actorUserId, action, targetUserId, result, 
   }
 }
 
-export { normalizeEmail };
+function invalidField(field, message) {
+  const error = new Error(message);
+  error.field = field;
+  error.status = 400;
+  return error;
+}
+
+function normalizeFullName(value) {
+  const name = String(value === null || value === undefined ? '' : value).trim();
+  if (!name) return null;
+  if (name.length > 100) throw invalidField('fullName', 'Name must be 1-100 characters and cannot contain <, >, or control characters.');
+  if (/[<>\u0000-\u001F\u007F]/.test(name)) throw invalidField('fullName', 'Name must be 1-100 characters and cannot contain <, >, or control characters.');
+  return name;
+}
+
+function normalizeIaaId(value) {
+  const raw = String(value === null || value === undefined ? '' : value).trim().toUpperCase();
+  if (!raw) return null;
+  if (!/^IAA-[0-9]{1,20}$/.test(raw)) throw invalidField('iaaId', 'IAA ID must look like IAA-12345.');
+  return raw;
+}
+
+function normalizeLicNo(value) {
+  const raw = String(value === null || value === undefined ? '' : value).trim().toUpperCase();
+  if (!raw) return null;
+  if (!/^FOOL-[0-9]{1,20}$/.test(raw)) throw invalidField('licNo', 'LIC No. must look like FOOL-881234.');
+  return raw;
+}
+
+export { normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo };

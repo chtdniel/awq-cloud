@@ -8,6 +8,8 @@
 // NOTE: /briefing (functions/briefing.js) is intentionally left untouched.
 // ============================================================================
 
+import { getRequestUser } from './api/auth.js';
+
 // --- Helpers ----------------------------------------------------------------
 
 // Escape any DB-derived string before it reaches HTML (attribute or text node).
@@ -25,6 +27,15 @@ function escapeHtml(text) {
 // never close the script tag and inject markup.
 function safeJson(value) {
     return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+// Signature prefill: "NAME (LIC: FOOL-881234)", or just "NAME" when no LIC.
+// Returns '' when there is no usable name (never a half-built "(LIC: )").
+export function dxrPrefillFromProfile(row) {
+    const name = row && row.full_name ? String(row.full_name).trim() : '';
+    if (!name) return '';
+    const lic = row && row.lic_no ? String(row.lic_no).trim() : '';
+    return lic ? name + ' (LIC: ' + lic + ')' : name;
 }
 
 // Normalise a station-ish DB value to an uppercase ICAO token.
@@ -198,6 +209,22 @@ export async function onRequest(context) {
             if (typeof v === 'string') return v;
             return (fallback === null || fallback === undefined) ? '' : String(fallback);
         };
+
+        // Prefill the DXR signature from the logged-in user's profile, only as a
+        // fallback: `sv` already lets any saved value (including "") win over it.
+        // Degrade silently — user_profiles/auth may be absent on a fresh DB.
+        let dxrProfilePrefill = '';
+        try {
+            const requestUser = await getRequestUser(context);
+            if (requestUser) {
+                const profileRow = await context.env.DB.prepare(
+                    'SELECT full_name, lic_no FROM user_profiles WHERE user_id = ? LIMIT 1'
+                ).bind(requestUser.id).first();
+                dxrProfilePrefill = dxrPrefillFromProfile(profileRow);
+            }
+        } catch (profileErr) {
+            console.warn('[briefing-form] Could not load profile prefill:', profileErr.message);
+        }
 
         const nowUtc = new Date().toISOString().replace('T', ' ').substring(0, 16) + 'Z';
 
@@ -731,7 +758,7 @@ export async function onRequest(context) {
                 <div class="sign-role">DXR ON DUTY</div>
                 <div class="sign-sub">NAME / SIGN</div>
                 <input type="text" class="editable sign-line" name="dxrName" data-field="dxrName"
-                    placeholder="Dispatcher name" value="${escapeHtml(sv('dxrName', ''))}">
+                    placeholder="Dispatcher name" value="${escapeHtml(sv('dxrName', dxrProfilePrefill))}">
             </div>
             <div class="sign-box">
                 <div class="sign-role">PIC</div>

@@ -12996,6 +12996,26 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     </div>
   </div>
 </div>
+
+<div id="auth-profile-backdrop" class="modal-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-profile-title">
+    <div class="modal-title" id="auth-profile-title">Edit profile</div>
+    <div class="modal-body">
+      <div class="settings-note" id="auth-profile-target"></div>
+      <label class="settings-hint" style="display:block;margin-top:10px">Name<input id="auth-profile-name" class="in" type="text" maxlength="100" autocomplete="off"></label>
+      <p class="settings-hint" id="auth-profile-name-error" style="color:var(--danger,#fda4af);min-height:14px;margin:2px 0 0"></p>
+      <label class="settings-hint" style="display:block">IAA ID<input id="auth-profile-iaa" class="in" type="text" placeholder="IAA-12345" autocomplete="off"></label>
+      <p class="settings-hint" id="auth-profile-iaa-error" style="color:var(--danger,#fda4af);min-height:14px;margin:2px 0 0"></p>
+      <label class="settings-hint" style="display:block">LIC No.<input id="auth-profile-lic" class="in" type="text" placeholder="FOOL-881234" autocomplete="off"></label>
+      <p class="settings-hint" id="auth-profile-lic-error" style="color:var(--danger,#fda4af);min-height:14px;margin:2px 0 0"></p>
+      <p class="settings-hint" id="auth-profile-status" role="status" aria-live="polite" style="min-height:14px"></p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="auth-profile-cancel" type="button" aria-label="Cancel profile edit">Cancel</button>
+      <button class="btn primary" id="auth-profile-save" type="button" aria-label="Save profile" disabled>Save profile</button>
+    </div>
+  </div>
+</div>
 <div id="settings-toast" class="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -13246,6 +13266,135 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   }
 
   var authUsersState = [];
+  var authProfileTarget = null;
+  
+  // Profile validation rules (mirror server)
+  function authProfileValidation() {
+    var errors = {};
+    var nameInput = document.getElementById('auth-profile-name');
+    var iaaInput = document.getElementById('auth-profile-iaa');
+    var licInput = document.getElementById('auth-profile-lic');
+    
+    // Name: trimmed ≤ 100 chars, must not contain < or >
+    var nameVal = (nameInput.value || '').trim();
+    if (nameVal.length > 0 && nameVal.length <= 100) {
+      if (/<|>/.test(nameVal)) {
+        errors.name = 'Name cannot contain < or >';
+      }
+    } else if (nameVal.length > 100) {
+      errors.name = 'Name must be 100 characters or less';
+    }
+    
+    // IAA: empty allowed; else /^IAA-[0-9]{1,20}$/i
+    var iaaVal = (iaaInput.value || '').trim().toUpperCase();
+    if (iaaVal.length > 0) {
+      if (!/^IAA-[0-9]{1,20}$/.test(iaaVal)) {
+        errors.iaa = 'IAA ID must be in format IAA-12345 (digits only, max 20)';
+      }
+    }
+    
+    // LIC: empty allowed; else /^FOOL-[0-9]{1,20}$/i
+    var licVal = (licInput.value || '').trim().toUpperCase();
+    if (licVal.length > 0) {
+      if (!/^FOOL-[0-9]{1,20}$/.test(licVal)) {
+        errors.lic = 'LIC No. must be in format FOOL-881234 (digits only, max 20)';
+      }
+    }
+    
+    return { ok: Object.keys(errors).length === 0, errors: errors };
+  }
+  
+  function payloadFromAuthProfileForm() {
+    var nameInput = document.getElementById('auth-profile-name');
+    var iaaInput = document.getElementById('auth-profile-iaa');
+    var licInput = document.getElementById('auth-profile-lic');
+    return {
+      fullName: (nameInput.value || '').trim(),
+      iaaId: (iaaInput.value || '').trim().toUpperCase(),
+      licNo: (licInput.value || '').trim().toUpperCase()
+    };
+  }
+  
+  function openAuthProfile(email, values) {
+    var user = null;
+    for (var i = 0; i < authUsersState.length; i++) {
+      if (authUsersState[i].email === email) {
+        user = authUsersState[i];
+        break;
+      }
+    }
+    if (!user) { authUsersStatus('User is no longer in the list. Refresh and try again.'); return; }
+
+    authProfileTarget = email;
+    document.getElementById('auth-profile-target').textContent = esc(email);
+
+    var nameInput = document.getElementById('auth-profile-name');
+    var iaaInput = document.getElementById('auth-profile-iaa');
+    var licInput = document.getElementById('auth-profile-lic');
+
+    nameInput.value = (values && typeof values.fullName === 'string') ? values.fullName : (user.fullName || '');
+    iaaInput.value = (values && typeof values.iaaId === 'string') ? values.iaaId : (user.iaaId || '');
+    licInput.value = (values && typeof values.licNo === 'string') ? values.licNo : (user.licNo || '');
+    
+    // Clear all error slots
+    document.getElementById('auth-profile-name-error').textContent = '';
+    document.getElementById('auth-profile-iaa-error').textContent = '';
+    document.getElementById('auth-profile-lic-error').textContent = '';
+    document.getElementById('auth-profile-status').textContent = '';
+    
+    // Disable Save initially
+    document.getElementById('auth-profile-save').disabled = true;
+    
+    // Open backdrop
+    document.getElementById('auth-profile-backdrop').classList.add('open');
+    
+    // Focus Name input
+    nameInput.focus();
+    
+    // Initial validation check
+    refreshAuthProfileSaveButton();
+  }
+  
+  function closeAuthProfile() {
+    document.getElementById('auth-profile-backdrop').classList.remove('open');
+    authProfileTarget = null;
+    // Clear errors
+    document.getElementById('auth-profile-name-error').textContent = '';
+    document.getElementById('auth-profile-iaa-error').textContent = '';
+    document.getElementById('auth-profile-lic-error').textContent = '';
+    document.getElementById('auth-profile-status').textContent = '';
+  }
+  
+  function refreshAuthProfileSaveButton() {
+    if (!authProfileTarget) return;
+    
+    var validation = authProfileValidation();
+    var payload = payloadFromAuthProfileForm();
+    
+    // Compare with original values from current user
+    var currentUser = null;
+    for (var i = 0; i < authUsersState.length; i++) {
+      if (authUsersState[i].email === authProfileTarget) {
+        currentUser = authUsersState[i];
+        break;
+      }
+    }
+    
+    if (!currentUser) return;
+    var originalFullName = currentUser.fullName || '';
+    var originalIaaId = currentUser.iaaId || '';
+    var originalLicNo = currentUser.licNo || '';
+    
+    // Enable Save only when valid AND differs from original
+    var hasChanges = (payload.fullName !== originalFullName || 
+                      payload.iaaId !== originalIaaId.toUpperCase() || 
+                      payload.licNo !== originalLicNo.toUpperCase());
+    
+    var saveBtn = document.getElementById('auth-profile-save');
+    if (saveBtn) {
+      saveBtn.disabled = !validation.ok || !hasChanges;
+    }
+  }
   function authUsersStatus(text){ var el=document.getElementById('auth-users-status'); if(el) el.textContent=text || ''; }
   function authUsersRefresh(completionMessage){
     if(typeof google==='undefined' || !google.script || !google.script.run){ authUsersStatus('Preview: auth users unavailable'); return; }
@@ -13255,7 +13404,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       var box = document.getElementById('auth-users-list');
       box.innerHTML = authUsersState.map(function(u){
         var active = Number(u.isActive) === 1;
-        return '<div class="settings-chip" style="display:grid;grid-template-columns:2fr 1fr auto auto;gap:8px;align-items:center"><b>'+esc(u.email)+'</b><span>'+esc(u.role)+'</span><span>'+ (active ? 'ACTIVE' : 'DISABLED') +'</span><span style="display:flex;gap:6px"><button type="button" class="btn" data-auth-role="'+esc(u.email)+'">Role</button><button type="button" class="btn" data-auth-active="'+esc(u.email)+'" data-active="'+(active?'1':'0')+'">'+(active?'Disable':'Enable')+'</button><button type="button" class="btn" data-auth-reset="'+esc(u.email)+'">Reset</button></span></div>';
+        var nameVal = (u.fullName && u.fullName !== '') ? esc(u.fullName) : '\u2014';
+        var iaaVal = (u.iaaId && u.iaaId !== '') ? esc(u.iaaId) : '\u2014';
+        var licVal = (u.licNo && u.licNo !== '') ? esc(u.licNo) : '\u2014';
+        return '<div class="settings-chip" style="display:grid;grid-template-columns:1.6fr 1.4fr 1fr 1fr auto auto auto;gap:8px;align-items:center"><b>'+esc(u.email)+'</b><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nameVal+'</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+iaaVal+'</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+licVal+'</span><span>'+esc(u.role)+'</span><span>'+ (active ? 'ACTIVE' : 'DISABLED') +'</span><span style="display:flex;gap:6px"><button type="button" class="btn" data-auth-profile="'+esc(u.email)+'">Profile</button><button type="button" class="btn" data-auth-role="'+esc(u.email)+'">Role</button><button type="button" class="btn" data-auth-active="'+esc(u.email)+'" data-active="'+(active?'1':'0')+'">'+(active?'Disable':'Enable')+'</button><button type="button" class="btn" data-auth-reset="'+esc(u.email)+'">Reset</button></span></div>';
       }).join('') || '<div class="settings-note">No internal users.</div>';
       authUsersStatus(completionMessage || (authUsersState.length + ' users'));
     }).withFailureHandler(function(error){ authUsersStatus(error && error.message || 'Unable to load users'); }).adminListUsers();
@@ -13272,14 +13424,65 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   window.authUserCreate = authUserCreate;
   document.getElementById('auth-users-list').addEventListener('click', function(event){
     var button=event.target.closest('button'); if(!button) return;
-    var email=button.getAttribute('data-auth-role') || button.getAttribute('data-auth-active') || button.getAttribute('data-auth-reset');
-    if(button.hasAttribute('data-auth-role')){
+    var email=button.getAttribute('data-auth-profile') || button.getAttribute('data-auth-role') || button.getAttribute('data-auth-active') || button.getAttribute('data-auth-reset');
+    if(button.hasAttribute('data-auth-profile')){
+      openAuthProfile(email);
+    } else if(button.hasAttribute('data-auth-role')){
       var role=window.prompt('New role: readonly, registered, or admin'); if(role) settingsModal('Change role?', 'Change '+email+' role to '+role+'. This changes what the account can access.', 'Change role', function(){ google.script.run.withSuccessHandler(function(){ authUsersRefresh('Role updated successfully.'); }).withFailureHandler(function(error){authUsersStatus(error && error.message || 'Unable to update role');}).adminUpdateUserRole(email, role); });
     } else if(button.hasAttribute('data-auth-active')) {
       var active=button.getAttribute('data-active') !== '1'; settingsModal(active ? 'Enable user?' : 'Disable user?', (active ? 'Enable ' : 'Disable ') + email + (active ? '.' : '. Active sessions will be revoked.'), active ? 'Enable' : 'Disable', function(){ google.script.run.withSuccessHandler(function(){ authUsersRefresh(active ? 'User enabled successfully.' : 'User disabled successfully.'); }).withFailureHandler(function(error){authUsersStatus(error && error.message || 'Unable to update status');}).adminSetUserActive(email, active); });
     } else {
       var password=window.prompt('Temporary password (minimum 12 characters):'); if(password) settingsModal('Reset password?', 'Reset '+email+' password and revoke active sessions. The temporary password is never stored in the audit log.', 'Reset password', function(){ google.script.run.withSuccessHandler(function(){ authUsersRefresh('Password reset successfully.'); }).withFailureHandler(function(error){authUsersStatus(error && error.message || 'Unable to reset password');}).adminResetPassword(email, password); });
     }
+  });
+  
+  // Profile modal handlers
+  document.getElementById('auth-profile-cancel').addEventListener('click', closeAuthProfile);
+  document.getElementById('auth-profile-backdrop').addEventListener('click', function(e){
+    if(e.target === this) closeAuthProfile();
+  });
+  
+  document.getElementById('auth-profile-name').addEventListener('input', refreshAuthProfileSaveButton);
+  document.getElementById('auth-profile-iaa').addEventListener('input', function(){ 
+    this.value = (this.value || '').toUpperCase();
+    refreshAuthProfileSaveButton();
+  });
+  document.getElementById('auth-profile-lic').addEventListener('input', function(){ 
+    this.value = (this.value || '').toUpperCase();
+    refreshAuthProfileSaveButton();
+  });
+  
+  document.getElementById('auth-profile-save').addEventListener('click', function(){
+    var validation = authProfileValidation();
+    if (!validation.ok) {
+      document.getElementById('auth-profile-name-error').textContent = validation.errors.name || '';
+      document.getElementById('auth-profile-iaa-error').textContent = validation.errors.iaa || '';
+      document.getElementById('auth-profile-lic-error').textContent = validation.errors.lic || '';
+      return;
+    }
+
+    var target = authProfileTarget;
+    var payload = payloadFromAuthProfileForm();
+    closeAuthProfile();
+
+    settingsModal('Save profile?', 'Update the profile for ' + target + '? This changes the identity printed on briefing outputs.', 'Save profile', function() {
+      authUsersStatus('Saving\u2026');
+      google.script.run
+        .withSuccessHandler(function(){
+          authUsersRefresh('Profile updated successfully.');
+        })
+        .withFailureHandler(function(error){
+          var message = (error && error.message) || 'Unable to save profile';
+          var fields = (error && error.fields) || {};
+          authUsersStatus(message);
+          openAuthProfile(target, payload);
+          if (fields.fullName) document.getElementById('auth-profile-name-error').textContent = fields.fullName;
+          if (fields.iaaId) document.getElementById('auth-profile-iaa-error').textContent = fields.iaaId;
+          if (fields.licNo) document.getElementById('auth-profile-lic-error').textContent = fields.licNo;
+          document.getElementById('auth-profile-status').textContent = message;
+        })
+        .adminSaveProfile(target, payload);
+    });
   });
 
   function checkAdminOwn(){

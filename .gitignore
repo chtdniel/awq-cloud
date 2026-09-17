@@ -5,8 +5,15 @@
 # Dependencies
 node_modules/
 
+# Local secrets (never commit — repo is PUBLIC)
+.dev.vars
+
 # Agent & IDE caches
 .claude-flow/
 .omo/
 .DS_Store
 Thumbs.db
+
+# D1 database dumps (repo is PUBLIC; dumps contain password hashes + PII).
+# Files are still exported locally to docs/backups/ — just never committed.
+docs/backups/*.sql
