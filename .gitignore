@@ -17,3 +17,6 @@ Thumbs.db
 # D1 database dumps (repo is PUBLIC; dumps contain password hashes + PII).
 # Files are still exported locally to docs/backups/ — just never committed.
 docs/backups/*.sql
+
+# Office lock/temp files (e.g. public/~$briefing-template.xlsx while Excel has it open)
+~$*
