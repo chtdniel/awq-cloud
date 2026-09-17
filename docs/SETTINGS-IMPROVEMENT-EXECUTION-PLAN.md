@@ -1,6 +1,6 @@
 # AWQ OCC Settings Improvement Execution Plan
 
-Status: ✅ APPROVED 2026-09-18 — dieksekusi 2026-09-18 (lihat "Execution Result").
+Status: ✅ APPROVED 2026-09-18 — executed 2026-09-18; all six acceptance items verified against the deployed surface. See "Execution Result".
 
 ## Objective
 
@@ -127,6 +127,7 @@ Approved by the product owner in-session. Scope additions confirmed: audit log r
 | WX AI rows validated in the browser before Save, with per-row messages and disabled Save | `src/Settings_Ui.html` |
 | Per-field WX AI validation on the server (`400 WX_CATALOG_INVALID`, `fields['rowN.field']`) | `functions/api/rpc.js` |
 | System tab: D1 data source, timezone, last refresh, configuration status, legacy fields behind a toggle | `src/Settings_Ui.html` |
+| WX AI change stamp: `meta.WX_AI_CATALOG_UPDATED_AT` written only on an accepted save, returned by `wxAiGetCatalog`, and shown as "Terakhir diubah: … (N menit lalu)" in the WX AI tab | `functions/api/rpc.js`, `src/Settings_Ui.html` |
 | Settings authorization/conflict/validation tests, wired into `npm test` | `tests/test_settings_rpc.mjs` |
 
 ### Verification
@@ -135,6 +136,7 @@ Approved by the product owner in-session. Scope additions confirmed: audit log r
 - `node tests/test_settings_access_browser.mjs` → 6/6 scenarios pass (admin, registered, readonly, re-activation, blocked switchTab). Kept out of `npm test` because it drives a real browser, matching the repo convention for browser QA.
 - `node build.js` → `public/index.html` rebuilt from `src/` and verified to contain the new panels.
 - Deployed and exercised against production: legacy write refused with `409 LEGACY_SETTING_READ_ONLY` plus two `legacy_settings_write_denied` audit entries; a registered account sees only the locked notice, the navbar keeps SETTINGS hidden, and no admin RPC is issued.
+- Revision conflict exercised end to end against the deployed surface (see the manual QA result below).
 - Not covered by automated tests: live WX AI model calls and a manual keyboard/AT walkthrough in the deployed surface.
 
 ### Defects found during deployed QA
@@ -149,8 +151,28 @@ The manual pass as a non-admin account surfaced three real defects that neither 
 
 Lesson recorded for future UI work: authorization UI must be verified by opening the page **as an account that fails the check**, not only as an admin. An empty shell and a correct denial look identical to the admin performing the test.
 
+### Manual QA result — revision conflict (the last open item)
+
+Two admins, two windows, one live database.
+
+| Probe | Result |
+|---|---|
+| Save from an editor holding the current revision | `200` — accepted |
+| Save from an editor holding an out-of-date revision | `409 STALE_REVISION` — refused, catalog untouched |
+| RPC called with `expectedRevision: "sengaja-salah"` | `409` — the guard is not bypassable by sending garbage |
+| Real UI path: the stale window pressed Save | Dialog **"Perubahan lebih baru terdeteksi"** appeared and the request returned `409`; the newer window's data was never overwritten |
+
+One earlier attempt appeared to fail. It did not: the JSON body captured from the second window already contained the first window's new model, proving that window had reloaded after the first save, so it held a current revision and its save was legitimate. This is why the change stamp was added — without a visible "last changed" value there was no way to tell a stale editor from a current one, and the same confusion will otherwise recur.
+
+No defect was found in the conflict path. The revision guard held on both the direct-RPC and the UI paths.
+
+### Scope decision recorded
+
+`test@gmail.com` is deliberately kept as an active `registered` account for manual QA. It is not a leftover: do not propose disabling it in future reviews. If it ever needs to be narrowed, `readonly` is the preferred role, because the non-admin UI paths (including the locked Settings notice) can be exercised without write access to operational data.
+
 ### Known follow-ups
 
 - The revision stamp is a change detector, not a security control: it assumes an authorised writer.
 - `getAccess()` still exposes `canEdit` for registered accounts; that is intentional (they may write operational data) and is not a Settings permission.
+- An empty catalog and a never-saved catalog still hash to the same revision value; `updatedAt` (`null` before the first save) is what distinguishes them, so read the stamp rather than inferring from the hash.
 
