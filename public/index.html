@@ -13039,6 +13039,9 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   #view-settings .modal-title{font:700 14px var(--font-ui);color:var(--text-primary)}
   #view-settings .modal-body{font:500 12px var(--font-mono);color:var(--text-secondary);line-height:1.6}
   #view-settings .modal-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+  /* Form pembungkus isi modal: meniru grid .modal supaya jarak title → body →
+     actions tetap 12px setelah body dan actions pindah ke dalam <form>. */
+  #view-settings .auth-modal-form{display:grid;gap:12px;min-width:0}
   #view-settings .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--bg-panel-raised);border:1px solid var(--border-light);color:var(--text-primary);font:600 12px var(--font-mono);padding:9px 16px;border-radius:999px;box-shadow:var(--shadow-lift);opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;z-index:var(--z-tooltip)}
   #view-settings .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   #view-settings .settings-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
@@ -13175,12 +13178,12 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     @media (max-width:760px) { #auth-users-list > .settings-chip { grid-template-columns:1fr !important; } #auth-users-list > .settings-chip > span:nth-child(2), #auth-users-list > .settings-chip > span:nth-child(3), #auth-users-list > .settings-chip > span:nth-child(4) { display:none; } }
   </style>
   <div id="auth-users-list" style="display:grid;gap:10px;margin:14px 0 16px"></div>
-  <div style="display:grid;grid-template-columns:2fr 1fr 2fr auto;gap:8px;align-items:end">
+  <form id="auth-create-user-form" style="display:grid;grid-template-columns:2fr 1fr 2fr auto;gap:8px;align-items:end" onsubmit="window.authCreateUserSubmit(event)">
     <label class="settings-hint">Email<input id="auth-user-email" class="in" type="email" autocomplete="off"></label>
     <label class="settings-hint">Role<select id="auth-user-role" class="in"><option value="readonly">readonly</option><option value="registered">registered</option><option value="admin">admin</option></select></label>
     <label class="settings-hint">Temporary password<input id="auth-user-password" class="in" type="password" autocomplete="new-password"></label>
-    <button type="button" class="btn primary" onclick="authUserCreate()">+ Create</button>
-  </div>
+    <button type="submit" class="btn primary">+ Create</button>
+  </form>
   <span id="auth-users-status" class="settings-hint" role="status" aria-live="polite"></span>
 </div>
 
@@ -13291,6 +13294,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 <div id="auth-reset-backdrop" class="modal-backdrop">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-reset-title">
     <div class="modal-title" id="auth-reset-title">Reset password</div>
+    <form id="auth-reset-form" class="auth-modal-form" onsubmit="window.authResetSubmit(event)">
     <div class="modal-body">
       <div class="settings-note" id="auth-reset-target"></div>
       <label class="settings-hint" style="display:block;margin-top:10px">Temporary password (minimum 12 characters)
@@ -13306,8 +13310,9 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     </div>
     <div class="modal-actions">
       <button class="btn" id="auth-reset-cancel" type="button" aria-label="Cancel password reset">Cancel</button>
-      <button class="btn primary" id="auth-reset-save" type="button" aria-label="Reset password" disabled>Reset password</button>
+      <button class="btn primary" id="auth-reset-save" type="submit" aria-label="Reset password" disabled>Reset password</button>
     </div>
+    </form>
   </div>
 </div>
 
@@ -13769,6 +13774,13 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   }
   window.authUsersRefresh = authUsersRefresh;
   window.authUserCreate = authUserCreate;
+  // Enter di dalam #auth-create-user-form. preventDefault wajib supaya halaman
+  // tidak dinavigasi ulang; authUserCreate() sendiri sudah memvalidasi dan
+  // menampilkan hint kalau email/password belum memenuhi syarat.
+  window.authCreateUserSubmit = function(event){
+    if(event) event.preventDefault();
+    authUserCreate();
+  };
 
   // ---- Role change modal ----
   var authRoleTarget = null;
@@ -13895,6 +13907,15 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     }).adminResetPassword(email, password);
   };
 
+  // Tombol save sudah jadi type="submit" di dalam #auth-reset-form, jadi satu
+  // jalur saja lewat submit. Listener click di tombol itu dihapus — kalau
+  // dipertahankan, satu klik menjalankan handler dua kali (click + submit),
+  // artinya dua panggilan adminResetPassword.
+  window.authResetSubmit = function(event){
+    if(event) event.preventDefault();
+    window.authResetSave();
+  };
+
   document.getElementById('auth-users-list').addEventListener('click', function(event){
     var button=event.target.closest('button'); if(!button) return;
     var email=button.getAttribute('data-auth-profile') || button.getAttribute('data-auth-role') || button.getAttribute('data-auth-active') || button.getAttribute('data-auth-reset');
@@ -13915,7 +13936,6 @@ VTK N 01 24.9 E 104 01.3"></textarea>
   document.getElementById('auth-role-select').addEventListener('change', refreshAuthRoleSave);
   document.getElementById('auth-role-backdrop').addEventListener('click', function(e){ if(e.target === this) closeAuthRole(); });
   document.getElementById('auth-reset-cancel').addEventListener('click', closeAuthReset);
-  document.getElementById('auth-reset-save').addEventListener('click', function(){ window.authResetSave(); });
   document.getElementById('auth-reset-password').addEventListener('input', refreshAuthResetSave);
   document.getElementById('auth-reset-confirm').addEventListener('input', refreshAuthResetSave);
   document.getElementById('auth-reset-backdrop').addEventListener('click', function(e){ if(e.target === this) closeAuthReset(); });
