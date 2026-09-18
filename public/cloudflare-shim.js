@@ -46,6 +46,17 @@ window.google.script = window.google.script || {};
     return method === 'authLogin' || method === 'authLogout' || method === 'authMe';
   }
 
+  // A session can disappear while the app is open (cookie expiry, revocation).
+  // Drop the stale identity and ask for credentials, so "Authentication
+  // required." never lands in a module as an error state.
+  function invalidateSession() {
+    authState.user = null;
+    window.awqAuthUser = null;
+    var bar = document.getElementById('awq-user-bar');
+    if (bar) bar.remove();
+    showLogin();
+  }
+
   function showLogin() {
     if (document.getElementById('awq-login-gate')) return;
     if (!document.body) { document.addEventListener('DOMContentLoaded', showLogin, { once: true }); return; }
@@ -134,10 +145,7 @@ window.google.script = window.google.script || {};
       try {
         await callRpc('authLogout', [], false);
         panel.hidePopover();
-        bar.remove();
-        authState.user = null;
-        window.awqAuthUser = null;
-        showLogin();
+        invalidateSession();
       } catch (logoutError) {
         error.textContent = 'Could not sign out. Please try again.';
         error.hidden = false;
@@ -354,6 +362,9 @@ window.google.script = window.google.script || {};
     var response = await fetch('/api/rpc', { method: 'POST', credentials: 'same-origin', headers: headers, body: JSON.stringify({ method: method, args: args }) });
     var result = await response.json();
     if (!response.ok) {
+      // Only the server's explicit AUTH_REQUIRED code means "the session is
+      // gone"; a guard rejection (missing/bad Origin) must stay a plain error.
+      if (response.status === 401 && result.code === 'AUTH_REQUIRED' && !isAuthMethod(method)) invalidateSession();
       var error = new Error(result.error || ('HTTP error! status: ' + response.status));
       error.status = response.status;
       if (result.fields) error.fields = result.fields;
