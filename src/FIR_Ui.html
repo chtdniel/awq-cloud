@@ -1503,9 +1503,19 @@
   function getActiveBoardRowIds() {
     try {
       if (Array.isArray(window.activeBoardRowIds) && window.activeBoardRowIds.length) return window.activeBoardRowIds.map(n => Number(n)).filter(n => !isNaN(n));
-      // localStorage fallback (occ_active_board)
-      const raw = localStorage.getItem('occ_active_board');
-      if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr.map(n => Number(n)).filter(n => !isNaN(n)); }
+      // localStorage fallback (occ_active_board). Baca lewat helper Flight_Ui
+      // kalau tersedia, karena helper itu sekaligus memeriksa stamp pemilik
+      // cache — operator lain di PC yang sama tidak boleh mewarisi board
+      // operator sebelumnya.
+      const cached = typeof window.readCachedBoardForCurrentUser === 'function'
+        ? window.readCachedBoardForCurrentUser()
+        : (function () {
+            try {
+              const raw = localStorage.getItem('occ_active_board');
+              return raw ? JSON.parse(raw) : null;
+            } catch (e) { return null; }
+          })();
+      if (Array.isArray(cached) && cached.length) return cached.map(n => Number(n)).filter(n => !isNaN(n));
       // window.allDbFlights filtered by board? last resort: all rowIdx on current board filter
       if (Array.isArray(window.allDbFlights) && window.allDbFlights.length && typeof window.getFilteredBoardFlights === 'function' && typeof window.flightFilter !== 'undefined') {
         try {

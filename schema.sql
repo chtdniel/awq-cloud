@@ -162,6 +162,15 @@ CREATE TABLE IF NOT EXISTS latlong (
 CREATE INDEX IF NOT EXISTS idx_latlong_route ON latlong(route_id);
 CREATE INDEX IF NOT EXISTS idx_latlong_route_order ON latlong(route_id, sequence_order, id);
 
+-- Flight Board aktif per akun (lihat migrations/012_user_board_state.sql).
+-- row_ids = JSON array flights.id, urut sesuai tampilan board.
+CREATE TABLE IF NOT EXISTS user_board_state (
+    user_id INTEGER PRIMARY KEY,              -- 1:1 dengan auth_users.id
+    row_ids TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS briefing_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     flights_key TEXT NOT NULL,

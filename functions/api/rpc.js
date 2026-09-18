@@ -24,14 +24,18 @@ const ADMIN_ONLY_METHODS = new Set([
 ]);
 
 const AUTH_METHODS = new Set(['authLogin', 'authLogout', 'authMe', 'authBootstrap']);
-const SELF_WRITE_METHODS = new Set(['authChangePassword', 'profileSave']);
+// Data milik user sendiri: cukup sesi yang valid, tidak butuh tier registered
+// seperti REGISTERED_WRITE_METHODS. Board aktif termasuk di sini — semua tier
+// yang boleh membuka flight board boleh menyimpan susunannya sendiri.
+const SELF_WRITE_METHODS = new Set(['authChangePassword', 'profileSave', 'saveBoardState']);
 const AUTHENTICATED_READ_METHODS = new Set([
   'getFlightDashboardData', 'getAllRoutes', 'syncNotamAnalysisState', 'analyzeNotams', 'analyzeFlightNotams', 'analyzeFlightList',
   'firGetNotamEditorData', 'firGetNotamResults', 'firBulkPreviewNotams', 'getTafData', 'fetchLatestTafFromApi',
   'getActiveFlightDataForWarning', 'analyzeWxWithManual', 'getFirData', 'getFirGeometry', 'getActiveNotams', 'getSelectedFlightsData',
   'getActiveFlightList', 'getFlightSummary', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
   'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
-  'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'syncCgoData', 'getSettingsAccessInfo'
+  'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'syncCgoData', 'getSettingsAccessInfo',
+  'getBoardState'
 ]);
 
 function rpcGuard(context) {
@@ -97,6 +101,10 @@ export async function onRequestPost(context) {
         return await handleAuthBootstrap(context, args);
       case 'profileSave':
         return await handleProfileSave(context, access.requestUser, args);
+      case 'getBoardState':
+        return await handleGetBoardState(context, access.requestUser);
+      case 'saveBoardState':
+        return await handleSaveBoardState(context, access.requestUser, args);
       case 'adminSaveProfile':
         return await handleAdminSaveProfile(context, access.requestUser, args);
       case 'adminListUsers':
@@ -375,6 +383,94 @@ async function handleGetFlightDashboardData(context) {
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
     }
+}
+
+// ---- Flight Board aktif (per akun) ----
+// Dulu daftar flight di board hanya hidup di localStorage browser, jadi akun
+// yang sama di browser/device lain selalu mulai dari board kosong. Server
+// sekarang jadi sumber kebenaran; localStorage tinggal cache paint pertama.
+
+const BOARD_MAX_ROWS = 500;
+
+// Urutan array = urutan strip di board, jadi duplikat dibuang dengan urutan
+// tetap — jangan pernah di-sort.
+function normalizeBoardRowIds(value) {
+  function invalid(message) {
+    const error = new Error(message);
+    error.field = 'rowIds';
+    error.status = 400;
+    return error;
+  }
+  if (!Array.isArray(value)) throw invalid('Board must be an array of flight ids.');
+  if (value.length > BOARD_MAX_ROWS) {
+    throw invalid(`Board cannot hold more than ${BOARD_MAX_ROWS} flights.`);
+  }
+  const seen = new Set();
+  const ids = [];
+  for (const raw of value) {
+    const id = Number(raw);
+    if (!Number.isInteger(id) || id <= 0) throw invalid('Board flight ids must be positive integers.');
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+async function handleGetBoardState(context, user) {
+  if (!user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
+  const row = await context.env.DB.prepare(
+    'SELECT row_ids, updated_at FROM user_board_state WHERE user_id = ?'
+  ).bind(user.id).first();
+  // `present` membedakan "belum pernah menyimpan board" (klien boleh adopsi
+  // board lokal yang sudah ada, supaya board operator lama tidak hilang saat
+  // migrasi) dari "board sengaja dikosongkan" (jangan dihidupkan lagi dari
+  // cache browser).
+  const present = Boolean(row);
+  let rowIds = [];
+  if (present) {
+    try {
+      const parsed = JSON.parse(row.row_ids || '[]');
+      if (Array.isArray(parsed)) {
+        rowIds = parsed.map(Number).filter(id => Number.isInteger(id) && id > 0);
+      }
+    } catch (error) {
+      console.warn('[RPC] getBoardState: row_ids korup untuk user', user.id, '-', error.message);
+      rowIds = [];
+    }
+  }
+  return authResponse({ rowIds, present, updatedAt: row?.updated_at || null });
+}
+
+async function handleSaveBoardState(context, user, args) {
+  if (!user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
+  const [value] = Array.isArray(args) ? args : [];
+  let rowIds;
+  try {
+    rowIds = normalizeBoardRowIds(value);
+  } catch (error) {
+    if (error.field) {
+      return Response.json(
+        { error: error.message, code: 'VALIDATION_ERROR', fields: { [error.field]: error.message } },
+        { status: 400 }
+      );
+    }
+    throw error;
+  }
+  // Tidak diaudit: board berubah tiap kali operator menambah atau menggeser
+  // flight, jadi satu baris auth_audit_log per perubahan hanya akan mengubur
+  // kejadian yang benar-benar perlu ditelusuri.
+  await context.env.DB.prepare(
+    `INSERT INTO user_board_state (user_id, row_ids, created_at, updated_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT(user_id) DO UPDATE SET
+       row_ids = excluded.row_ids,
+       updated_at = CURRENT_TIMESTAMP`
+  ).bind(user.id, JSON.stringify(rowIds)).run();
+  const row = await context.env.DB.prepare(
+    'SELECT updated_at FROM user_board_state WHERE user_id = ?'
+  ).bind(user.id).first();
+  return authResponse({ ok: true, rowIds, present: true, updatedAt: row?.updated_at || null });
 }
 
 async function handleSaveFlightEdit(context, args) {

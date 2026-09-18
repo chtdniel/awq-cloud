@@ -2438,17 +2438,186 @@
   window.airportNotes = window.airportNotes || [];
   window.flightNotamIndex = window.flightNotamIndex || {};
   
-  // Unified State for Active Board
+  // =========================================================
+  // UNIFIED STATE FOR ACTIVE BOARD
+  // =========================================================
+  // Board aktif disimpan di server per akun (user_board_state) supaya login
+  // yang sama di browser/device lain memuat susunan yang sama. localStorage
+  // tinggal cache: dipakai untuk paint instan, lalu ditimpa hasil hidrasi.
   window.activeBoardRowIds = window.activeBoardRowIds || [];
-  try {
-    const saved = localStorage.getItem('occ_active_board');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) window.activeBoardRowIds = parsed;
+
+  const BOARD_CACHE_KEY = 'occ_active_board';
+  const BOARD_OWNER_KEY = 'occ_active_board_owner';
+
+  let boardSyncReady = false;      // hidrasi sudah selesai → boleh push
+  let boardServerWritable = false; // baca server berhasil → aman menulis
+  let boardSaveTimer = null;
+  let lastSavedBoardJson = null;   // state terakhir yang diketahui ada di server
+
+  // Cache lewat safeStorage (window.safeStorage, di Index.html) supaya kuota
+  // penuh / private browsing / data korup tidak melempar ke jalur render board.
+  function boardCacheGet(key) {
+    if (window.safeStorage) return window.safeStorage.get(key, null);
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? null : JSON.parse(raw);
+    } catch (e) {
+      console.warn('[BOARD] LocalStorage read failed:', e);
+      return null;
     }
-  } catch (e) { 
-    console.warn('LocalStorage access failed:', e);
   }
+
+  function boardCacheSet(key, value) {
+    if (window.safeStorage) { window.safeStorage.set(key, value); return; }
+    try { localStorage.setItem(key, JSON.stringify(value)); }
+    catch (e) { console.warn('[BOARD] LocalStorage write failed:', e); }
+  }
+
+  function readCachedBoard() {
+    const parsed = boardCacheGet(BOARD_CACHE_KEY);
+    return Array.isArray(parsed) ? parsed : null;
+  }
+
+  function writeCachedBoard(ids) {
+    boardCacheSet(BOARD_CACHE_KEY, ids || []);
+    const owner = (window.awqAuthUser && window.awqAuthUser.email) || null;
+    if (owner) boardCacheSet(BOARD_OWNER_KEY, owner);
+  }
+
+  // Stamp pemilik dibaca mentah, bukan lewat safeStorage, supaya tiga keadaan
+  // bisa dibedakan: (a) tidak ada stamp → instalasi lama, cache boleh dipakai
+  // demi migrasi; (b) stamp cocok → cache milik user ini; (c) stamp ada tapi
+  // tidak terbaca → JANGAN dipakai. safeStorage mengembalikan null untuk (a)
+  // dan (c) sekaligus, sehingga stamp yang korup lolos sebagai "tidak ada
+  // stamp" — fail-open pada guard yang justru menjaga board antar operator.
+  function readCacheOwnerStamp() {
+    let raw = null;
+    try { raw = localStorage.getItem(BOARD_OWNER_KEY); } catch (e) { raw = null; }
+    if (raw === null) return { present: false, owner: null };
+    try { return { present: true, owner: JSON.parse(raw) }; }
+    catch (e) {
+      console.warn('[BOARD] Stamp pemilik cache tidak terbaca — cache diabaikan.');
+      return { present: true, owner: null };
+    }
+  }
+
+  // Cache browser hanya boleh dipakai kalau stamp pemiliknya cocok dengan akun
+  // yang sedang login. Tanpa ini, operator berikutnya di PC yang sama mewarisi
+  // board operator sebelumnya selama akun barunya belum punya state di server.
+  function readCachedBoardForCurrentUser() {
+    const owner = (window.awqAuthUser && window.awqAuthUser.email) || null;
+    if (owner) {
+      const stamp = readCacheOwnerStamp();
+      // stamp.owner null (korup) juga tidak sama dengan owner → ikut ditolak.
+      if (stamp.present && stamp.owner !== owner) return null;
+    }
+    return readCachedBoard();
+  }
+
+  // Urutan array = urutan strip di board, jadi duplikat dibuang dengan urutan
+  // tetap (tidak pernah di-sort). Cerminan normalizeBoardRowIds di rpc.js.
+  function normalizeBoardIds(list) {
+    const seen = new Set();
+    const out = [];
+    (Array.isArray(list) ? list : []).forEach(raw => {
+      const id = Number(raw);
+      if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return;
+      seen.add(id);
+      out.push(id);
+    });
+    return out;
+  }
+
+  function getBoardStateFromServer() {
+    return new Promise(resolve => {
+      if (typeof google === 'undefined' || !google.script || !google.script.run) return resolve(null);
+      let settled = false;
+      const done = value => { if (!settled) { settled = true; resolve(value); } };
+      // Jangan biarkan board menggantung kalau RPC-nya stall — cache lokal
+      // sudah cukup untuk merender.
+      const guard = setTimeout(() => { console.warn('[BOARD] getBoardState timeout'); done(null); }, 8000);
+      try {
+        google.script.run
+          .withSuccessHandler(result => { clearTimeout(guard); done(result); })
+          .withFailureHandler(err => { clearTimeout(guard); console.warn('[BOARD] getBoardState failed:', err); done(null); })
+          .getBoardState();
+      } catch (e) {
+        clearTimeout(guard);
+        console.warn('[BOARD] getBoardState threw:', e);
+        done(null);
+      }
+    });
+  }
+
+  function pushBoardState() {
+    if (!boardSyncReady || !boardServerWritable) return;
+    const ids = normalizeBoardIds(window.activeBoardRowIds);
+    const json = JSON.stringify(ids);
+    if (json === lastSavedBoardJson) return;
+    if (typeof google === 'undefined' || !google.script || !google.script.run) return;
+    const previous = lastSavedBoardJson;
+    lastSavedBoardJson = json; // optimistis; dikembalikan kalau gagal
+    google.script.run
+      .withFailureHandler(err => {
+        console.warn('[BOARD] saveBoardState failed:', err);
+        lastSavedBoardJson = previous; // perubahan berikutnya akan mencoba lagi
+      })
+      .saveBoardState(ids);
+  }
+
+  // Satu jalur untuk semua perubahan board: cache lokal dulu (paint instan),
+  // lalu dorong ke server dengan debounce supaya drag/geser tidak menembak
+  // satu RPC per frame.
+  function persistActiveBoard() {
+    if (boardSaveTimer) clearTimeout(boardSaveTimer);
+    writeCachedBoard(normalizeBoardIds(window.activeBoardRowIds));
+    boardSaveTimer = setTimeout(() => { boardSaveTimer = null; pushBoardState(); }, 400);
+  }
+  window.persistActiveBoard = persistActiveBoard;
+  // Dipakai FIR_Ui.html sebagai fallback baca cache, supaya pemeriksaan pemilik
+  // cache hanya hidup di satu tempat.
+  window.readCachedBoardForCurrentUser = readCachedBoardForCurrentUser;
+
+  // Hidrasi sekali per boot. Server menang; kalau baca gagal kita TIDAK menulis
+  // sama sekali — board lokal bisa saja kosong (browser baru) dan mendorong []
+  // akan menghapus board asli user. Sesi itu turun ke localStorage-only, sama
+  // seperti sebelum fitur ini ada.
+  function hydrateBoardState() {
+    // Reset dulu. initFlightData ikut jalan lagi setelah login berikutnya, dan
+    // kalau re-login sebagai akun lain sementara pembacaan gagal, state akun
+    // sebelumnya tidak boleh ikut terkirim ke akun baru.
+    boardSyncReady = false;
+    boardServerWritable = false;
+    lastSavedBoardJson = null;
+
+    // Cache browser yang memang milik user ini. Dipakai kalau server belum
+    // punya baris (user baru / migrasi dari versi localStorage-only).
+    const adoptCache = () => {
+      const cached = readCachedBoardForCurrentUser();
+      window.activeBoardRowIds = normalizeBoardIds(cached || []);
+      if (cached) writeCachedBoard(window.activeBoardRowIds);
+    };
+
+    return getBoardStateFromServer().then(state => {
+      if (!state) {
+        console.warn('[BOARD] Server board state unavailable — sesi ini localStorage-only.');
+        adoptCache();
+        boardSyncReady = true; // render boleh jalan, push tetap diblokir
+        return;
+      }
+      boardServerWritable = true;
+      boardSyncReady = true;
+      if (state.present && Array.isArray(state.rowIds)) {
+        window.activeBoardRowIds = normalizeBoardIds(state.rowIds);
+        lastSavedBoardJson = JSON.stringify(window.activeBoardRowIds);
+        writeCachedBoard(window.activeBoardRowIds);
+        return;
+      }
+      adoptCache();
+      pushBoardState();
+    });
+  }
+  window.hydrateBoardState = hydrateBoardState;
 
   // Local alias for convenience, but we'll use window. prefix for clarity in critical paths
   var activeBoardRowIds = window.activeBoardRowIds;
@@ -3278,8 +3447,13 @@
 
           if (loader) loader.style.display = 'none';
           if (dbStat) { dbStat.innerText = 'CONNECTED'; dbStat.style.color = 'var(--status-safe)'; }
-          renderBoard();
-          loadFlightBoardNotams();
+          // Board aktif datang dari server per akun, jadi tunggu hidrasi dulu
+          // sebelum render. Tanpa ini browser baru sempat menggambar board
+          // kosong dari cache lokal, lalu berkedip ke susunan yang sebenarnya.
+          hydrateBoardState().then(() => {
+            renderBoard();
+            loadFlightBoardNotams();
+          });
         }).getFlightDashboardData(false);
     } else {
       clearTimeout(syncTimeout);
@@ -3333,14 +3507,14 @@
       if (boardFlights.length === 0) {
         tbody.innerHTML = `<div class="fs-empty">[ BOARD IS CURRENTLY EMPTY ]<br><br><button class="control-btn btn-solid-primary" onclick="window.uiOpenAddFlightModal()">ADD FLIGHT FROM DATABASE</button></div>`;
         window.updateSelectionUI(); 
-        localStorage.setItem('occ_active_board', JSON.stringify(window.activeBoardRowIds));
+        persistActiveBoard();
         try{window.dispatchEvent(new CustomEvent('occ:boardChanged', {detail:{ids: window.activeBoardRowIds.slice()}}));}catch(e){} 
         return;
       }
 
       if (window.flightView === 'timeline') {
         renderTimeline(tbody, visibleFlights);
-        localStorage.setItem('occ_active_board', JSON.stringify(window.activeBoardRowIds));
+        persistActiveBoard();
         try{window.dispatchEvent(new CustomEvent('occ:boardChanged', {detail:{ids: window.activeBoardRowIds.slice()}}));}catch(e){}
         if (window.updateQuickStats) window.updateQuickStats();
         return;
@@ -3461,7 +3635,7 @@
       });
 
       window.updateSelectionUI(); 
-      localStorage.setItem('occ_active_board', JSON.stringify(window.activeBoardRowIds));
+      persistActiveBoard();
         try{window.dispatchEvent(new CustomEvent('occ:boardChanged', {detail:{ids: window.activeBoardRowIds.slice()}}));}catch(e){}
       if (window.updateQuickStats) window.updateQuickStats();
       if (typeof refreshCurrentTabIfNeeded === 'function') refreshCurrentTabIfNeeded();
@@ -10196,9 +10370,19 @@
   function getActiveBoardRowIds() {
     try {
       if (Array.isArray(window.activeBoardRowIds) && window.activeBoardRowIds.length) return window.activeBoardRowIds.map(n => Number(n)).filter(n => !isNaN(n));
-      // localStorage fallback (occ_active_board)
-      const raw = localStorage.getItem('occ_active_board');
-      if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr.map(n => Number(n)).filter(n => !isNaN(n)); }
+      // localStorage fallback (occ_active_board). Baca lewat helper Flight_Ui
+      // kalau tersedia, karena helper itu sekaligus memeriksa stamp pemilik
+      // cache — operator lain di PC yang sama tidak boleh mewarisi board
+      // operator sebelumnya.
+      const cached = typeof window.readCachedBoardForCurrentUser === 'function'
+        ? window.readCachedBoardForCurrentUser()
+        : (function () {
+            try {
+              const raw = localStorage.getItem('occ_active_board');
+              return raw ? JSON.parse(raw) : null;
+            } catch (e) { return null; }
+          })();
+      if (Array.isArray(cached) && cached.length) return cached.map(n => Number(n)).filter(n => !isNaN(n));
       // window.allDbFlights filtered by board? last resort: all rowIdx on current board filter
       if (Array.isArray(window.allDbFlights) && window.allDbFlights.length && typeof window.getFilteredBoardFlights === 'function' && typeof window.flightFilter !== 'undefined') {
         try {
