@@ -1301,7 +1301,15 @@
       window.occBuildAckKey = buildAckKey;
       // Dialog opens only after payload arrives (success/failure handlers).
       // No pre-payload showModal: avoids empty flash on startup.
-      loadReadiness();
+      // Session-gated: a guest request is rejected with 401 and would open the
+      // dialog showing a bogus backend error, so the reminder is never shown
+      // before login. It runs on the first authenticated boot and again after
+      // every later successful login.
+      function startReadiness() {
+        if (typeof window.awqWhenAuthenticated === 'function') window.awqWhenAuthenticated(loadReadiness);
+        else loadReadiness();
+      }
+      startReadiness();
       dialog.addEventListener('close', function() {
         var fallback = document.getElementById('nav-flight') || lastFocus;
         if (fallback && typeof fallback.focus === 'function') try { fallback.focus(); } catch (e) {}
@@ -3243,6 +3251,15 @@
           clearTimeout(syncTimeout);
           console.error("Dashboard Data Fetch Failed:", err);
           if (loader) loader.style.display = 'none';
+          // A rejected session is not a database outage. Before login the RPC
+          // layer answers 401 "Authentication required."; reporting that as
+          // DATABASE CONNECTION ERROR blamed the database for a missing session
+          // and left the banner on screen after a successful login.
+          if (err && (err.status === 401 || err.code === 'AUTH_REQUIRED')) {
+            console.warn('[SYSTEM] Dashboard request rejected: no active session.');
+            if (dbStat) { dbStat.innerText = 'AUTH REQUIRED'; dbStat.style.color = 'var(--status-warning)'; }
+            return;
+          }
           if (dbStat) { dbStat.innerText = 'OFFLINE'; dbStat.style.color = 'var(--status-critical)'; }
           const tbody = document.getElementById('flight-tbody');
           if (tbody) {
@@ -3273,12 +3290,23 @@
   }
   window.initFlightData = initFlightData;
 
+  // Session-gated data loading. Before login every RPC is rejected with 401
+  // "Authentication required.", which the board used to paint as a bogus
+  // DATABASE CONNECTION ERROR. Loads on the first authenticated boot and again
+  // after each later successful login.
+  function startFlightData() {
+    window._forceReload = true;
+    window._flightInitDone = false;
+    if (typeof window.awqWhenAuthenticated === 'function') window.awqWhenAuthenticated(initFlightData);
+    else initFlightData();
+  }
+
   function runInitSequence() {
     try {
       console.log('[SYSTEM] Running Initialization Sequence...');
-      initFlightData();
       initTooltipDelegation();
       initContextMenu();
+      startFlightData();
     } catch (err) {
       console.error("[CRITICAL] Initialization Sequence Failed:", err);
     }
@@ -12951,7 +12979,18 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     <button type="button" class="btn" onclick="authUsersRefresh()">⟳ Refresh</button>
   </div>
   <div class="settings-note">Kelola akun login internal. Role menentukan akses: <b>admin</b> (kelola user + settings), <b>registered</b> (lihat + ubah data operasional), <b>readonly</b> (hanya lihat). Password sementara wajib diganti saat login pertama.</div>
-  <div id="auth-users-list" style="display:grid;gap:8px;margin:12px 0"></div>
+  <style>
+    #auth-users-list { display:grid; gap:10px; margin:14px 0 16px; }
+    #auth-users-list > .settings-chip { display:grid !important; grid-template-columns:minmax(0,1fr) auto !important; gap:12px !important; align-items:start !important; padding:16px !important; border:1px solid var(--border-subtle) !important; border-radius:12px !important; background:linear-gradient(180deg,var(--bg-panel),var(--bg-panel-alt)) !important; box-shadow:var(--shadow-soft) !important; }
+    #auth-users-list > .settings-chip > b { color:var(--text-primary); font:700 12px/1.35 var(--font-mono); overflow-wrap:anywhere; }
+    #auth-users-list > .settings-chip > span:nth-child(2), #auth-users-list > .settings-chip > span:nth-child(3), #auth-users-list > .settings-chip > span:nth-child(4) { padding:8px 10px; border-radius:6px; background:var(--bg-panel-sunken); color:var(--text-secondary); font:500 11px var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #auth-users-list > .settings-chip > span:nth-child(5), #auth-users-list > .settings-chip > span:nth-child(6) { align-self:center; color:var(--text-primary); font:700 11px var(--font-mono); text-transform:uppercase; }
+    #auth-users-list > .settings-chip > span:nth-child(6) { color:var(--status-safe); font-size:10px; }
+    #auth-users-list > .settings-chip > span:last-child { grid-column:1/-1; display:flex !important; gap:6px !important; padding-top:12px; border-top:1px solid var(--border-subtle); }
+    #auth-users-list > .settings-chip > span:last-child .btn { flex:1; min-height:31px; padding:0 8px; font-size:10px; }
+    @media (max-width:760px) { #auth-users-list > .settings-chip { grid-template-columns:1fr !important; } #auth-users-list > .settings-chip > span:nth-child(2), #auth-users-list > .settings-chip > span:nth-child(3), #auth-users-list > .settings-chip > span:nth-child(4) { display:none; } }
+  </style>
+  <div id="auth-users-list" style="display:grid;gap:10px;margin:14px 0 16px"></div>
   <div style="display:grid;grid-template-columns:2fr 1fr 2fr auto;gap:8px;align-items:end">
     <label class="settings-hint">Email<input id="auth-user-email" class="in" type="email" autocomplete="off"></label>
     <label class="settings-hint">Role<select id="auth-user-role" class="in"><option value="readonly">readonly</option><option value="registered">registered</option><option value="admin">admin</option></select></label>
@@ -14433,30 +14472,39 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       };
       if (document.readyState === 'complete') setTimeout(__legacyLoad, 0);
       else window.addEventListener('load', __legacyLoad);
-      // Settings admin gate: hide nav-settings if not admin
-      try {
-        if (typeof google !== 'undefined' && google.script && google.script.run) {
-          google.script.run.withSuccessHandler(function(res) {
-            // canView now answers exactly one question: may this account open
-            // the Settings page? It is admin-only on the server.
-            var canView = !!(res && res.ok && res.canView);
-            window.isSettingsAdmin = canView;
-            var nav = document.getElementById('nav-settings');
-            if (nav && !canView) nav.style.display = 'none';
-            var isAdmin = !!(res && res.ok && res.tier === 'admin');
-            window.isAdmin = isAdmin;
-            var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
-            if (wpItem && !isAdmin) wpItem.style.display = 'none';
-          }).withFailureHandler(function() {
-            window.isSettingsAdmin = false;
-            var nav2 = document.getElementById('nav-settings');
-            if (nav2) nav2.style.display = 'none';
-            window.isAdmin = false;
-            var wpItem2 = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
-            if (wpItem2) wpItem2.style.display = 'none';
-          }).getSettingsAccessInfo();
-        }
-      } catch (e) { console.warn('[SECURITY] settings gate failed', e); }
+      // Settings admin gate: hide nav-settings if not admin.
+      // Session-gated for the same reason as the readiness dialog: the RPC
+      // answers 401 before login, and that guest failure used to pin the
+      // Settings and WAYPOINT nav items hidden for the whole page life —
+      // for administrators too. Re-applied after every successful login, and
+      // the resolved state is written both ways so a re-check can restore them.
+      function applySettingsAccessGate() {
+        try {
+          if (typeof google !== 'undefined' && google.script && google.script.run) {
+            google.script.run.withSuccessHandler(function(res) {
+              // canView now answers exactly one question: may this account open
+              // the Settings page? It is admin-only on the server.
+              var canView = !!(res && res.ok && res.canView);
+              window.isSettingsAdmin = canView;
+              var nav = document.getElementById('nav-settings');
+              if (nav) nav.style.display = canView ? '' : 'none';
+              var isAdmin = !!(res && res.ok && res.tier === 'admin');
+              window.isAdmin = isAdmin;
+              var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
+              if (wpItem) wpItem.style.display = isAdmin ? '' : 'none';
+            }).withFailureHandler(function() {
+              window.isSettingsAdmin = false;
+              var nav2 = document.getElementById('nav-settings');
+              if (nav2) nav2.style.display = 'none';
+              window.isAdmin = false;
+              var wpItem2 = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
+              if (wpItem2) wpItem2.style.display = 'none';
+            }).getSettingsAccessInfo();
+          }
+        } catch (e) { console.warn('[SECURITY] settings gate failed', e); }
+      }
+      if (typeof window.awqWhenAuthenticated === 'function') window.awqWhenAuthenticated(applySettingsAccessGate);
+      else applySettingsAccessGate();
     })();
 
     // External Links Dropdown Logic

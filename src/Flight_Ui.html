@@ -1762,6 +1762,15 @@
           clearTimeout(syncTimeout);
           console.error("Dashboard Data Fetch Failed:", err);
           if (loader) loader.style.display = 'none';
+          // A rejected session is not a database outage. Before login the RPC
+          // layer answers 401 "Authentication required."; reporting that as
+          // DATABASE CONNECTION ERROR blamed the database for a missing session
+          // and left the banner on screen after a successful login.
+          if (err && (err.status === 401 || err.code === 'AUTH_REQUIRED')) {
+            console.warn('[SYSTEM] Dashboard request rejected: no active session.');
+            if (dbStat) { dbStat.innerText = 'AUTH REQUIRED'; dbStat.style.color = 'var(--status-warning)'; }
+            return;
+          }
           if (dbStat) { dbStat.innerText = 'OFFLINE'; dbStat.style.color = 'var(--status-critical)'; }
           const tbody = document.getElementById('flight-tbody');
           if (tbody) {
@@ -1792,12 +1801,23 @@
   }
   window.initFlightData = initFlightData;
 
+  // Session-gated data loading. Before login every RPC is rejected with 401
+  // "Authentication required.", which the board used to paint as a bogus
+  // DATABASE CONNECTION ERROR. Loads on the first authenticated boot and again
+  // after each later successful login.
+  function startFlightData() {
+    window._forceReload = true;
+    window._flightInitDone = false;
+    if (typeof window.awqWhenAuthenticated === 'function') window.awqWhenAuthenticated(initFlightData);
+    else initFlightData();
+  }
+
   function runInitSequence() {
     try {
       console.log('[SYSTEM] Running Initialization Sequence...');
-      initFlightData();
       initTooltipDelegation();
       initContextMenu();
+      startFlightData();
     } catch (err) {
       console.error("[CRITICAL] Initialization Sequence Failed:", err);
     }

@@ -167,7 +167,18 @@
     <button type="button" class="btn" onclick="authUsersRefresh()">⟳ Refresh</button>
   </div>
   <div class="settings-note">Kelola akun login internal. Role menentukan akses: <b>admin</b> (kelola user + settings), <b>registered</b> (lihat + ubah data operasional), <b>readonly</b> (hanya lihat). Password sementara wajib diganti saat login pertama.</div>
-  <div id="auth-users-list" style="display:grid;gap:8px;margin:12px 0"></div>
+  <style>
+    #auth-users-list { display:grid; gap:10px; margin:14px 0 16px; }
+    #auth-users-list > .settings-chip { display:grid !important; grid-template-columns:minmax(0,1fr) auto !important; gap:12px !important; align-items:start !important; padding:16px !important; border:1px solid var(--border-subtle) !important; border-radius:12px !important; background:linear-gradient(180deg,var(--bg-panel),var(--bg-panel-alt)) !important; box-shadow:var(--shadow-soft) !important; }
+    #auth-users-list > .settings-chip > b { color:var(--text-primary); font:700 12px/1.35 var(--font-mono); overflow-wrap:anywhere; }
+    #auth-users-list > .settings-chip > span:nth-child(2), #auth-users-list > .settings-chip > span:nth-child(3), #auth-users-list > .settings-chip > span:nth-child(4) { padding:8px 10px; border-radius:6px; background:var(--bg-panel-sunken); color:var(--text-secondary); font:500 11px var(--font-mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #auth-users-list > .settings-chip > span:nth-child(5), #auth-users-list > .settings-chip > span:nth-child(6) { align-self:center; color:var(--text-primary); font:700 11px var(--font-mono); text-transform:uppercase; }
+    #auth-users-list > .settings-chip > span:nth-child(6) { color:var(--status-safe); font-size:10px; }
+    #auth-users-list > .settings-chip > span:last-child { grid-column:1/-1; display:flex !important; gap:6px !important; padding-top:12px; border-top:1px solid var(--border-subtle); }
+    #auth-users-list > .settings-chip > span:last-child .btn { flex:1; min-height:31px; padding:0 8px; font-size:10px; }
+    @media (max-width:760px) { #auth-users-list > .settings-chip { grid-template-columns:1fr !important; } #auth-users-list > .settings-chip > span:nth-child(2), #auth-users-list > .settings-chip > span:nth-child(3), #auth-users-list > .settings-chip > span:nth-child(4) { display:none; } }
+  </style>
+  <div id="auth-users-list" style="display:grid;gap:10px;margin:14px 0 16px"></div>
   <div style="display:grid;grid-template-columns:2fr 1fr 2fr auto;gap:8px;align-items:end">
     <label class="settings-hint">Email<input id="auth-user-email" class="in" type="email" autocomplete="off"></label>
     <label class="settings-hint">Role<select id="auth-user-role" class="in"><option value="readonly">readonly</option><option value="registered">registered</option><option value="admin">admin</option></select></label>

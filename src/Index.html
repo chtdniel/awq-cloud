@@ -1299,7 +1299,15 @@
       window.occBuildAckKey = buildAckKey;
       // Dialog opens only after payload arrives (success/failure handlers).
       // No pre-payload showModal: avoids empty flash on startup.
-      loadReadiness();
+      // Session-gated: a guest request is rejected with 401 and would open the
+      // dialog showing a bogus backend error, so the reminder is never shown
+      // before login. It runs on the first authenticated boot and again after
+      // every later successful login.
+      function startReadiness() {
+        if (typeof window.awqWhenAuthenticated === 'function') window.awqWhenAuthenticated(loadReadiness);
+        else loadReadiness();
+      }
+      startReadiness();
       dialog.addEventListener('close', function() {
         var fallback = document.getElementById('nav-flight') || lastFocus;
         if (fallback && typeof fallback.focus === 'function') try { fallback.focus(); } catch (e) {}
@@ -1687,30 +1695,39 @@
       };
       if (document.readyState === 'complete') setTimeout(__legacyLoad, 0);
       else window.addEventListener('load', __legacyLoad);
-      // Settings admin gate: hide nav-settings if not admin
-      try {
-        if (typeof google !== 'undefined' && google.script && google.script.run) {
-          google.script.run.withSuccessHandler(function(res) {
-            // canView now answers exactly one question: may this account open
-            // the Settings page? It is admin-only on the server.
-            var canView = !!(res && res.ok && res.canView);
-            window.isSettingsAdmin = canView;
-            var nav = document.getElementById('nav-settings');
-            if (nav && !canView) nav.style.display = 'none';
-            var isAdmin = !!(res && res.ok && res.tier === 'admin');
-            window.isAdmin = isAdmin;
-            var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
-            if (wpItem && !isAdmin) wpItem.style.display = 'none';
-          }).withFailureHandler(function() {
-            window.isSettingsAdmin = false;
-            var nav2 = document.getElementById('nav-settings');
-            if (nav2) nav2.style.display = 'none';
-            window.isAdmin = false;
-            var wpItem2 = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
-            if (wpItem2) wpItem2.style.display = 'none';
-          }).getSettingsAccessInfo();
-        }
-      } catch (e) { console.warn('[SECURITY] settings gate failed', e); }
+      // Settings admin gate: hide nav-settings if not admin.
+      // Session-gated for the same reason as the readiness dialog: the RPC
+      // answers 401 before login, and that guest failure used to pin the
+      // Settings and WAYPOINT nav items hidden for the whole page life —
+      // for administrators too. Re-applied after every successful login, and
+      // the resolved state is written both ways so a re-check can restore them.
+      function applySettingsAccessGate() {
+        try {
+          if (typeof google !== 'undefined' && google.script && google.script.run) {
+            google.script.run.withSuccessHandler(function(res) {
+              // canView now answers exactly one question: may this account open
+              // the Settings page? It is admin-only on the server.
+              var canView = !!(res && res.ok && res.canView);
+              window.isSettingsAdmin = canView;
+              var nav = document.getElementById('nav-settings');
+              if (nav) nav.style.display = canView ? '' : 'none';
+              var isAdmin = !!(res && res.ok && res.tier === 'admin');
+              window.isAdmin = isAdmin;
+              var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
+              if (wpItem) wpItem.style.display = isAdmin ? '' : 'none';
+            }).withFailureHandler(function() {
+              window.isSettingsAdmin = false;
+              var nav2 = document.getElementById('nav-settings');
+              if (nav2) nav2.style.display = 'none';
+              window.isAdmin = false;
+              var wpItem2 = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
+              if (wpItem2) wpItem2.style.display = 'none';
+            }).getSettingsAccessInfo();
+          }
+        } catch (e) { console.warn('[SECURITY] settings gate failed', e); }
+      }
+      if (typeof window.awqWhenAuthenticated === 'function') window.awqWhenAuthenticated(applySettingsAccessGate);
+      else applySettingsAccessGate();
     })();
 
     // External Links Dropdown Logic

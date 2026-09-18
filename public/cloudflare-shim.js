@@ -14,6 +14,18 @@ window.google.script = window.google.script || {};
     window.dispatchEvent(new CustomEvent('awq-auth-ready', { detail: authState.user }));
   }
 
+  // Boot gate for session-dependent modules. Before a session exists every
+  // non-auth RPC is rejected with 401 "Authentication required.", so a module
+  // that starts on page load paints a bogus backend failure (e.g. the flight
+  // board showed "DATABASE CONNECTION ERROR"). Callers register once; the
+  // subscription is permanent so each later successful login re-runs the
+  // callback, and a session restored before registration fires it immediately.
+  function whenAuthenticated(callback) {
+    if (typeof callback !== 'function') return;
+    window.addEventListener('awq-auth-ready', function () { callback(); });
+    if (authState.loaded && authState.user) callback();
+  }
+
   function accountDisplayName() {
     return (authState.user && authState.user.profile && authState.user.profile.fullName) || (authState.user && authState.user.email) || '';
   }
@@ -406,4 +418,5 @@ window.google.script = window.google.script || {};
   }
 
   window.google.script.run = makeRunner(null, null);
+  window.awqWhenAuthenticated = whenAuthenticated;
 })();
