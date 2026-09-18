@@ -1125,7 +1125,22 @@
         return;
       }
       adoptCache();
-      pushBoardState();
+      const adopted = normalizeBoardIds(window.activeBoardRowIds);
+      if (adopted.length) {
+        // Board lokal nyata: adopsi lalu simpan ke server supaya operator lama
+        // tidak kehilangan susunannya saat migrasi.
+        pushBoardState();
+        return;
+      }
+      // Browser ini tidak punya board dan server belum punya baris. JANGAN klaim
+      // barisnya dengan kekosongan: browser bersih (cache kosong) bisa menang
+      // balapan melawan browser yang justru menyimpan board aslinya, dan begitu
+      // baris [] ada, server jadi otoritatif — board di browser lain ikut
+      // terhapus. "Tidak ada baris" dan "baris kosong" sama saja di UI, jadi
+      // perlakukan sebagai sudah-kosong: baris baru dibuat saat operator
+      // benar-benar mengubah board. Ini juga menahan push susulan dari
+      // persistActiveBoard() di akhir render.
+      lastSavedBoardJson = '[]';
     });
   }
   window.hydrateBoardState = hydrateBoardState;

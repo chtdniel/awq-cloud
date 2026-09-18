@@ -163,7 +163,7 @@ let failures = 0;
 
 // Satu skenario = satu profil browser bersih. `seed` menulis localStorage
 // sebelum skrip halaman jalan (meniru browser lama yang masih punya cache).
-async function scenario(name, { seed, expectStrips, expectRowIds, expectServerRowIds, expectCache, expectCacheOwner }) {
+async function scenario(name, { seed, expectStrips, expectRowIds, expectServerRowIds, expectServerRowAbsent, expectCache, expectCacheOwner }) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   await context.addInitScript(() => {
     window.__boardRenders = 0;
@@ -210,6 +210,12 @@ async function scenario(name, { seed, expectStrips, expectRowIds, expectServerRo
       }, `${name}: baris server ${JSON.stringify(expectServerRowIds)}`);
       assert.deepEqual(row, expectServerRowIds, `${name}: baris server`);
     }
+    if (expectServerRowAbsent) {
+      // Beri kesempatan push susulan (persistActiveBoard menunda 400ms) muncul,
+      // lalu pastikan server tetap tidak punya baris untuk akun ini.
+      await page.waitForTimeout(900);
+      assert.equal(serverBoard(USER_A), null, `${name}: baris server TIDAK boleh dibuat`);
+    }
     assert.deepEqual(pageErrors, [], `${name}: tidak boleh ada JS error`);
     assert.ok(!warnings.some(text => text.includes('Server board state unavailable')), `${name}: hidrasi server harus berhasil, warnings: ${warnings.join(' | ')}`);
 
@@ -244,6 +250,16 @@ await scenario('board lokal lama diadopsi dan disimpan ke server', {
   expectServerRowIds: [3]
 });
 
+// Skenario 2b — BALAPAN MIGRASI. Browser bersih (cache kosong) memuat halaman
+// saat server belum punya baris. Dulu klien langsung mengklaim baris dengan [],
+// dan karena baris yang ada membuat server otoritatif, board asli yang masih
+// tersimpan di browser lain ikut terhapus. Sekarang barisnya tidak boleh dibuat.
+setServerBoard(USER_A, null);
+await scenario('browser bersih tidak mengklaim baris kosong di server', {
+  expectStrips: 0,
+  expectServerRowAbsent: true
+});
+
 // Skenario 3 — server sengaja kosong (present) dan cache browser masih berisi
 // flight: board harus tetap kosong, tidak dihidupkan lagi dari cache.
 setServerBoard(USER_A, []);
@@ -257,7 +273,7 @@ await scenario('board kosong di server tidak dihidupkan dari cache', {
 });
 
 // Skenario 4 — PC bersama: cache milik operator LAIN tidak boleh diwarisi.
-// Efek sampingnya membuktikan hidrasi berhasil: baris server user A dibuat '[]'.
+// Server juga tidak boleh diklaim dengan kekosongan, jadi barisnya tetap absen.
 setServerBoard(USER_A, null);
 await scenario('cache milik akun lain pada PC yang sama tidak diwarisi', {
   seed: () => {
@@ -265,7 +281,9 @@ await scenario('cache milik akun lain pada PC yang sama tidak diwarisi', {
     localStorage.setItem('occ_active_board_owner', JSON.stringify('operator.lain@example.com'));
   },
   expectStrips: 0,
-  expectServerRowIds: []
+  expectCache: '[]',
+  expectCacheOwner: USER_A,
+  expectServerRowAbsent: true
 });
 
 // Skenario 5b — stamp pemilik ada tapi tidak terbaca. Harus fail-CLOSED:
@@ -277,7 +295,9 @@ await scenario('stamp pemilik korup membuat cache diabaikan', {
     localStorage.setItem('occ_active_board_owner', 'bukan-json');
   },
   expectStrips: 0,
-  expectServerRowIds: []
+  expectCache: '[]',
+  expectCacheOwner: USER_A,
+  expectServerRowAbsent: true
 });
 
 // Skenario 5 — server menang atas cache lokal yang basi.
