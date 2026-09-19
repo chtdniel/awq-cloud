@@ -5,7 +5,7 @@
   "main": "build.js",
   "scripts": {
     "test": "node --test tests/test_auth.mjs tests/test_authz_rpc.mjs tests/test_board_state.mjs tests/test_settings_rpc.mjs tests/test_user_profiles.mjs tests/test_qr.mjs tests/test_date_parsing.js tests/test_briefing_xlsx.mjs tests/test_bulk_flight_dof.mjs tests/test_notam_flight_time.mjs tests/test_taf_fallback.mjs tests/test_waypoint.mjs",
-    "test:browser": "node tests/test_board_state_browser.mjs && node tests/test_settings_password_forms_browser.mjs",
+    "test:browser": "node tests/test_board_state_browser.mjs && node tests/test_settings_password_forms_browser.mjs && node tests/test_atc_popover_position_browser.mjs",
     "check:client-syntax": "node tests/check-client-syntax.mjs src/Flight_Ui.html src/FIR_Ui.html public/index.html"
   },
   "repository": {

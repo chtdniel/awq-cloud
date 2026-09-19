@@ -424,8 +424,13 @@
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
   /* ── ATC CONFIRMATION POPOVER ───────────────────────────── */
+  /* Popover ditempel ke pil yang diklik memakai koordinat viewport dari
+     getBoundingClientRect(). Karena itu posisinya WAJIB `fixed`: dengan
+     `absolute`, containing block-nya adalah body (body punya position:
+     relative) sehingga `top` diukur dari awal dokumen dan dialog meleset ke
+     atas sebesar scroll halaman — muncul menempel di baris yang lain. */
   .atc-confirm-popover {
-    position: absolute;
+    position: fixed;
     z-index: var(--z-tooltip);
     background: var(--bg-panel-raised);
     border: 1px solid var(--border-light);
@@ -1362,6 +1367,8 @@
   // ════════ P1 - ATC TOGGLE CONFIRMATION SYSTEM ════════════════
   
   let activeATCPopover = null;
+  let atcPopoverAnchor = null;
+  let atcPopoverViewportHandler = null;
   let atcPendingRowId = null;
   let atcUndoTimeout = null;
   const ATC_UNDO_WINDOW_MS = 5000; // 5-second undo capability
@@ -1385,6 +1392,10 @@
     activeATCPopover.setAttribute('aria-modal', 'true');
     activeATCPopover.setAttribute('aria-labelledby', 'atc-confirm-title');
     
+    // event.target bisa berupa <svg>/<use> di dalam pil (kotaknya lebih kecil
+    // dari pil), jadi anchor-nya adalah tombol pil itu sendiri.
+    atcPopoverAnchor = (event.currentTarget && event.currentTarget.nodeType === 1) ? event.currentTarget : event.target;
+
     const buttonClass = newStatus === 'SENT' ? 'btn-outline-safe' : 'btn-outline-critical';
     
     activeATCPopover.innerHTML = `
@@ -1402,12 +1413,21 @@
       </div>
     `;
     
-    const rect = event.target.getBoundingClientRect();
-    activeATCPopover.style.left = `${rect.left}px`;
-    activeATCPopover.style.top = `${rect.bottom + 8}px`;
-    
     document.body.appendChild(activeATCPopover);
+    positionATCPopover();
     setupFocusTrap(activeATCPopover);
+
+    // Koordinat popover berbasis viewport, jadi popover harus ikut pilnya saat
+    // halaman digulir/di-resize, dan ditutup kalau barisnya keluar dari layar
+    // (jangan sampai dialog menggantung di atas baris lain).
+    atcPopoverViewportHandler = () => {
+      if (!activeATCPopover) return;
+      const rect = (atcPopoverAnchor && atcPopoverAnchor.isConnected) ? atcPopoverAnchor.getBoundingClientRect() : null;
+      if (!rect || rect.bottom < 0 || rect.top > window.innerHeight) { closeATCPopover(); return; }
+      positionATCPopover();
+    };
+    window.addEventListener('scroll', atcPopoverViewportHandler, true);
+    window.addEventListener('resize', atcPopoverViewportHandler);
     
     const handleEscape = (e) => {
       if (e.key === 'Escape') {
@@ -1465,30 +1485,60 @@
   function setupATCUndo(rowId, oldStatus) {
     if (atcUndoTimeout) clearTimeout(atcUndoTimeout);
     
+    // Timeout hanya menutup jendela undo; perubahan yang dikonfirmasi tetap
+    // tersimpan (sebelumnya di sini justru saveFlightData(oldStatus) sehingga
+    // status ATC kembali sendiri setelah 5 detik).
     atcUndoTimeout = setTimeout(() => {
-      const flight = (window.allDbFlights || []).find(f => f.rowIdx === rowId);
-      if (flight && flight.ATC !== oldStatus) {
-        flight.ATC = oldStatus;
-        google.script.run.withSuccessHandler(() => renderBoard()).saveFlightData(rowId, 14, oldStatus, 'text');
-      }
+      atcUndoTimeout = null;
+      window.undoLastATCChange = null;
     }, ATC_UNDO_WINDOW_MS);
     
     window.undoLastATCChange = function() {
-      if (atcUndoTimeout) {
-        clearTimeout(atcUndoTimeout);
-        const flight = (window.allDbFlights || []).find(f => f.rowIdx === rowId);
-        if (flight && flight.ATC !== oldStatus) {
-          flight.ATC = oldStatus;
-          google.script.run.withSuccessHandler(() => {
-            renderBoard();
-            announceToScreenReader('ATC change undone');
-          }).saveFlightData(rowId, 14, oldStatus, 'text');
-        }
+      if (!atcUndoTimeout) return; // jendela undo sudah habis
+      clearTimeout(atcUndoTimeout);
+      atcUndoTimeout = null;
+      window.undoLastATCChange = null;
+      const flight = (window.allDbFlights || []).find(f => f && f.rowIdx === rowId);
+      if (flight && flight.ATC !== oldStatus) {
+        flight.ATC = oldStatus;
+        google.script.run.withSuccessHandler(() => {
+          renderBoard();
+          announceToScreenReader('ATC change undone');
+        }).saveFlightData(rowId, 14, oldStatus, 'text');
       }
     };
   }
   
+  /**
+   * Tempel popover ke pil yang diklik memakai koordinat viewport
+   * (getBoundingClientRect), lalu jepit ke dalam layar supaya tidak terpotong
+   * tepi kanan/bawah. Kalau ruang di bawah pil tidak cukup, popover dibalik ke
+   * atas pil (pola yang sama dengan route tooltip).
+   */
+  function positionATCPopover() {
+    if (!activeATCPopover || !atcPopoverAnchor) return;
+    const rect = atcPopoverAnchor.getBoundingClientRect();
+    const box = activeATCPopover.getBoundingClientRect();
+    const gap = 8;
+    const margin = 8;
+
+    let left = rect.left;
+    let top = rect.bottom + gap;
+
+    if (left + box.width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - box.width - margin);
+    if (top + box.height > window.innerHeight - margin) top = Math.max(margin, rect.top - box.height - gap);
+
+    activeATCPopover.style.left = `${Math.round(left)}px`;
+    activeATCPopover.style.top = `${Math.round(top)}px`;
+  }
+
   function closeATCPopover() {
+    if (atcPopoverViewportHandler) {
+      window.removeEventListener('scroll', atcPopoverViewportHandler, true);
+      window.removeEventListener('resize', atcPopoverViewportHandler);
+      atcPopoverViewportHandler = null;
+    }
+    atcPopoverAnchor = null;
     if (activeATCPopover) {
       activeATCPopover.remove();
       activeATCPopover = null;
