@@ -46,6 +46,33 @@ function parseLocalEntries(bytes) {
 
 const assert = (c, msg) => { if (!c) { console.error('FAIL:', msg); process.exit(1); } console.log('PASS:', msg); };
 
+// Central-directory reader for a GENERATED workbook: inflates deflated parts.
+function zipPartMap(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0; i--) if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  assert(eocd !== -1, 'generated workbook has an EOCD');
+  const count = view.getUint16(eocd + 10, true);
+  let cd = view.getUint32(eocd + 16, true);
+  const parts = new Map();
+  for (let n = 0; n < count; n++) {
+    const method = view.getUint16(cd + 10, true);
+    const compSize = view.getUint32(cd + 20, true);
+    const nameLen = view.getUint16(cd + 28, true);
+    const extraLen = view.getUint16(cd + 30, true);
+    const commentLen = view.getUint16(cd + 32, true);
+    const lhOff = view.getUint32(cd + 42, true);
+    const name = new TextDecoder().decode(bytes.slice(cd + 46, cd + 46 + nameLen));
+    const lhNameLen = view.getUint16(lhOff + 26, true);
+    const lhExtraLen = view.getUint16(lhOff + 28, true);
+    const dataOff = lhOff + 30 + lhNameLen + lhExtraLen;
+    const raw = bytes.slice(dataOff, dataOff + compSize);
+    parts.set(name, method === 8 ? new Uint8Array(inflateRawSync(Buffer.from(raw))) : raw);
+    cd += 46 + nameLen + extraLen + commentLen;
+  }
+  return parts;
+}
+
 const entries = parseLocalEntries(tpl);
 assert(entries.length > 50, 'template parses as ZIP with 50+ entries (' + entries.length + ')');
 const names = entries.map(e => e.name);
@@ -110,27 +137,7 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   assert(response.status === 200, 'generateBriefingXlsx returns 200');
   const generated = new Uint8Array(await response.arrayBuffer());
 
-  const gview = new DataView(generated.buffer, generated.byteOffset, generated.byteLength);
-  let geocd = -1;
-  for (let i = generated.length - 22; i >= 0; i--) if (gview.getUint32(i, true) === 0x06054b50) { geocd = i; break; }
-  const gcount = gview.getUint16(geocd + 10, true);
-  let gcd = gview.getUint32(geocd + 16, true);
-  const parts = new Map();
-  for (let n = 0; n < gcount; n++) {
-    const method = gview.getUint16(gcd + 10, true);
-    const compSize = gview.getUint32(gcd + 20, true);
-    const nameLen = gview.getUint16(gcd + 28, true);
-    const extraLen = gview.getUint16(gcd + 30, true);
-    const commentLen = gview.getUint16(gcd + 32, true);
-    const lhOff = gview.getUint32(gcd + 42, true);
-    const name = new TextDecoder().decode(generated.slice(gcd + 46, gcd + 46 + nameLen));
-    const lhNameLen = gview.getUint16(lhOff + 26, true);
-    const lhExtraLen = gview.getUint16(lhOff + 28, true);
-    const dataOff = lhOff + 30 + lhNameLen + lhExtraLen;
-    const raw = generated.slice(dataOff, dataOff + compSize);
-    parts.set(name, method === 8 ? new Uint8Array(inflateRawSync(Buffer.from(raw))) : raw);
-    gcd += 46 + nameLen + extraLen + commentLen;
-  }
+  const parts = zipPartMap(generated);
 
   const qrPart = [...parts.keys()].find(name => /^xl\/media\/image\d+\.png$/.test(name) && name !== 'xl/media/image2.png' && name !== 'xl/media/image1.png');
   assert(!!qrPart, 'QR image part added to the generated XLSX (' + qrPart + ')');
@@ -148,7 +155,28 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   assert(!!embed, 'QR anchor references a blip relationship (' + embed + ')');
   assert(drawingRels.includes('Id="' + embed + '"') && drawingRels.includes('Target="../media/' + qrPart.split('/').pop() + '"'), 'drawing relationship points at the QR image part');
   assert(new TextDecoder().decode(parts.get('xl/worksheets/sheet5.xml')).includes('CHRIS DANIEL (LIC: FOOL-881234)'), 'E48 still carries the DXR signature');
-  database.close();
   console.log('PASS: XLSX embeds a scannable QR image part wired into the CBR drawing with E48 intact.');
+
+  // --- Report page path: generateReportXlsx must NOT carry the signature QR ---
+  // Both report-page controls (DOWNLOAD SHEET XLSX and CREATE GOOGLE SHEET) call
+  // this method; a report is not the signed briefing form, so no QR image part
+  // and no QR drawing anchor may appear. The printed DXR name is unaffected.
+  const reportRequest = new Request('http://localhost/api/rpc', { method: 'POST', headers, body: JSON.stringify({ method: 'generateReportXlsx', args: [payload] }) });
+  const reportResponse = await onRequestPost({ request: reportRequest, env: { DB, ASSETS } });
+  assert(reportResponse.status === 200, 'generateReportXlsx returns 200');
+  const reportParts = zipPartMap(new Uint8Array(await reportResponse.arrayBuffer()));
+
+  const templateMedia = entries.map(e => e.name).filter(n => n.startsWith('xl/media/')).sort();
+  const reportMedia = [...reportParts.keys()].filter(n => n.startsWith('xl/media/')).sort();
+  assert(JSON.stringify(reportMedia) === JSON.stringify(templateMedia), 'report XLSX adds no QR image part (' + reportMedia.join(', ') + ')');
+
+  const reportDrawing = new TextDecoder().decode(reportParts.get('xl/drawings/drawing4.xml'));
+  const reportDrawingRels = new TextDecoder().decode(reportParts.get('xl/drawings/_rels/drawing4.xml.rels'));
+  assert(!reportDrawing.includes('qr.png'), 'report CBR drawing carries no QR anchor');
+  assert(!/qr/i.test(reportDrawingRels) && !reportDrawingRels.includes('../media/image3.png'), 'report drawing relationships add no QR image target');
+  assert((reportDrawing.match(/<xdr:oneCellAnchor>/g) || []).length === 1, 'report CBR drawing keeps only the template anchor');
+  assert(new TextDecoder().decode(reportParts.get('xl/worksheets/sheet5.xml')).includes('CHRIS DANIEL (LIC: FOOL-881234)'), 'report E48 still carries the saved DXR signature text');
+  console.log('PASS: report XLSX (report page) carries no QR image part or anchor.');
+  database.close();
 }
 console.log('All briefing-xlsx contract checks passed.');

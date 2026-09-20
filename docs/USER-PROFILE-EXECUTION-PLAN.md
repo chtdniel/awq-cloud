@@ -149,7 +149,7 @@ Perubahan method yang sudah ada:
 ### Phase 8 — QR tanda tangan Level A (terpisah dari core; TANPA perubahan database/endpoint)
 18. Vendor encoder QR pure-JS kecil (lisensi terbuka, tanpa npm dependency — prinsip zero-dependency repo).
 19. `functions/briefing-form.js`: render QR sebagai image (data URI) di samping blok tanda tangan DXR pada form/report HTML.
-20. `functions/api/briefing-xlsx.js`: generate PNG QR dari matrix encoder (primitives deflate + CRC32 untuk format PNG sudah ada di file ini), tulis sebagai image part baru ke ZIP XLSX + anchor drawing di area tanda tangan sheet CBR — posisi persis diverifikasi terhadap template saat eksekusi.
+20. `functions/api/briefing-xlsx.js`: generate PNG QR dari matrix encoder (primitives deflate + CRC32 untuk format PNG sudah ada di file ini), tulis sebagai image part baru ke ZIP XLSX + anchor drawing di area tanda tangan sheet CBR — posisi persis diverifikasi terhadap template saat eksekusi. **Hanya jalur form briefing (`generateBriefingXlsx`).** Jalur report page (`generateReportXlsx` — dipakai DOWNLOAD SHEET (XLSX) dan CREATE GOOGLE SHEET) memanggil builder dengan `{ embedSignatureQr: false }`: report tidak memuat image part QR maupun anchor QR, hanya nama DXR yang tercetak di E48.
 21. Isi QR (kompak agar reliable saat discan dari cetakan): `AWQ OCC | DXR: NAME (LIC: FOOL-…) | <tanggal form> | REF: <flights_key>`. Nilai diambil dari field form yang sama dengan yang tercetak di dokumen (`dxrName`, `formDate`) — bukan clock render — agar QR selalu konsisten dengan isi dokumen.
 22. Test: perluas pola `tests/test_briefing_xlsx.mjs` (image part QR ada di ZIP + header PNG valid) + QA manual: cetak XLSX → scan dengan HP → teks terbaca.
 
@@ -175,7 +175,7 @@ Catatan Phase 8: Level A tidak menyimpan apa pun di database — beban maintenan
 - Panel akun menampilkan nama setelah diisi; fallback email bila kosong.
 - Internal Users menampilkan kolom profil; admin edit + konfirmasi berfungsi.
 - Briefing: prefill hanya bila kosong; nilai tersimpan **tidak ditimpa**; XLSX E48/B26 berisi nilai.
-- QR (Phase 8): image QR tampil di form HTML; XLSX memuat image part QR dengan header PNG valid; hasil cetak dapat discan dan teks terbaca; isi QR konsisten dengan field yang tercetak (dxrName, formDate, flights_key).
+- QR (Phase 8): image QR tampil di form HTML; XLSX form briefing memuat image part QR dengan header PNG valid; hasil cetak dapat discan dan teks terbaca; isi QR konsisten dengan field yang tercetak (dxrName, formDate, flights_key). XLSX dari report page (DOWNLOAD SHEET / CREATE GOOGLE SHEET) **tanpa** QR — dijaga `tests/test_briefing_xlsx.mjs`.
 
 **Regression**
 - `node build.js` menghasilkan `public/index.html` yang memuat perubahan; seluruh `npm test` lulus.
