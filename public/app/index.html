@@ -9923,6 +9923,9 @@
     layerGroup: null,
     flightRetried: false,
     drawnCount: 0,
+    tileIndex: 0,
+    tileStats: { attempted: 0, errors: 0 },
+    basemapFailed: false,
     lastFetchMs: 0
   };
 
@@ -10233,30 +10236,65 @@
 
   /* --------------------------------------------------------------------- map --- */
 
-  // Tile providers, tried in order. CARTO's public basemap now answers with an
-  // "API KEY REQUIRED" watermark instead of failing, so OSM goes first and the
-  // swap is driven by tile errors rather than by a try/catch that never fires.
+  // Key-free basemaps only, tried in order. A key-gated provider must never be in
+  // this list: CARTO's public endpoint now answers with an "API KEY REQUIRED"
+  // watermark instead of failing, which looks like a working map covered in
+  // adverts. If every provider here fails, the page says so and keeps drawing the
+  // warning overlay and the route, which is the information that matters.
   var TILE_PROVIDERS = [
-    { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', options: { subdomains: 'abc', maxZoom: 19 }, attribution: '&copy; OpenStreetMap contributors' },
-    { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', options: { maxZoom: 18 }, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }
+    { id: 'osm', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' },
+    { id: 'osm-fr', url: 'https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', subdomains: 'abc', maxZoom: 19, attribution: '&copy; OpenStreetMap contributors, OSM France' },
+    { id: 'osm-de', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', maxZoom: 18, attribution: '&copy; OpenStreetMap contributors, FOSSGIS' }
   ];
 
+  // A couple of failed tiles is normal (throttling, a flaky link, a pan the
+  // network could not keep up with). Switching provider on the second error threw
+  // a perfectly healthy OSM away for the whole session, so a provider is only
+  // abandoned when most of a meaningful sample fails.
+  var TILE_SWITCH_MIN_ATTEMPTS = 8;
+  var TILE_SWITCH_ERROR_RATIO = 0.5;
+
+  function setBasemapFailed(failed) {
+    state.basemapFailed = failed;
+    setMapNotice(state.drawnCount || 0);
+  }
+
   function addTileLayer(index) {
-    if (!state.map || index >= TILE_PROVIDERS.length) return;
+    if (!state.map || index >= TILE_PROVIDERS.length) {
+      setBasemapFailed(true);
+      return;
+    }
     var provider = TILE_PROVIDERS[index];
     if (state.tileLayer) state.map.removeLayer(state.tileLayer);
-    var errors = 0;
-    var layer = L.tileLayer(provider.url, Object.assign({ attribution: provider.attribution }, provider.options));
+    state.tileIndex = index;
+    state.tileStats = { attempted: 0, errors: 0 };
+    var options = { attribution: provider.attribution, maxZoom: provider.maxZoom };
+    if (provider.subdomains) options.subdomains = provider.subdomains;
+    var layer = L.tileLayer(provider.url, options);
+    layer.on('tileload', function () {
+      if (state.tileLayer === layer) state.tileStats.attempted++;
+    });
     layer.on('tileerror', function () {
-      errors++;
-      // Only the live layer may trigger the swap, and only once: a provider that
-      // is blocked or key-gated fires this for every tile.
-      if (errors >= 2 && state.tileLayer === layer && index + 1 < TILE_PROVIDERS.length) {
-        addTileLayer(index + 1);
-      }
+      if (state.tileLayer !== layer) return;
+      state.tileStats.attempted++;
+      state.tileStats.errors++;
+      if (state.tileStats.attempted < TILE_SWITCH_MIN_ATTEMPTS) return;
+      if (state.tileStats.errors / state.tileStats.attempted < TILE_SWITCH_ERROR_RATIO) return;
+      console.warn('[WX WARNING] basemap "' + provider.id + '" failed ' + state.tileStats.errors + '/' + state.tileStats.attempted + ' tiles; trying the next provider');
+      addTileLayer(index + 1);
     });
     layer.addTo(state.map);
     state.tileLayer = layer;
+    setBasemapFailed(false);
+  }
+
+  // REFRESH also gives a failed basemap another chance: the primary provider is
+  // retried instead of staying abandoned for the life of the tab.
+  function resetBasemap() {
+    if (!state.map) return;
+    state.basemapFailed = false;
+    if (state.tileIndex !== 0 || !state.tileLayer) addTileLayer(0);
+    else setMapNotice(state.drawnCount || 0);
   }
 
   function ensureMap() {
@@ -10326,21 +10364,27 @@
     var total = (payload.warnings || []).length;
     var visibleCount = visibleWarnings().length;
     var hasRoute = routeLatLngs().length >= 2;
-    if (drawn > 0) {
+    var basemapLine = state.basemapFailed
+      ? '<span style="color:var(--status-warning);font-weight:700;">BASEMAP UNAVAILABLE</span> — every key-free tile provider failed; the warning overlay and the route below are still accurate.'
+      : null;
+    if (drawn > 0 && !basemapLine) {
       wrap.classList.remove('is-empty');
       return;
     }
     wrap.classList.add('is-empty');
-    if (!total) {
-      notice.innerHTML = 'No active TC / VA warnings in the Asia-Pacific box for this feed.' +
-        (hasRoute ? ' Route of the selected flight is shown.' : '') + '<br>Paste a product below or press REFRESH.';
-      return;
+    var lines = [];
+    if (basemapLine) lines.push(basemapLine);
+    if (drawn === 0) {
+      if (!total) {
+        lines.push('No active TC / VA warnings in the Asia-Pacific box for this feed.' +
+          (hasRoute ? ' Route of the selected flight is shown.' : '') + '<br>Paste a product below or press REFRESH.');
+      } else if (!visibleCount) {
+        lines.push('All ' + total + ' active warning(s) are hidden by the current filter.');
+      } else {
+        lines.push(visibleCount + ' warning(s) active but hidden by the layer toggles.');
+      }
     }
-    if (!visibleCount) {
-      notice.textContent = 'All ' + total + ' active warning(s) are hidden by the current filter.';
-      return;
-    }
-    notice.textContent = visibleCount + ' warning(s) active but hidden by the layer toggles.';
+    notice.innerHTML = lines.join('<br>');
   }
 
   function drawWarnings() {
@@ -10751,6 +10795,7 @@
   }
 
   window.wxWarningRefresh = function (force) {
+    resetBasemap();
     return loadFlightOptionsWithRetry().then(function () { return loadData(force !== false); });
   };
 

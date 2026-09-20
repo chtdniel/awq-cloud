@@ -391,6 +391,64 @@ await check('deleting a manual entry removes it everywhere', async () => {
   assert.equal(database.prepare('SELECT COUNT(*) AS n FROM wx_warnings WHERE is_manual = 1').get().n, 1);
 });
 
+// Regression for the live defect an operator hit: two transient tile errors were
+// enough to abandon a healthy OSM basemap, and the fallback was CARTO, which
+// answers with an "API KEY REQUIRED" watermark instead of failing. So the map
+// looked fine while being covered in adverts.
+await check('the basemap chain never contains a key-gated provider', async () => {
+  const urls = await page.evaluate(() => [...document.querySelectorAll('#wxw-map img.leaflet-tile')].map(img => img.src));
+  assert.ok(urls.length > 0, 'the page must request basemap tiles');
+  urls.forEach(url => assert.doesNotMatch(url, /cartocdn|carto\.com|stadia|maptiler|thunderforest|api\.mapbox/i,
+    'key-gated tile provider in use: ' + url));
+  assert.match(urls[0], /tile\.openstreetmap\.(org|fr|de)/, 'the primary basemap must be key-free OSM: ' + urls[0]);
+});
+
+async function openWithTileFailure({ failEvery }) {
+  const failingContext = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
+  const failingPage = await failingContext.newPage();
+  let served = 0;
+  // Fail whole provider requests (abort = network error, which is what a blocked
+  // or throttled host looks like to Leaflet).
+  await failingPage.route(/tile\.openstreetmap\.(org|fr|de)\//, route => {
+    const host = new URL(route.request().url()).host;
+    const isPrimary = /(^|\.)tile\.openstreetmap\.org$/.test(host);
+    served++;
+    if (isPrimary && failEvery(served)) return route.abort();
+    return route.continue();
+  });
+  await failingPage.addInitScript(() => { window.activeBoardRowIds = [1]; });
+  await failingPage.goto(baseUrl + '/app', { waitUntil: 'domcontentloaded' });
+  await failingPage.waitForFunction(() => window.isAdmin !== null, null, { timeout: 20000 });
+  await failingPage.click('#nav-weather-toggle');
+  await failingPage.click('#wx-submenu .dropdown-item[data-tab="wx-warning"]');
+  await failingPage.waitForFunction(() => document.querySelector('#wxw-map.leaflet-container'), null, { timeout: 30000 });
+  await failingPage.waitForFunction(() => document.querySelectorAll('#wxw-map img.leaflet-tile').length > 0, null, { timeout: 20000 });
+  return { failingContext, failingPage };
+}
+
+await check('a couple of failed tiles does not abandon the primary basemap', async () => {
+  const { failingContext, failingPage } = await openWithTileFailure({ failEvery: n => n <= 2 });
+  await failingPage.waitForTimeout(2500);
+  const hosts = await failingPage.evaluate(() => [...new Set([...document.querySelectorAll('#wxw-map img.leaflet-tile')].map(img => new URL(img.src).host))]);
+  assert.deepEqual(hosts, ['tile.openstreetmap.org'], 'transient failures must not switch provider: ' + JSON.stringify(hosts));
+  const noticeShown = await failingPage.$eval('#wxw-map-wrap', node => node.classList.contains('is-empty'));
+  assert.equal(noticeShown, false, 'a healthy basemap must not raise the basemap notice');
+  await failingContext.close();
+});
+
+await check('a provider that fails wholesale hands over, and the page still draws the overlay', async () => {
+  const { failingContext, failingPage } = await openWithTileFailure({ failEvery: () => true });
+  await failingPage.waitForFunction(
+    () => [...document.querySelectorAll('#wxw-map img.leaflet-tile')].some(img => /tile\.openstreetmap\.(fr|de)/.test(img.src)),
+    null, { timeout: 25000 }
+  );
+  const hosts = await failingPage.evaluate(() => [...new Set([...document.querySelectorAll('#wxw-map img.leaflet-tile')].map(img => new URL(img.src).host))]);
+  hosts.forEach(host => assert.doesNotMatch(host, /cartocdn|carto\.com/, 'never fall back to a key-gated host: ' + JSON.stringify(hosts)));
+  const routeDrawn = await failingPage.$$eval('#wxw-map .leaflet-overlay-pane path', nodes => nodes.length);
+  assert.ok(routeDrawn >= 1, 'the route must stay drawn whatever the basemap does');
+  await failingContext.close();
+});
+
 await check('the page produced no uncaught errors', async () => {
   assert.deepEqual(pageErrors, []);
 });
