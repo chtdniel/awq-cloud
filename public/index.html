@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="utf-8">
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AWQ OCC</title>
@@ -778,7 +779,51 @@
       z-index: var(--z-base); /* Layer: Base/content */
       min-width: 0;
     }
-    
+
+    /* PUBLIC SITE FOOTER — the Google OAuth consent screen requires the app
+       homepage to identify the app and link its privacy policy, so these links
+       must stay public and must match the URLs registered in the consent screen
+       (privacy: /privacy, terms: /terms). */
+    .occ-site-footer {
+      position: relative;
+      z-index: var(--z-base);
+      margin-top: 12px;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--nav-bg);
+      backdrop-filter: blur(12px);
+    }
+    .occ-site-footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 24px;
+      padding: 14px clamp(1rem, 3vw, 2rem);
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    .occ-site-footer-brand { display: grid; gap: 2px; min-width: 0; }
+    .occ-site-footer-name {
+      font: 700 11px var(--font-ui);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-primary);
+    }
+    .occ-site-footer-desc { font: 500 11px var(--font-mono); color: var(--text-muted); }
+    .occ-site-footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
+    .occ-site-footer-links a {
+      font: 700 11px var(--font-ui);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      padding-bottom: 1px;
+      transition: color 0.22s var(--ease-spring), border-color 0.22s var(--ease-spring);
+    }
+    .occ-site-footer-links a:hover { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+    .occ-site-footer-links a:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+
     .view-section { display: none; }
     .view-section.active { display: block; animation: slideUpFade 0.5s var(--ease-spring); }
     @keyframes slideUpFade { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
@@ -2672,22 +2717,42 @@
   window.parseToDbDate = parseToDbDate;
 
   // Normalisasi tampilan waktu ke HH:MM — terima ISO penuh ('2026-09-08T03:25:00.000Z'),
-  // 'HHMM' polos DB lama, dan 'HH:MM'. Jam selalu UTC (ops Zulu).
+  // datetime berpemisah selain 'T' ('2026-09-08 03:25:00'), 'HHMM' polos DB lama, dan 'HH:MM'.
+  // Jam selalu UTC (ops Zulu) dan tidak digeser timezone browser.
   function displayTime(v) {
     const s = String(v || '');
     if (/T/.test(s)) {
       const d = new Date(s);
       if (!isNaN(d.getTime())) return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
     }
-    const d = s.replace(/[^0-9]/g, '').padStart(4, '0');
+    // Jam literal menang: pemisah spasi/dll tetap datetime, bukan HHMM polos.
+    // Tanpa cabang ini nilai seperti '2026-09-08 03:25:00' jatuh ke fallback dan
+    // dikembalikan mentah ke input maxlength=5 (dan merusak timeToMins).
+    const clock = s.match(/(\d{1,2}):(\d{2})/);
+    if (clock) {
+      const hh = Number(clock[1]), mm = Number(clock[2]);
+      if (hh <= 23 && mm <= 59) return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+    }
+    const digits = s.replace(/[^0-9]/g, '');
+    // Datetime tanpa pemisah: YYYYMMDDHHMM[SS] → HH:MM di posisi 8.
+    if (digits.length >= 12) {
+      const hh = digits.slice(8, 10), mm = digits.slice(10, 12);
+      if (Number(hh) <= 23 && Number(mm) <= 59) return hh + ':' + mm;
+      return s;
+    }
+    const d = digits.padStart(4, '0');
     if (d === '0000') return '00:00';
     if (!/^\d{4}$/.test(d)) return s;
     return d.substring(0, 2) + ':' + d.substring(2, 4);
   }
   function timeToMins(tStr) {
     if (!tStr) return 0;
-    let s = displayTime(tStr).replace(/[^0-9]/g, '').padStart(4, '0');
-    return parseInt(s.substring(0, 2)) * 60 + parseInt(s.substring(2, 4));
+    // Hanya percaya keluaran HH:MM. Menghitung ulang digit dari output displayTime
+    // membuat nilai bukan-jam ikut jadi menit (mis. tanggal polos '2026-09-08' →
+    // 20*60+26 = 1226) dan bar timeline salah tempat tanpa error.
+    const m = /^(\d{2}):(\d{2})$/.exec(displayTime(tStr));
+    if (!m) return 0;
+    return Number(m[1]) * 60 + Number(m[2]);
   }
 
   function normalizeAcList(list) {
@@ -4560,6 +4625,13 @@
         if (!r) return;
         let isPrimary = String(r.ID).endsWith('10');
         let label = isPrimary ? `${r.ID} (Primary)` : `${r.ID} (Alternate)`;
+        // Penanda koordinat: peta FIR menggambar rute dari tabel LATLONG, jadi
+        // profil tanpa baris di sana akan tampil sebagai rute kosong di peta.
+        // Ditandai di titik pemilihan supaya operator tidak baru sadar di peta.
+        const wpCount = Number(r.WAYPOINT_COUNT);
+        if (r.WAYPOINT_COUNT !== null && r.WAYPOINT_COUNT !== undefined && r.WAYPOINT_COUNT !== '' && Number.isFinite(wpCount)) {
+          label += wpCount > 0 ? ` · ${wpCount} WP` : ' · NO WP';
+        }
         opts.push(`<option value="${esc(r.ID)}">${esc(label)}</option>`);
       });
       opts.push(`<option value="__NEW_ALT__">+ Add Alternate Route</option>`);
@@ -5359,6 +5431,73 @@
   <script>
     window.lastFetchedFlightIds = "";
     window.savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
+
+    // Gate C rule: the report carries AERODROME NOTAMs only. A NOTAM is aerodrome
+    // scoped when its station is one of the selected flights' aerodromes
+    // (DEP/ARR/ALT/ENR). FIR/UIR-wide NOTAMs are keyed by their FIR designator, so
+    // they never match that set and are dropped here — before the payload, before
+    // the size check and before the audit hash.
+    window.reportStationSet = function(flights) {
+      var set = {};
+      (flights || []).forEach(function(f) {
+        ['DEP', 'ARR', 'ALT', 'ENR1', 'ENR2', 'ENR3'].forEach(function(k) {
+          var s = f && f[k] ? String(f[k]).trim().toUpperCase() : '';
+          if (s) set[s] = true;
+        });
+      });
+      return set;
+    };
+    window.isAerodromeReportNotam = function(notam, stationSet) {
+      var stn = String((notam && notam.station) || '').trim().toUpperCase();
+      if (!stn) return false;
+      return !!(stationSet && stationSet[stn]);
+    };
+
+    // Gate B handoff: narrow view over the last analyzeNotams response, limited to the
+    // selected flights, their actually-selected NOTAMs, and aerodrome scope only.
+    window.getReportNotamContext = function(flights) {
+      var resp = window.awqReportState && window.awqReportState.notamResponse;
+      // Fresh scope report per call: the payload builder reports what was dropped.
+      window.reportNotamScope = { dropped: [], available: false };
+      if (!resp || !Array.isArray(resp.data)) return [];
+      window.reportNotamScope.available = true;
+      var analysis = window.savedNotamAnalysis || {};
+      var stationSet = window.reportStationSet(flights);
+      var selectedByFlight = {};
+      (flights || []).forEach(function(f) {
+        var num = String(f && f.FLIGHT || '').trim();
+        if (num) selectedByFlight[num] = (analysis[num] || []).map(function(x) { return String(x); });
+      });
+      var out = [];
+      resp.data.forEach(function(stnObj) {
+        if (!stnObj) return;
+        var station = String(stnObj.station || '').trim().toUpperCase();
+        var stnFlights = String(stnObj.flightsStr || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        var relevant = stnFlights.filter(function(fn) { return !!selectedByFlight[fn]; });
+        if (!relevant.length) return;
+        (stnObj.notams || []).forEach(function(n) {
+          if (!n) return;
+          var id = String(n.notamNum || n.id || '').trim();
+          if (!id) return;
+          var owners = relevant.filter(function(fn) { return selectedByFlight[fn].indexOf(id) !== -1; });
+          if (!owners.length) return;
+          var record = {
+            id: id,
+            station: station,
+            flights: owners,
+            text: String(n.rawText == null ? '' : n.rawText),
+            status: String(n.status || ''),
+            selected: true
+          };
+          if (!window.isAerodromeReportNotam(record, stationSet)) {
+            window.reportNotamScope.dropped.push({ id: id, station: station, flights: owners });
+            return;
+          }
+          out.push(record);
+        });
+      });
+      return out;
+    };
     window.activeStationGlobalState = "";
 
     window.loadNotamsForSelected = function(isForced = false) {
@@ -5409,6 +5548,9 @@
         google.script.run
           .withSuccessHandler(res => {
             try {
+              window.awqReportState = window.awqReportState || {};
+              window.awqReportState.notamResponse = res;
+              window.awqReportState.notamReceivedAt = new Date().toISOString();
               window.renderStationCentricGrid(res);
             } catch (err) {
               console.error('[NOTAM] Render error:', err);
@@ -5884,8 +6026,8 @@
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.openBriefingForm()" id="btn-open-form">
         <svg class="ic ic-sm"><use href="#i-bolt"/></svg> OPEN EDITABLE FORM
       </button>
-      <button class="btn-execute-cbr btn-solid-primary" onclick="window.downloadReportXlsx()" id="btn-download-sheet" title="Download Crew Briefing Report as .xlsx sheet (CBR + WX + NOTAM)">
-        <svg class="ic ic-sm"><use href="#i-save"/></svg> DOWNLOAD SHEET (XLSX)
+      <button class="btn-execute-cbr btn-solid-primary" onclick="window.openReportWeb1()" id="btn-download-sheet" title="Open the Google Sheets report generator">
+        <svg class="ic ic-sm"><use href="#i-download"/></svg> DOWNLOAD SHEET
       </button>
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.createReportGoogleSheet()" id="btn-google-sheet" disabled title="Create the report in your Google Drive and open Google Sheets">CREATE GOOGLE SHEET</button>
     </div>
@@ -6244,6 +6386,215 @@
         noSigMap: getNoSigStationMap()
       };
     };
+
+    // ============================================================
+    // WEB 1 REPORT HANDOFF (B0 transport proof build)
+    // READY -> CONTEXT -> ACCEPTED, iframe-aware per implementation plan §3.
+    // Audit/generation backend is Gate B; this build only proves transport.
+    // ============================================================
+    const REPORT_WEB1_URL = window.__REPORT_WEB1_URL_OVERRIDE || 'https://script.google.com/macros/s/AKfycbz0gdvfrKdGu-7LovIZylT7q-REolKKBNmCRUOL13Dd9gdUZhDmeb6134hMKfv5wLPajA/exec';
+    const REPORT_WEB1_ORIGINS = window.__REPORT_WEB1_ORIGINS || null; // exact-origin override for local tests
+    const REPORT_MAX_TOTAL_BYTES = 64 * 1024; // locked from real-data measurement (tests/measure_payload_size.mjs)
+    const REPORT_MAX_TEXT_BYTES = 8 * 1024;
+    // Receipt window: must cover an Apps Script cold start of the receipt RPC
+    // (measured ~34 s on the first call). Overridable for fast tests.
+    const REPORT_RECEIPT_TIMEOUT_MS = window.__REPORT_RECEIPT_TIMEOUT_MS || 45000;
+
+    function reportByteLength_(s) {
+      try { return new TextEncoder().encode(String(s)).length; } catch (e) { return String(s).length; }
+    }
+
+    function reportOversizeText_(payload) {
+      var taf = payload.tafContext || [];
+      for (var i = 0; i < taf.length; i++) {
+        if (taf[i].text && reportByteLength_(taf[i].text) > REPORT_MAX_TEXT_BYTES) {
+          return { kind: 'TAF', label: taf[i].station, bytes: reportByteLength_(taf[i].text) };
+        }
+      }
+      var notam = payload.notamContext || [];
+      for (var j = 0; j < notam.length; j++) {
+        if (notam[j].text && reportByteLength_(notam[j].text) > REPORT_MAX_TEXT_BYTES) {
+          return { kind: 'NOTAM', label: notam[j].id, bytes: reportByteLength_(notam[j].text) };
+        }
+      }
+      return null;
+    }
+
+    function isReportWeb1Origin(origin) {
+      if (REPORT_WEB1_ORIGINS) return REPORT_WEB1_ORIGINS.includes(origin);
+      if (origin === 'https://script.google.com') return true;
+      if (origin === 'https://script.googleusercontent.com') return true;
+      // hashed Apps Script user-content subdomain, e.g. n-<hash>-<n>-lu-script.googleusercontent.com
+      return /^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/.test(origin);
+    }
+    let reportWeb1Window = null;    // top-level popup returned by window.open()
+    let reportWeb1Transfer = null;  // { nonce, payload, peer, peerOrigin, sent, receiptTimer }
+
+    function getReportWeb1Payload() {
+      const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+      const rid = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : ('req-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+
+      // Station metadata: which roles/flights use each station (DEP/ARR/ALT/ENR).
+      const roleFor = { DEP: 'DEP', ARR: 'ARR', ALT: 'ALT', ENR1: 'ENR', ENR2: 'ENR', ENR3: 'ENR' };
+      const stationMeta = {};
+      const stationOrder = [];
+      selectedFlights.forEach(function(f) {
+        ['DEP', 'ARR', 'ALT', 'ENR1', 'ENR2', 'ENR3'].forEach(function(k) {
+          const s = f[k] ? String(f[k]).trim().toUpperCase() : '';
+          if (!s) return;
+          if (!stationMeta[s]) { stationMeta[s] = { roles: [], flights: [] }; stationOrder.push(s); }
+          if (stationMeta[s].roles.indexOf(roleFor[k]) === -1) stationMeta[s].roles.push(roleFor[k]);
+          if (stationMeta[s].flights.indexOf(f.FLIGHT) === -1) stationMeta[s].flights.push(f.FLIGHT);
+        });
+      });
+
+      // Full raw TAF text from Web 2's registry view (Taf_Ui); unavailable is explicit.
+      const tafBase = (typeof window.getReportTafContext === 'function')
+        ? window.getReportTafContext(stationOrder)
+        : stationOrder.map(function(s) { return { station: s, text: '', issueTime: null, available: false }; });
+      const tafContext = tafBase.map(function(t) {
+        const meta = stationMeta[t.station] || { roles: [], flights: [] };
+        return Object.assign({}, t, { roles: meta.roles, flights: meta.flights });
+      });
+
+      // Full selected NOTAM text from Web 2's analyzeNotams response (Notam_Ui).
+      // Aerodrome scope only: FIR/UIR-wide NOTAMs are dropped in the builder.
+      const notamContext = (typeof window.getReportNotamContext === 'function')
+        ? window.getReportNotamContext(selectedFlights)
+        : [];
+      const notamScope = (window.reportNotamScope && window.reportNotamScope.available)
+        ? {
+            rule: 'AERODROME_ONLY',
+            droppedFirWide: (window.reportNotamScope.dropped || []).length,
+            dropped: (window.reportNotamScope.dropped || []).map(function(d) {
+              return { id: d.id, station: d.station };
+            })
+          }
+        : { rule: 'AERODROME_ONLY', droppedFirWide: 0, dropped: [] };
+
+      return {
+        version: 1,
+        reportRequestId: rid,
+        requestedAt: new Date().toISOString(),
+        flights: selectedFlights,
+        tafContext: tafContext,
+        notamContext: notamContext,
+        notamScope: notamScope,
+        savedNotamAnalysis: window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {},
+        noSigStationMap: getNoSigStationMap()
+      };
+    }
+
+    function isReportWeb1ReadyMessage(event) {
+      if (!reportWeb1Transfer || !reportWeb1Transfer.nonce) return false;
+      if (!isReportWeb1Origin(event.origin)) return false;
+      if (!event.data || event.data.type !== 'AWQ_REPORT_READY' || event.data.nonce !== reportWeb1Transfer.nonce) return false;
+      // iframe-aware: READY source must belong to the tab we opened (event.source.top === popup)
+      try { return !!event.source && event.source.top === reportWeb1Window; }
+      catch (e) { return false; }
+    }
+
+    function isReportWeb1ReceiptMessage(event) {
+      if (!reportWeb1Transfer || !reportWeb1Transfer.peer) return false;
+      return event.source === reportWeb1Transfer.peer &&
+        event.origin === reportWeb1Transfer.peerOrigin &&
+        !!event.data &&
+        (event.data.type === 'AWQ_REPORT_ACCEPTED' || event.data.type === 'AWQ_REPORT_REJECTED') &&
+        event.data.nonce === reportWeb1Transfer.nonce;
+    }
+
+    window.openReportWeb1 = function() {
+      if (window.reportState.isBusy) return;
+      const payload = getReportWeb1Payload();
+      if (!Array.isArray(payload.flights) || payload.flights.length < 1 || payload.flights.length > 4) {
+        printTerminalLine('DOWNLOAD SHEET: Select 1 to 4 flights first.', 'warn');
+        return;
+      }
+      // Locked size limits: reject oversized context outright (never truncate).
+      const totalBytes = reportByteLength_(JSON.stringify(payload));
+      if (totalBytes > REPORT_MAX_TOTAL_BYTES) {
+        printTerminalLine('DOWNLOAD SHEET: Report context is ' + totalBytes + ' bytes, over the ' + Math.round(REPORT_MAX_TOTAL_BYTES / 1024) + ' KiB limit. Reduce the selected NOTAMs.', 'error');
+        return;
+      }
+      const oversize = reportOversizeText_(payload);
+      if (oversize) {
+        printTerminalLine('DOWNLOAD SHEET: ' + oversize.kind + ' text for ' + oversize.label + ' is ' + oversize.bytes + ' bytes, over the ' + Math.round(REPORT_MAX_TEXT_BYTES / 1024) + ' KiB per-text limit.', 'error');
+        return;
+      }
+      const sourceOrigin = window.location.origin;
+      if (!/^https?:$/.test(window.location.protocol) || !sourceOrigin || sourceOrigin === 'null') {
+        printTerminalLine('DOWNLOAD SHEET: The report handoff requires the deployed Web 2 origin.', 'error');
+        return;
+      }
+      const nonce = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+      const reportUrl = new URL(REPORT_WEB1_URL);
+      reportUrl.searchParams.set('page', 'report');
+      // one-time control values in the fragment (never sent as HTTP query/referrer)
+      reportUrl.hash = 'nonce=' + encodeURIComponent(nonce) + '&sourceOrigin=' + encodeURIComponent(sourceOrigin);
+      window.__gatecPendingHandoff = { nonce: nonce, reportRequestId: payload.reportRequestId };
+
+      reportWeb1Transfer = { nonce: nonce, payload: payload, peer: null, peerOrigin: null, sent: false, receiptTimer: null };
+      reportWeb1Window = window.open(reportUrl.toString(), '_blank');
+      if (!reportWeb1Window) {
+        window.__gatecTransferState = { state: 'POPUP_BLOCKED', reportRequestId: payload.reportRequestId };
+        reportWeb1Transfer = null;
+        printTerminalLine('DOWNLOAD SHEET: Allow pop-ups to open the Google Sheets report.', 'error');
+        return;
+      }
+      printTerminalLine('DOWNLOAD SHEET: Opening Web 1 REPORT and waiting for readiness...', 'info');
+      // 30-second readiness timeout
+      var reportReadyTimeoutMs = window.__REPORT_READY_TIMEOUT_MS || 30000;
+      setTimeout(function() {
+        if (reportWeb1Transfer && !reportWeb1Transfer.sent) {
+          window.__gatecTransferState = { state: 'READY_TIMEOUT', reportRequestId: reportWeb1Transfer.payload.reportRequestId };
+          printTerminalLine('DOWNLOAD SHEET: Web 1 did not signal ready within ' + Math.round(reportReadyTimeoutMs / 1000) + ' seconds.', 'error');
+          reportWeb1Transfer = null;
+        }
+      }, reportReadyTimeoutMs);
+    };
+
+    window.addEventListener('message', function(event) {
+      if (reportWeb1Transfer && !reportWeb1Transfer.sent && isReportWeb1ReadyMessage(event)) {
+        // pin the validated iframe peer; send CONTEXT to the peer, not the outer popup
+        reportWeb1Transfer.peer = event.source;
+        reportWeb1Transfer.peerOrigin = event.origin;
+        reportWeb1Transfer.sent = true;
+        window.__gatecContextSent = { reportRequestId: reportWeb1Transfer.payload.reportRequestId, nonce: reportWeb1Transfer.nonce, peerOrigin: event.origin };
+        event.source.postMessage(
+          { type: 'AWQ_REPORT_CONTEXT', nonce: reportWeb1Transfer.nonce, payload: reportWeb1Transfer.payload },
+          event.origin
+        );
+        printTerminalLine('DOWNLOAD SHEET: Flight context sent to validated Web 1 iframe peer.', 'success');
+        // 10-second receipt timeout
+        reportWeb1Transfer.receiptTimer = setTimeout(function() {
+          if (reportWeb1Transfer) {
+            window.__gatecTransferState = { state: 'RECEIPT_UNKNOWN', reportRequestId: reportWeb1Transfer.payload.reportRequestId };
+            printTerminalLine('DOWNLOAD SHEET: No receipt within ' + Math.round(REPORT_RECEIPT_TIMEOUT_MS / 1000) + ' seconds. Web 1 may still be starting; CHECK REPORT STATUS in Web 1 with request ID ' + reportWeb1Transfer.payload.reportRequestId + '.', 'warn');
+          }
+        }, REPORT_RECEIPT_TIMEOUT_MS);
+        return;
+      }
+      if (isReportWeb1ReceiptMessage(event)) {
+        if (event.data.type === 'AWQ_REPORT_ACCEPTED') {
+          printTerminalLine('DOWNLOAD SHEET: Web 1 accepted the report context (request ' + event.data.reportRequestId + '). Confirm in Web 1 to generate.', 'success');
+          // Scope warning: the report carries aerodrome NOTAMs only.
+          if (event.data.warning) printTerminalLine('DOWNLOAD SHEET: ' + event.data.warning, 'warn');
+        } else {
+          printTerminalLine('DOWNLOAD SHEET: Web 1 rejected the report context: ' + (event.data.reason || 'unknown reason'), 'error');
+        }
+        if (reportWeb1Transfer && reportWeb1Transfer.receiptTimer) clearTimeout(reportWeb1Transfer.receiptTimer);
+        window.__gatecTransferState = {
+          state: event.data.type === 'AWQ_REPORT_ACCEPTED' ? 'ACCEPTED' : 'REJECTED',
+          reportRequestId: event.data.reportRequestId || '',
+          reason: event.data.reason || ''
+        };
+        reportWeb1Transfer = null;
+      }
+    });
 
     // Helper: accept absolute http/https OR same-origin relative /briefing or /briefing-form URLs
     window.isValidReportUrl = function(u) {
@@ -6787,6 +7138,7 @@
     <div class="kpi-card accent"><span class="kpi-label">Registered Profiles</span><span class="kpi-val" id="route-kpi-total">0</span><span class="kpi-sub">approved routing profiles</span></div>
     <div class="kpi-card"><span class="kpi-label">Route Pairs</span><span class="kpi-val" id="route-kpi-pairs">0</span><span class="kpi-sub">unique city pairs</span></div>
     <div class="kpi-card warn"><span class="kpi-label">Status</span><span class="kpi-val text">REGISTRY</span><span class="kpi-sub">live from route DB</span></div>
+    <div class="kpi-card safe" id="route-kpi-wp-card"><span class="kpi-label">WP Coverage</span><span class="kpi-val text" id="route-kpi-wp">0/0</span><span class="kpi-sub">with registered waypoints</span></div>
   </div>
 
   <div class="route-manager-container">
@@ -6801,10 +7153,12 @@
           <span class="filter-chip" onclick="window.setRouteFilter(this, 'WMKK')">WMKK (KUL)</span>
           <span class="filter-chip" onclick="window.setRouteFilter(this, 'WSSS')">WSSS (SIN)</span>
           <span class="filter-chip" onclick="window.setRouteFilter(this, 'YPPH')">YPPH (PER)</span>
+          <span class="filter-chip wp-gap-filter" id="route-filter-wp-gap" onclick="window.toggleRouteWpFilter(this)" title="Show only routes with no waypoints registered in the WAYPOINT database">NO WAYPOINTS</span>
         </div>
       </div>
       <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); text-align: right; padding-top: 12px; flex-shrink: 0;">
         <span id="route-total-count" style="font-weight: 700; color: var(--accent-primary); font-size: 16px;">0</span><br>PROFILES
+        <div style="margin-top: 8px; font-size: 9px; letter-spacing: 0.05em; color: var(--text-muted);">WP = REGISTERED IN WAYPOINT DB</div>
       </div>
     </div>
 
@@ -6855,7 +7209,20 @@
       align-items: flex-start;
       gap: 10px;
     }
+    .route-id-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
     .route-id-cell { font-family: var(--font-mono); font-weight: 800; color: var(--accent-primary); letter-spacing: 0.02em; font-size: 14px; }
+    /* Waypoint-registration marker: text + icon, not colour alone, so the state
+       survives greyscale and screen readers. */
+    .wp-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 1px 7px; border-radius: var(--radius-pill);
+      border: 1px solid transparent;
+      font-family: var(--font-mono); font-size: 9px; font-weight: 800;
+      letter-spacing: 0.05em; white-space: nowrap;
+    }
+    .wp-badge-ok { background: var(--status-safe-bg); color: var(--status-safe); border-color: var(--status-safe); }
+    .wp-badge-gap { background: var(--status-warning-bg); color: var(--status-warning); border-color: var(--status-warning); }
+    .wp-badge-unknown { background: var(--bg-panel-sunken); color: var(--text-muted); border-color: var(--border-medium); }
     .route-pair-cell { font-weight: 700; letter-spacing: 0.04em; font-size: 11px; color: var(--text-secondary); margin-top: 2px; display: flex; align-items: center; gap: 5px; }
     .route-card-actions { display: flex; gap: 8px; }
 
@@ -6901,6 +7268,10 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .action-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); background: var(--status-info-bg); }
+    /* Shortcut ke WAYPOINT MANAGER: hanya untuk admin, dan hanya pada route yang
+       koordinatnya belum terdaftar. Begitu gap-nya terisi, tombolnya hilang. */
+    .action-btn.btn-wp-gap { border-color: var(--status-warning); color: var(--status-warning); }
+    .action-btn.btn-wp-gap:hover { border-color: var(--status-warning); color: #fff; background: var(--status-warning); }
     .action-btn:focus-visible, .filter-chip:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
     @media (max-width: 480px) {
       .route-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; }
@@ -6925,12 +7296,80 @@
     }
     .filter-chip:hover { border-color: var(--accent-primary); color: var(--text-primary); }
     .filter-chip.active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,163,255,0.3); }
+    /* Coverage gap filter is amber, not accent: it is a "work still to do" view. */
+    .filter-chip.wp-gap-filter.active { background: var(--status-warning); color: #fff; border-color: var(--status-warning); box-shadow: none; }
   </style>
 
   <script>
     window.allRoutesCache = [];
+    window.routeShowMissingWpOnly = false;
+
+    // Penanda "waypoint sudah terdaftar di database" untuk kartu route.
+    // WAYPOINT_COUNT dihitung server-side dari tabel latlong. Nilai yang tidak
+    // terbaca sengaja jadi badge netral, bukan "NO WP" — salah tampil "belum ada"
+    // lebih berbahaya daripada tampil "tidak diketahui".
+    window.routeWpBadgeMarkup = function(route) {
+      const esc = window.escapeHtml || (v => String(v == null ? '' : v));
+      const raw = route.WAYPOINT_COUNT;
+      if (raw === null || raw === undefined || raw === '' || !Number.isFinite(Number(raw))) {
+        return '<span class="wp-badge wp-badge-unknown" title="Waypoint registration status unavailable — reload the route registry." aria-label="Waypoint registration status unavailable"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-circle"/></svg>WP ?</span>';
+      }
+      const count = Number(raw);
+      if (count > 0) {
+        return `<span class="wp-badge wp-badge-ok" title="${esc(count)} waypoint(s) registered for this route in the WAYPOINT database" aria-label="${esc(count)} waypoints registered in the waypoint database"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-check"/></svg>${esc(count)} WP</span>`;
+      }
+      return '<span class="wp-badge wp-badge-gap" title="No waypoints registered for this route in the WAYPOINT database" aria-label="No waypoints registered in the waypoint database"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-warn"/></svg>NO WP</span>';
+    }
+
+    // Tombol pintasan ke WAYPOINT MANAGER. Gagal-tertutup: WAYPOINT MANAGER
+    // admin-only, jadi non-admin tidak diberi tombol yang pasti ditolak. Selama
+    // status akses belum diketahui (isAdmin masih null saat boot), tombol juga
+    // belum muncul — dan digambar ulang saat occ:accessResolved tiba.
+    window.routeWpActionMarkup = function(route) {
+      if (window.isAdmin !== true) return '';
+      if (Number(route.WAYPOINT_COUNT) > 0) return '';
+      const esc = window.escapeHtml || (v => String(v == null ? '' : v));
+      const id = esc(route.ID);
+      return `<button class="action-btn btn-wp-gap route-wp-btn" data-route-id="${id}" title="No coordinates yet — add waypoints in WAYPOINT MANAGER" aria-label="Add waypoints for route ${id} in WAYPOINT MANAGER"><svg class="ic"><use href="#i-stack"/></svg></button>`;
+    }
+
+    // Pindah ke WAYPOINT MANAGER lalu isikan Route ID-nya. Kalau akses ditolak
+    // (switchTab menolak non-admin tanpa mengaktifkan view), tidak ada yang
+    // diisi — jangan sampai field terisi di halaman yang tidak boleh dibuka.
+    window.openWaypointsForRoute = function(routeId) {
+      if (typeof window.switchTab !== 'function') return;
+      window.switchTab('waypoint');
+      const view = document.getElementById('view-waypoint');
+      if (!view || !view.classList.contains('active')) return;
+      if (typeof window.latlongPrefillRoute === 'function') window.latlongPrefillRoute(routeId);
+    }
+
+    // Status admin baru turun setelah boot (getSettingsAccessInfo). Kalau halaman
+    // route sempat digambar sebelum itu, tombolnya belum ikut ter-render.
+    window.addEventListener('occ:accessResolved', function() {
+      if (Array.isArray(window.allRoutesCache) && window.allRoutesCache.length && document.getElementById('route-manager-tbody')) {
+        window.filterRouteTable();
+      }
+    });
 
     window.initRouteManager = function() {
+      // Event delegation: route card action buttons (C1 fix — no inline handlers).
+      // Dipasang sekali di sini, bukan di dalam render: tbody tidak pernah diganti
+      // (hanya innerHTML-nya), jadi listener yang dipasang saat render menumpuk dan
+      // satu klik jadi beberapa kali aksi.
+      const tbody = document.getElementById('route-manager-tbody');
+      if (tbody && !tbody.dataset.actionsBound) {
+        tbody.dataset.actionsBound = '1';
+        tbody.addEventListener('click', function(e) {
+          const wpBtn = e.target.closest('.route-wp-btn');
+          if (wpBtn) { window.openWaypointsForRoute(wpBtn.dataset.routeId); return; }
+          const editBtn = e.target.closest('.route-edit-btn');
+          if (editBtn) { window.editRouteFromManager(editBtn.dataset.routeId); return; }
+          const deleteBtn = e.target.closest('.route-delete-btn');
+          if (deleteBtn) { window.confirmDeleteRoute(deleteBtn.dataset.routeId); return; }
+        });
+      }
+
       google.script.run
         .withSuccessHandler(routes => {
           window.allRoutesCache = routes;
@@ -6950,13 +7389,26 @@
       const tbody = document.getElementById('route-manager-tbody');
       const esc = window.escapeHtml;
       document.getElementById('route-total-count').innerText = routes.length;
+
+      // Cakupan dihitung dari registry penuh, bukan dari hasil filter, supaya
+      // angka KPI tidak berubah saat operator mengetik pencarian. KPI lain ikut
+      // registry supaya satu baris kartu tidak mencampur dua definisi; jumlah
+      // baris yang sedang tampil tetap ada di counter kanan atas.
+      const registry = (Array.isArray(window.allRoutesCache) && window.allRoutesCache.length) ? window.allRoutesCache : routes;
       const kpiTotal = document.getElementById('route-kpi-total');
-      if (kpiTotal) kpiTotal.innerText = routes.length;
+      if (kpiTotal) kpiTotal.innerText = registry.length;
       const kpiPairs = document.getElementById('route-kpi-pairs');
-      if (kpiPairs) kpiPairs.innerText = new Set(routes.map(r => `${r.DEP_AIRPORT}-${r.ARR_AIRPORT}`)).size;
+      if (kpiPairs) kpiPairs.innerText = new Set(registry.map(r => `${r.DEP_AIRPORT}-${r.ARR_AIRPORT}`)).size;
+      const withWaypoints = registry.filter(r => Number(r.WAYPOINT_COUNT) > 0).length;
+      const kpiWp = document.getElementById('route-kpi-wp');
+      if (kpiWp) kpiWp.innerText = `${withWaypoints}/${registry.length}`;
+      const kpiWpCard = document.getElementById('route-kpi-wp-card');
+      if (kpiWpCard) kpiWpCard.className = 'kpi-card ' + (registry.length > 0 && withWaypoints === registry.length ? 'safe' : 'warn');
 
       if (routes.length === 0) {
-        tbody.innerHTML = '<div class="route-empty">NO ROUTES FOUND IN REGISTRY</div>';
+        tbody.innerHTML = (window.routeShowMissingWpOnly && registry.length > 0)
+          ? '<div class="route-empty">EVERY ROUTE IN THE REGISTRY HAS REGISTERED WAYPOINTS</div>'
+          : '<div class="route-empty">NO ROUTES FOUND IN REGISTRY</div>';
         return;
       }
 
@@ -6964,10 +7416,11 @@
         <div class="route-card">
           <div class="route-card-head">
             <div>
-              <div class="route-id-cell">${esc(r.ID)}</div>
+              <div class="route-id-line"><span class="route-id-cell">${esc(r.ID)}</span>${window.routeWpBadgeMarkup(r)}</div>
               <div class="route-pair-cell">${esc(r.DEP_AIRPORT)} <svg class="ic ic-sm" style="opacity:0.6;"><use href="#i-arrow-r"/></svg> ${esc(r.ARR_AIRPORT)}</div>
             </div>
             <div class="route-card-actions">
+              ${window.routeWpActionMarkup(r)}
               <button class="action-btn route-edit-btn" data-route-id="${esc(r.ID)}" title="Edit Profile" aria-label="Edit route profile"><svg class="ic"><use href="#i-pen"/></svg></button>
               <button class="action-btn btn-delete route-delete-btn" data-route-id="${esc(r.ID)}" title="Delete Profile" aria-label="Delete route profile"><svg class="ic"><use href="#i-trash"/></svg></button>
             </div>
@@ -6987,35 +7440,46 @@
           </div>
         </div>
       `).join('');
-
-      // Event delegation: route card action buttons (C1 fix — no inline handlers)
-      tbody.addEventListener('click', function(e) {
-        const editBtn = e.target.closest('.route-edit-btn');
-        if (editBtn) { window.editRouteFromManager(editBtn.dataset.routeId); return; }
-        const deleteBtn = e.target.closest('.route-delete-btn');
-        if (deleteBtn) { window.confirmDeleteRoute(deleteBtn.dataset.routeId); return; }
-      });
     }
 
     window.setRouteFilter = function(chipEl, val) {
+      // Chip bandara dan chip gap waypoint saling eksklusif — operator memilih
+      // satu sudut pandang, bukan menumpuk filter diam-diam.
+      window.routeShowMissingWpOnly = false;
       const input = document.getElementById('route-search-input');
-      if (input) {
-        input.value = val;
-        window.filterRouteTable();
-      }
-      
-      // Update UI active state
-      const chips = document.querySelectorAll('.filter-chip');
+      if (input) input.value = val;
+      const chips = document.querySelectorAll('#route-filter-chips .filter-chip');
       chips.forEach(c => c.classList.remove('active'));
       if (chipEl) chipEl.classList.add('active');
+      window.filterRouteTable();
+    }
+
+    window.toggleRouteWpFilter = function(chipEl) {
+      window.routeShowMissingWpOnly = !window.routeShowMissingWpOnly;
+      const input = document.getElementById('route-search-input');
+      if (input) input.value = '';
+      const chips = document.querySelectorAll('#route-filter-chips .filter-chip');
+      chips.forEach(c => c.classList.remove('active'));
+      if (window.routeShowMissingWpOnly && chipEl) {
+        chipEl.classList.add('active');
+      } else {
+        const allChip = document.querySelector('#route-filter-chips .filter-chip');
+        if (allChip) allChip.classList.add('active');
+      }
+      window.filterRouteTable();
     }
 
     window.filterRouteTable = function() {
-      const query = document.getElementById('route-search-input').value.toUpperCase();
-      const filtered = window.allRoutesCache.filter(r => 
-        r.ID.toUpperCase().includes(query) || 
-        r.DEP_AIRPORT.toUpperCase().includes(query) || 
-        r.ARR_AIRPORT.toUpperCase().includes(query)
+      const input = document.getElementById('route-search-input');
+      const query = (input ? input.value : '').toUpperCase().trim();
+      const missingOnly = window.routeShowMissingWpOnly === true;
+      const filtered = window.allRoutesCache.filter(r =>
+        (!missingOnly || !(Number(r.WAYPOINT_COUNT) > 0)) && (
+          !query ||
+          String(r.ID || '').toUpperCase().includes(query) ||
+          String(r.DEP_AIRPORT || '').toUpperCase().includes(query) ||
+          String(r.ARR_AIRPORT || '').toUpperCase().includes(query)
+        )
       );
       window.renderRouteManagerTable(filtered);
     }
@@ -7308,6 +7772,40 @@
 
   <script>
     let localTafData = [];
+
+    // Gate B handoff: narrow read-only view over localTafData for the report payload.
+    // Precedence: a full registry TAF is authoritative; TIMESTAMP resolves staleness
+    // between two full values; unavailable is returned EXPLICITLY so Web 1 never
+    // silently substitutes a different forecast.
+    window.getReportTafContext = function(stations) {
+      var wanted = [];
+      var seen = {};
+      (stations || []).forEach(function(s) {
+        if (!s) return;
+        var u = String(s).trim().toUpperCase();
+        if (!u || seen[u]) return;
+        seen[u] = true;
+        wanted.push(u);
+      });
+      var best = {};
+      localTafData.forEach(function(d) {
+        if (!d) return;
+        var key = String(d.STATION || '').trim().toUpperCase();
+        if (!key) return;
+        var text = String(d.RAW_TAF || '').trim();
+        if (!text || d.IS_UNAVAILABLE) return;
+        var prev = best[key];
+        if (!prev || String(prev.issueTime || '') < String(d.TIMESTAMP || '')) {
+          best[key] = { station: key, text: text, issueTime: d.TIMESTAMP || null };
+        }
+      });
+      return wanted.map(function(key) {
+        var hit = best[key];
+        return hit
+          ? { station: key, text: hit.text, issueTime: hit.issueTime, available: true }
+          : { station: key, text: '', issueTime: null, available: false };
+      });
+    };
 
     window.tafToast = function(msg, kind) {
       const box = document.getElementById('taf-toastbox');
@@ -8259,11 +8757,108 @@
 
   <script>
   (function() {
-  // Normalisasi waktu HHMM polos (DB legacy) maupun HH:MM → jam 2 digit + label HH:MM.
-  // ponytail: split(':')[0] lama PECAH di '1230' → staH='1230' → parseInt%24=6, alt window ngaco.
+  // ── Time normalisation ────────────────────────────────────────────────────
+  // flights.etd/eta di D1 menyimpan ISO UTC ("2026-09-08T04:00:00.000Z"), "HH:MM",
+  // atau legacy HHMM/DDHHMM. Aturan parsing di sini identik dengan compactTime()
+  // di functions/briefing-form.js + functions/api/briefing-xlsx.js dan dengan
+  // shared/wxtime.mjs di server — satu aturan waktu untuk seluruh aplikasi.
+  function wxPad2(n) { return String(n).length < 2 ? '0' + n : String(n); }
+
+  // → { hh:'04', mm:'00', label:'04:00', utcMs:Number|null } | null
+  // Nilai ber-colon menang: itu jam literal, jadi tidak boleh dikonversi timezone.
+  function wxParseTime(v) {
+    const s = String(v === null || v === undefined ? '' : v).trim();
+    if (!s) return null;
+    let hh, mm, day = null, month = null, year = null;
+    const withColon = s.match(/(\d{1,2}):(\d{2})/);
+    if (withColon) {
+      hh = parseInt(withColon[1], 10); mm = parseInt(withColon[2], 10);
+      const date = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (date) { year = parseInt(date[1], 10); month = parseInt(date[2], 10); day = parseInt(date[3], 10); }
+    } else {
+      const d = s.replace(/[^0-9]/g, '');
+      if (d.length === 4) { hh = +d.slice(0, 2); mm = +d.slice(2, 4); }                          // HHMM
+      else if (d.length === 6) { day = +d.slice(0, 2); hh = +d.slice(2, 4); mm = +d.slice(4, 6); } // DDHHMM
+      else if (d.length >= 12) {                                                                 // YYYYMMDDHHMM[SS]
+        year = +d.slice(0, 4); month = +d.slice(4, 6); day = +d.slice(6, 8);
+        hh = +d.slice(8, 10); mm = +d.slice(10, 12);
+      } else return null;
+    }
+    if (!(hh >= 0 && hh <= 23) || !(mm >= 0 && mm <= 59)) return null;
+    if (day !== null && !(day >= 1 && day <= 31)) return null;
+    if (month !== null && !(month >= 1 && month <= 12)) return null;
+    const hasDate = day !== null && month !== null && year !== null;
+    return {
+      hh: wxPad2(hh), mm: wxPad2(mm), label: wxPad2(hh) + ':' + wxPad2(mm),
+      utcMs: hasDate ? Date.UTC(year, month - 1, day, hh, mm) : null
+    };
+  }
+
+  // Bentuk lama (dipakai label kartu): { hh, label }.
+  // Sebelumnya fungsi ini menghapus semua non-digit lalu mengambil 4 digit pertama,
+  // sehingga ISO "2026-09-08T04:00:00.000Z" menghasilkan tahun "20:26" — dan itu
+  // yang membuat STD/STA semua flight tampak sama.
   function wxHourParts(v) {
-    const d = String(v || '').replace(/[^0-9]/g, '').padStart(4, '0');
-    return { hh: d.slice(0, 2), label: d.slice(0, 2) + ':' + d.slice(2, 4) };
+    const t = wxParseTime(v);
+    return t ? { hh: t.hh, label: t.label } : { hh: '', label: '' };
+  }
+
+  // Instant UTC absolut satu titik flight. ISO sudah membawa tanggal; nilai legacy
+  // HH:MM mengambil tanggalnya dari flights.dof (YYYYMMDD) supaya window tetap
+  // punya tanggal, bukan hanya jam.
+  function wxFlightInstant(raw, dof) {
+    const t = wxParseTime(raw);
+    if (!t) return null;
+    if (t.utcMs !== null) return t.utcMs;
+    const d = String(dof === null || dof === undefined ? '' : dof).replace(/[^0-9]/g, '');
+    if (d.length < 8) return null;
+    const y = +d.slice(0, 4), m = +d.slice(4, 6), day = +d.slice(6, 8);
+    if (!(m >= 1 && m <= 12) || !(day >= 1 && day <= 31)) return null;
+    return Date.UTC(y, m - 1, day, +t.hh, +t.mm);
+  }
+
+  // TAF menulis hari+jam tanpa bulan ("1218/1400"). Anchor ke bulan terdekat
+  // dengan referensi — pola sama dengan tafDate() di shared/taf.mjs.
+  function wxDayHourNear(day, hour, minute, referenceMs) {
+    const ref = new Date(referenceMs);
+    let best = null;
+    for (const offset of [-1, 0, 1]) {
+      const candidate = Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + offset, day, hour, minute || 0);
+      if (best === null || Math.abs(candidate - referenceMs) < Math.abs(best - referenceMs)) best = candidate;
+    }
+    return best;
+  }
+
+  // Window satu leg: jam-of-day + instant absolut (null bila tanggal tak diketahui).
+  // shiftHours dipakai untuk window ALT (STA+1h).
+  function wxLegWindow(raw, dof, shiftHours) {
+    const t = wxParseTime(raw);
+    if (!t) return { hour: null, instant: null };
+    const shift = shiftHours || 0;
+    const hour = (parseInt(t.hh, 10) + shift) % 24;
+    const base = wxFlightInstant(raw, dof);
+    return { hour: hour, instant: base === null ? null : base + shift * 3600000 };
+  }
+
+  // Label window UTC untuk prompt AI: "08SEP 04:00Z → 07:50Z · ALT 08:00–11:00Z".
+  function wxWindowLabel(f) {
+    const dep = wxLegWindow(f.std, f.dof, 0);
+    const arr = wxLegWindow(f.sta, f.dof, 0);
+    const alt = wxLegWindow(f.sta, f.dof, 1);
+    const clock = (inst) => {
+      if (inst === null) return '--:--';
+      const d = new Date(inst);
+      return wxPad2(d.getUTCHours()) + ':' + wxPad2(d.getUTCMinutes()) + 'Z';
+    };
+    const dayTag = (inst) => {
+      if (inst === null) return '--';
+      const d = new Date(inst);
+      const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      return wxPad2(d.getUTCDate()) + months[d.getUTCMonth()];
+    };
+    return dayTag(dep.instant) + ' DEP ' + clock(dep.instant)
+      + ' · ARR ' + clock(arr.instant)
+      + ' · ALT ' + clock(alt.instant) + '–' + clock(alt.instant === null ? null : alt.instant + 2 * 3600000);
   }
   // TAF timestamp mentah → label pendek yang bisa dibaca: ISO penuh "2026-09-11T17:00:00.000Z"
   // menjadi "17:00" bila hari ini (UTC), atau "11 17:00" bila beda tanggal.
@@ -8284,10 +8879,15 @@
       window.wxAiResults = {}; // rowIdx → AI payload (survives tab switches + re-renders)
       window.wxAiPending = {}; // rowIdx → true while a request is in flight
 
-      function evaluateWeather(icao, startHour, rawTaf) {
+      // `win` = { hour, instant } dari wxLegWindow(): jam-of-day + instant absolut.
+      // Angka mentah masih diterima supaya pemanggil lama tidak pecah (hour-only).
+      function evaluateWeather(icao, win, rawTaf) {
         window.wxTriggerBlock = '';
         // Never fabricate a verdict when TAF is unavailable — report NO DATA.
-        if (!rawTaf || String(rawTaf).includes("No TAF data")) {
+        // NIL/CNL mean "no forecast published / cancelled" in TAF syntax, not clear
+        // weather; shared/taf.mjs and the server rule engine already read them that way.
+        if (!rawTaf || String(rawTaf).includes("No TAF data")
+          || /\b(?:NIL|CNL)\b/.test(String(rawTaf).toUpperCase())) {
           return 'NO_DATA';
         }
 
@@ -8369,34 +8969,58 @@
         mergeRefs(window.wxRefs, baseM.refs);
         if (baseM.status === 'DANGER' || baseM.status === 'WARNING') window.wxTriggerBlock = parts[0];
 
-        const flightHour = parseInt(startHour);
+        const wxWin = (win && typeof win === 'object') ? win : { hour: win, instant: null };
+        const flightHour = parseInt(wxWin.hour, 10);
+        const flightMs = (typeof wxWin.instant === 'number' && isFinite(wxWin.instant)) ? wxWin.instant : null;
         let worstStatus = baseStatus;
 
         // 3. Analyze change blocks
         for (let i = 1; i < parts.length; i++) {
           const block = parts[i];
+          // Grup perubahan TAF: DDHH/DDHH (TEMPO/PECMG/BECMG/PROB/INTER) atau FM DDHHMM.
           const timeMatch = block.match(/(\d{2})(\d{2})\/(\d{2})(\d{2})/);
-          
+          const fmMatch = block.match(/FM(\d{2})(\d{2})(\d{2})/);
+
           let isActive = false;
           let isPermanent = block.includes('BECMG') || block.includes('FM');
 
           if (timeMatch) {
-            const startH = parseInt(timeMatch[2]);
-            const endH = parseInt(timeMatch[4]);
-            
-            if (startH <= endH) {
-              // Inclusive window for safety (e.g. 08/12 covers hour 12)
-              if (flightHour >= startH && flightHour <= endH) isActive = true;
-              // Persistence for BECMG/FM
-              if (isPermanent && flightHour > endH) isActive = true;
-            } else {
-              // Over midnight
-              if (flightHour >= startH || flightHour <= endH) isActive = true;
-              if (isPermanent && flightHour > endH && flightHour < startH) isActive = true;
+            const startDay = parseInt(timeMatch[1], 10);
+            const startH = parseInt(timeMatch[2], 10);
+            const endDay = parseInt(timeMatch[3], 10);
+            const endH = parseInt(timeMatch[4], 10);
+
+            if (flightMs !== null) {
+              // Date-aware: bandingkan instant absolut, bukan jam-of-day saja.
+              // Tanpa ini blok TAF hari lain ikut aktif hanya karena jamnya sama.
+              const startMs = wxDayHourNear(startDay, startH, 0, flightMs);
+              let endMs = wxDayHourNear(endDay, endH, 0, flightMs);
+              if (endMs <= startMs) endMs += 86400000;   // grup melewati tengah malam
+              isActive = flightMs >= startMs && flightMs <= endMs;
+              // Persistence for BECMG/FM: kondisi permanen bertahan setelah grupnya.
+              if (!isActive && isPermanent && flightMs > endMs) isActive = true;
+            } else if (!isNaN(flightHour)) {
+              // Fallback hour-of-day bila tanggal flight tidak bisa ditentukan.
+              if (startH <= endH) {
+                // Inclusive window for safety (e.g. 08/12 covers hour 12)
+                if (flightHour >= startH && flightHour <= endH) isActive = true;
+                // Persistence for BECMG/FM
+                if (isPermanent && flightHour > endH) isActive = true;
+              } else {
+                // Over midnight
+                if (flightHour >= startH || flightHour <= endH) isActive = true;
+                if (isPermanent && flightHour > endH && flightHour < startH) isActive = true;
+              }
             }
-          } else if (block.includes('FM')) {
-            const fmMatch = block.match(/FM(\d{2})(\d{2})(\d{2})/);
-            if (fmMatch && flightHour >= parseInt(fmMatch[2])) isActive = true;
+          } else if (fmMatch) {
+            const fmDay = parseInt(fmMatch[1], 10);
+            const fmH = parseInt(fmMatch[2], 10);
+            const fmM = parseInt(fmMatch[3], 10);
+            if (flightMs !== null) {
+              isActive = flightMs >= wxDayHourNear(fmDay, fmH, fmM, flightMs);
+            } else if (!isNaN(flightHour)) {
+              isActive = flightHour >= fmH;
+            }
           }
 
           if (isActive) {
@@ -8580,9 +9204,13 @@
         const orig = btn ? btn.innerText : '';
         if (btn) { btn.disabled = true; btn.innerText = 'ANALYZING...'; }
         if (box) { box.style.display = 'grid'; box.innerHTML = '<div style="font-size:12px;opacity:.65;">ANALYZING... (you may switch tabs, result will be saved)</div>'; }
-        const stdH = wxHourParts(f.std).hh;
-        const staH = wxHourParts(f.sta).hh;
-        const altH = String((parseInt(staH, 10) + 1) % 24);
+        // Window per leg dari DB (jam + instant absolut hasil wxLegWindow).
+        const stdWindow = wxLegWindow(f.std, f.dof, 0);
+        const staWindow = wxLegWindow(f.sta, f.dof, 0);
+        const altWindow = wxLegWindow(f.sta, f.dof, 1);
+        const stdH = stdWindow.hour === null ? '' : wxPad2(stdWindow.hour);
+        const staH = staWindow.hour === null ? '' : wxPad2(staWindow.hour);
+        const altH = altWindow.hour === null ? '' : wxPad2(altWindow.hour);
         const clearWxTimer = () => {
           try { if (window.wxAiTimers && window.wxAiTimers[rowIdx]) { clearTimeout(window.wxAiTimers[rowIdx]); delete window.wxAiTimers[rowIdx]; } } catch (e) {}
         };
@@ -8649,7 +9277,9 @@
            })
           .analyzeWxWithManual(Object.assign({
             tafDep: f.tafDep, tafArr: f.tafArr, tafAlt: f.tafAlt,
-            stdH: stdH, staH: staH, altH: altH
+            stdH: stdH, staH: staH, altH: altH,
+            // Window UTC lengkap dengan tanggal: AI tidak boleh menilai blok TAF hari lain.
+            windowLabel: wxWindowLabel(f)
           }, window.wxAiChoice()));
       };
 
@@ -8821,14 +9451,16 @@
         let kpiDanger = 0, kpiWarn = 0, kpiClear = 0, kpiNoData = 0;
 
         container.innerHTML = activeFlights.map((f, idx) => {
-          const stdH = wxHourParts(f.std).hh;
-          const staH = wxHourParts(f.sta).hh;
-          const altWindowStart = (parseInt(staH) + 1) % 24;
-          const altWindowEnd = (parseInt(staH) + 3) % 24;
+          // Window per leg: jam-of-day + instant absolut (date-aware).
+          const stdWindow = wxLegWindow(f.std, f.dof, 0);
+          const staWindow = wxLegWindow(f.sta, f.dof, 0);
+          const altWindow = wxLegWindow(f.sta, f.dof, 1);
+          const altWindowStart = altWindow.hour;
+          const altWindowEnd = altWindowStart === null ? null : (altWindowStart + 2) % 24;
 
-          const depStatus = evaluateWeather(f.depApt, stdH, f.tafDep); const depRefs = window.wxRefs.slice(); const depTrig = wxShortTrigger(window.wxTriggerBlock);
-          const arrStatus = evaluateWeather(f.arrApt, staH, f.tafArr); const arrRefs = window.wxRefs.slice(); const arrTrig = wxShortTrigger(window.wxTriggerBlock);
-          const altStatus = evaluateWeather(f.altApt, altWindowStart, f.tafAlt); const altRefs = window.wxRefs.slice(); const altTrig = wxShortTrigger(window.wxTriggerBlock);
+          const depStatus = evaluateWeather(f.depApt, stdWindow, f.tafDep); const depRefs = window.wxRefs.slice(); const depTrig = wxShortTrigger(window.wxTriggerBlock);
+          const arrStatus = evaluateWeather(f.arrApt, staWindow, f.tafArr); const arrRefs = window.wxRefs.slice(); const arrTrig = wxShortTrigger(window.wxTriggerBlock);
+          const altStatus = evaluateWeather(f.altApt, altWindow, f.tafAlt); const altRefs = window.wxRefs.slice(); const altTrig = wxShortTrigger(window.wxTriggerBlock);
 
           // Flight-level worst status: DANGER > WARNING > NO DATA > CLEAR.
           const statuses = [depStatus, arrStatus, altStatus];
@@ -8844,7 +9476,9 @@
               : flightWorst === 'NO_DATA'
                 ? '<span class="wx-pill wx-pill-nodata">NO TAF — CHECK SOURCE</span>'
                 : '<span class="wx-pill wx-pill-clear">OPERATIONAL</span>';
-           const altWindowLabel = String(altWindowStart).padStart(2,'0') + ':00–' + String(altWindowEnd).padStart(2,'0') + ':00';
+           const altWindowLabel = altWindowStart === null
+             ? '--:--'
+             : wxPad2(altWindowStart) + ':00–' + wxPad2(altWindowEnd) + ':00';
            const aiPending = !!((window.wxAiPending || {})[f.rowIdx]);
            const aiOff = window.wxAiEnabled === false;
            const aiBtnHtml = aiOff ? ''
@@ -12775,6 +13409,9 @@
   .latlong-ui .ll-wpt{ font-family:var(--font-mono); font-weight:800; color:var(--text-primary); font-size:12px; }
   .latlong-ui .ll-coord{ font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); }
   .latlong-ui .ll-empty{ padding:20px; text-align:center; color:var(--text-muted); font-size:12px; font-family:var(--font-mono); }
+  /* Baris yatim: Route ID-nya tidak ada di registry, jadi koordinatnya tidak
+     pernah terbaca peta FIR. Teks + warna, bukan warna saja. */
+  .latlong-ui .ll-orphan{ display:inline-block; margin-left:4px; padding:0 6px; border-radius:var(--radius-pill); border:1px solid var(--status-warning); background:var(--status-warning-bg); color:var(--status-warning); font-size:9px; font-weight:800; letter-spacing:.05em; }
   .latlong-ui .ll-toast{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); box-shadow:0 8px 24px rgba(0,0,0,.18); }
 </style>
 
@@ -12857,6 +13494,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       <div class="ll-toolbar">
         <input class="ll-search" id="ll-search" type="text" aria-label="Search waypoints by fix, coordinates or route ID" placeholder="Search FIX / latitude / longitude / route ID...">
         <span class="ll-count" id="ll-total-count">0 FIXes</span>
+        <button type="button" class="ll-btn" id="ll-orphan-btn" aria-pressed="false" title="Show only rows whose Route ID has no profile in the ROUTE registry (they never reach the FIR map)" style="display:none;">UNTRACKED</button>
         <button type="button" class="ll-btn" id="ll-clear-btn" title="Clear all FIX data (retain header)" style="color:var(--status-critical); border-color:var(--status-critical);"><svg class="ic ic-sm"><use href="#i-trash"/></svg> CLEAR</button>
       </div>
       <div id="ll-list-status" class="ll-hint" style="padding:8px 14px; border-bottom:1px solid var(--border-subtle);"></div>
@@ -12869,7 +13507,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 (function(){
   if (window.latlongUiInited) return;
   window.latlongUiInited = true;
-  var state = { rows: [], header: [], colMap: null, preview: [], filter: '' };
+  var state = { rows: [], header: [], colMap: null, preview: [], filter: '', orphanOnly: false };
 
   function $(id){ return document.getElementById(id); }
   function esc(v){ return String(v==null?'':v).replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -12888,6 +13526,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     });
   }
 
+  function orphanCount(){
+    return state.rows.filter(function(r){ return r.orphan; }).length;
+  }
+
   function renderKpi(){
     $('ll-kpi-total').textContent = state.rows.length;
     $('ll-kpi-header').textContent = (state.header||[]).join(' | ') || '—';
@@ -12896,24 +13538,37 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     $('ll-order-badge').textContent = om + ' order';
     $('ll-kpi-parsed').textContent = state.preview.length || 0;
     $('ll-total-count').textContent = state.rows.length + ' waypoints';
+    var n = orphanCount();
+    var btn = $('ll-orphan-btn');
+    if(btn){
+      btn.style.display = n ? '' : 'none';
+      btn.textContent = 'UNTRACKED (' + n + ')';
+      btn.setAttribute('aria-pressed', state.orphanOnly ? 'true' : 'false');
+      btn.style.borderColor = state.orphanOnly ? 'var(--status-warning)' : '';
+      btn.style.color = state.orphanOnly ? 'var(--status-warning)' : '';
+      btn.style.background = state.orphanOnly ? 'var(--status-warning-bg)' : '';
+    }
   }
 
   function renderList(){
     var box=$('ll-list');
     var q=state.filter.trim().toUpperCase();
     var list = state.rows.filter(function(r){
+      if(state.orphanOnly && !r.orphan) return false;
       if(!q) return true;
       return (String(r.Waypoint).toUpperCase().indexOf(q)>-1) || (String(r.Latitude).toUpperCase().indexOf(q)>-1) || (String(r.Longitude).toUpperCase().indexOf(q)>-1) || (String(r.ID||'').toUpperCase().indexOf(q)>-1);
     });
     if(!list.length){
-      box.innerHTML='<div class="ll-empty">'+(state.rows.length?'No match.':'No waypoints found.')+'</div>';
+      var empty = state.rows.length ? (state.orphanOnly ? 'No untracked rows — every Route ID has a profile.' : 'No match.') : 'No waypoints found.';
+      box.innerHTML='<div class="ll-empty">'+empty+'</div>';
       return;
     }
     var hasId = state.header && state.header.map(function(h){return String(h).toUpperCase();}).indexOf('ID')>-1;
     var h='';
     list.slice(0,500).forEach(function(r){
       h+='<div class="ll-item">'
-        +'<div><div class="ll-wpt">'+esc(r.Waypoint)+(hasId && r.ID? ' <span style="color:var(--text-muted); font-weight:600; font-size:10px;">('+esc(r.ID)+')</span>':'')+'</div>'
+        +'<div><div class="ll-wpt">'+esc(r.Waypoint)+(hasId && r.ID? ' <span style="color:var(--text-muted); font-weight:600; font-size:10px;">('+esc(r.ID)+')</span>':'')
+        +(r.orphan? ' <span class="ll-orphan" title="Route ID ini tidak punya profil di ROUTE registry — koordinatnya tidak akan muncul di peta FIR">UNTRACKED</span>':'')+'</div>'
         +'<div class="ll-coord">'+esc(r.Latitude)+' &nbsp; '+esc(r.Longitude)+'</div></div>'
         +'<button class="ll-btn ll-delete-btn" style="padding:4px 8px; font-size:9px;" data-row-id="'+esc(r.rowId)+'" data-waypoint="'+esc(r.Waypoint)+'" title="Delete '+esc(r.Waypoint)+'" aria-label="Delete waypoint '+esc(r.Waypoint)+'"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>'
         +'</div>';
@@ -12958,12 +13613,34 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       state.rows = data.rows||[];
       state.header = data.header||[];
       state.colMap = data.colMap||null;
-      status.textContent = 'Sheet "'+esc(data.sheetName||'LATLONG')+'" — Variant B header: '+esc((data.header||[]).join(' | '))+' — '+data.count+' FIXes';
+      // Kalau baris yatim habis, filter "UNTRACKED" tidak boleh tertinggal aktif
+      // tanpa tombol yang bisa mematikannya.
+      if(!data.orphanCount) state.orphanOnly = false;
+      status.textContent = 'Sheet "'+esc(data.sheetName||'LATLONG')+'" — Variant B header: '+esc((data.header||[]).join(' | '))+' — '+data.count+' FIXes'
+        + (data.orphanCount ? ' — '+data.orphanCount+' UNTRACKED (Route ID tanpa profil di ROUTE registry)' : '');
       renderKpi(); renderList();
     } else {
       status.textContent='Error: '+esc((data&&data.error)||'unknown');
       box.innerHTML='<div class="ll-empty" style="color:var(--status-critical);">'+esc((data&&data.error)||'unknown')+'</div>';
     }
+  };
+
+  // Dipanggil dari halaman ROUTE (tombol "belum ada koordinat"). Pemilik field
+  // tetap di sini supaya route page tidak menulis langsung ke DOM waypoint.
+  // Daftar di kanan ikut difilter ke route ini: operator langsung melihat apakah
+  // route-nya memang kosong atau sudah punya baris yang akan ditimpa.
+  window.latlongPrefillRoute = function(routeId){
+    var id = String(routeId==null?'':routeId).trim().toUpperCase();
+    if(!id) return false;
+    var input = $('ll-routeId');
+    if(!input) return false;
+    input.value = id;
+    state.filter = id;
+    var search = $('ll-search'); if(search) search.value = id;
+    renderList();
+    var paste = $('ll-paste'); if(paste) paste.focus();
+    toast('Route '+id+' prefilled — list filtered to this route. Paste coordinates, then SAVE.');
+    return true;
   };
 
   window.latlongDelete = async function(wpt, rowId){
@@ -13012,7 +13689,13 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       if(!confirm(msg)) return;
       var res = await run('latlongSaveBulk', { rawText: raw, mode: mode, routeId: routeId, orderMode: order });
       if(res && res.ok){
-        toast('Saved '+res.count+' ('+res.inserted+' inserted, '+res.updated+' updated) — '+res.mode);
+        // Route ID yang tidak ada di registry tetap tersimpan, tapi koordinatnya
+        // tidak akan terbaca peta FIR — peringatkan sekarang, di titik salah
+        // ketiknya, bukan menunggu ketahuan di peta.
+        var warn = res.routeKnown === false
+          ? ' — WARNING: route "'+routeId+'" is not in the ROUTE registry; these coordinates will not show on the FIR map.'
+          : '';
+        toast('Saved '+res.count+' ('+res.inserted+' inserted, '+res.updated+' updated) — '+res.mode+warn);
         renderPreview([], null);
         await window.latlongRefresh();
       } else {
@@ -13036,6 +13719,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     $('ll-preview-btn').addEventListener('click', doPreview);
     $('ll-save-btn').addEventListener('click', doSave);
     $('ll-search').addEventListener('input', function(){ state.filter=$('ll-search').value; renderList(); });
+    $('ll-orphan-btn').addEventListener('click', function(){
+      state.orphanOnly = !state.orphanOnly;
+      renderKpi(); renderList();
+    });
     $('ll-order').addEventListener('change', function(){ renderPreview([], null); });
     $('ll-paste').addEventListener('input', function(){ renderPreview([], null); });
     $('ll-clear-btn').addEventListener('click', async function(){
@@ -14558,6 +15245,22 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       </section>
     </div>
 
+  <!-- Public legal footer. Required by the Google OAuth consent screen: the app
+       homepage must identify the app and link its privacy policy. Both links are
+       public (no login) and must keep matching the consent screen URLs. -->
+  <footer class="occ-site-footer">
+    <div class="occ-site-footer-inner">
+      <div class="occ-site-footer-brand">
+        <span class="occ-site-footer-name">AWQ Cloud Briefing</span>
+        <span class="occ-site-footer-desc">Flight dispatch briefing workspace — flight watch, NOTAM, TAF, weather, FIR and crew briefing reports.</span>
+      </div>
+      <nav class="occ-site-footer-links" aria-label="Legal">
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/terms">Terms of Service</a>
+      </nav>
+    </div>
+  </footer>
+
   <script>
     // Initialize Theme
     (function() {
@@ -14761,6 +15464,9 @@ VTK N 01 24.9 E 104 01.3"></textarea>
               window.isAdmin = isAdmin;
               var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
               if (wpItem) wpItem.style.display = isAdmin ? '' : 'none';
+              // Modul yang punya aksi admin-only (mis. pintasan waypoint di halaman
+              // ROUTE) menggambar ulang dari cache saat status aksesnya turun.
+              window.dispatchEvent(new CustomEvent('occ:accessResolved', { detail: { isAdmin: isAdmin, canViewSettings: canView } }));
             }).withFailureHandler(function() {
               window.isSettingsAdmin = false;
               var nav2 = document.getElementById('nav-settings');
@@ -14768,6 +15474,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
               window.isAdmin = false;
               var wpItem2 = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
               if (wpItem2) wpItem2.style.display = 'none';
+              window.dispatchEvent(new CustomEvent('occ:accessResolved', { detail: { isAdmin: false, canViewSettings: false } }));
             }).getSettingsAccessInfo();
           }
         } catch (e) { console.warn('[SECURITY] settings gate failed', e); }

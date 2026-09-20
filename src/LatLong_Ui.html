@@ -46,6 +46,9 @@
   .latlong-ui .ll-wpt{ font-family:var(--font-mono); font-weight:800; color:var(--text-primary); font-size:12px; }
   .latlong-ui .ll-coord{ font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); }
   .latlong-ui .ll-empty{ padding:20px; text-align:center; color:var(--text-muted); font-size:12px; font-family:var(--font-mono); }
+  /* Baris yatim: Route ID-nya tidak ada di registry, jadi koordinatnya tidak
+     pernah terbaca peta FIR. Teks + warna, bukan warna saja. */
+  .latlong-ui .ll-orphan{ display:inline-block; margin-left:4px; padding:0 6px; border-radius:var(--radius-pill); border:1px solid var(--status-warning); background:var(--status-warning-bg); color:var(--status-warning); font-size:9px; font-weight:800; letter-spacing:.05em; }
   .latlong-ui .ll-toast{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); box-shadow:0 8px 24px rgba(0,0,0,.18); }
 </style>
 
@@ -128,6 +131,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       <div class="ll-toolbar">
         <input class="ll-search" id="ll-search" type="text" aria-label="Search waypoints by fix, coordinates or route ID" placeholder="Search FIX / latitude / longitude / route ID...">
         <span class="ll-count" id="ll-total-count">0 FIXes</span>
+        <button type="button" class="ll-btn" id="ll-orphan-btn" aria-pressed="false" title="Show only rows whose Route ID has no profile in the ROUTE registry (they never reach the FIR map)" style="display:none;">UNTRACKED</button>
         <button type="button" class="ll-btn" id="ll-clear-btn" title="Clear all FIX data (retain header)" style="color:var(--status-critical); border-color:var(--status-critical);"><svg class="ic ic-sm"><use href="#i-trash"/></svg> CLEAR</button>
       </div>
       <div id="ll-list-status" class="ll-hint" style="padding:8px 14px; border-bottom:1px solid var(--border-subtle);"></div>
@@ -140,7 +144,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 (function(){
   if (window.latlongUiInited) return;
   window.latlongUiInited = true;
-  var state = { rows: [], header: [], colMap: null, preview: [], filter: '' };
+  var state = { rows: [], header: [], colMap: null, preview: [], filter: '', orphanOnly: false };
 
   function $(id){ return document.getElementById(id); }
   function esc(v){ return String(v==null?'':v).replace(/&apos;/g, "'").replace(/&#39;/g, "'").replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -159,6 +163,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     });
   }
 
+  function orphanCount(){
+    return state.rows.filter(function(r){ return r.orphan; }).length;
+  }
+
   function renderKpi(){
     $('ll-kpi-total').textContent = state.rows.length;
     $('ll-kpi-header').textContent = (state.header||[]).join(' | ') || '—';
@@ -167,24 +175,37 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     $('ll-order-badge').textContent = om + ' order';
     $('ll-kpi-parsed').textContent = state.preview.length || 0;
     $('ll-total-count').textContent = state.rows.length + ' waypoints';
+    var n = orphanCount();
+    var btn = $('ll-orphan-btn');
+    if(btn){
+      btn.style.display = n ? '' : 'none';
+      btn.textContent = 'UNTRACKED (' + n + ')';
+      btn.setAttribute('aria-pressed', state.orphanOnly ? 'true' : 'false');
+      btn.style.borderColor = state.orphanOnly ? 'var(--status-warning)' : '';
+      btn.style.color = state.orphanOnly ? 'var(--status-warning)' : '';
+      btn.style.background = state.orphanOnly ? 'var(--status-warning-bg)' : '';
+    }
   }
 
   function renderList(){
     var box=$('ll-list');
     var q=state.filter.trim().toUpperCase();
     var list = state.rows.filter(function(r){
+      if(state.orphanOnly && !r.orphan) return false;
       if(!q) return true;
       return (String(r.Waypoint).toUpperCase().indexOf(q)>-1) || (String(r.Latitude).toUpperCase().indexOf(q)>-1) || (String(r.Longitude).toUpperCase().indexOf(q)>-1) || (String(r.ID||'').toUpperCase().indexOf(q)>-1);
     });
     if(!list.length){
-      box.innerHTML='<div class="ll-empty">'+(state.rows.length?'No match.':'No waypoints found.')+'</div>';
+      var empty = state.rows.length ? (state.orphanOnly ? 'No untracked rows — every Route ID has a profile.' : 'No match.') : 'No waypoints found.';
+      box.innerHTML='<div class="ll-empty">'+empty+'</div>';
       return;
     }
     var hasId = state.header && state.header.map(function(h){return String(h).toUpperCase();}).indexOf('ID')>-1;
     var h='';
     list.slice(0,500).forEach(function(r){
       h+='<div class="ll-item">'
-        +'<div><div class="ll-wpt">'+esc(r.Waypoint)+(hasId && r.ID? ' <span style="color:var(--text-muted); font-weight:600; font-size:10px;">('+esc(r.ID)+')</span>':'')+'</div>'
+        +'<div><div class="ll-wpt">'+esc(r.Waypoint)+(hasId && r.ID? ' <span style="color:var(--text-muted); font-weight:600; font-size:10px;">('+esc(r.ID)+')</span>':'')
+        +(r.orphan? ' <span class="ll-orphan" title="Route ID ini tidak punya profil di ROUTE registry — koordinatnya tidak akan muncul di peta FIR">UNTRACKED</span>':'')+'</div>'
         +'<div class="ll-coord">'+esc(r.Latitude)+' &nbsp; '+esc(r.Longitude)+'</div></div>'
         +'<button class="ll-btn ll-delete-btn" style="padding:4px 8px; font-size:9px;" data-row-id="'+esc(r.rowId)+'" data-waypoint="'+esc(r.Waypoint)+'" title="Delete '+esc(r.Waypoint)+'" aria-label="Delete waypoint '+esc(r.Waypoint)+'"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>'
         +'</div>';
@@ -229,12 +250,34 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       state.rows = data.rows||[];
       state.header = data.header||[];
       state.colMap = data.colMap||null;
-      status.textContent = 'Sheet "'+esc(data.sheetName||'LATLONG')+'" — Variant B header: '+esc((data.header||[]).join(' | '))+' — '+data.count+' FIXes';
+      // Kalau baris yatim habis, filter "UNTRACKED" tidak boleh tertinggal aktif
+      // tanpa tombol yang bisa mematikannya.
+      if(!data.orphanCount) state.orphanOnly = false;
+      status.textContent = 'Sheet "'+esc(data.sheetName||'LATLONG')+'" — Variant B header: '+esc((data.header||[]).join(' | '))+' — '+data.count+' FIXes'
+        + (data.orphanCount ? ' — '+data.orphanCount+' UNTRACKED (Route ID tanpa profil di ROUTE registry)' : '');
       renderKpi(); renderList();
     } else {
       status.textContent='Error: '+esc((data&&data.error)||'unknown');
       box.innerHTML='<div class="ll-empty" style="color:var(--status-critical);">'+esc((data&&data.error)||'unknown')+'</div>';
     }
+  };
+
+  // Dipanggil dari halaman ROUTE (tombol "belum ada koordinat"). Pemilik field
+  // tetap di sini supaya route page tidak menulis langsung ke DOM waypoint.
+  // Daftar di kanan ikut difilter ke route ini: operator langsung melihat apakah
+  // route-nya memang kosong atau sudah punya baris yang akan ditimpa.
+  window.latlongPrefillRoute = function(routeId){
+    var id = String(routeId==null?'':routeId).trim().toUpperCase();
+    if(!id) return false;
+    var input = $('ll-routeId');
+    if(!input) return false;
+    input.value = id;
+    state.filter = id;
+    var search = $('ll-search'); if(search) search.value = id;
+    renderList();
+    var paste = $('ll-paste'); if(paste) paste.focus();
+    toast('Route '+id+' prefilled — list filtered to this route. Paste coordinates, then SAVE.');
+    return true;
   };
 
   window.latlongDelete = async function(wpt, rowId){
@@ -283,7 +326,13 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       if(!confirm(msg)) return;
       var res = await run('latlongSaveBulk', { rawText: raw, mode: mode, routeId: routeId, orderMode: order });
       if(res && res.ok){
-        toast('Saved '+res.count+' ('+res.inserted+' inserted, '+res.updated+' updated) — '+res.mode);
+        // Route ID yang tidak ada di registry tetap tersimpan, tapi koordinatnya
+        // tidak akan terbaca peta FIR — peringatkan sekarang, di titik salah
+        // ketiknya, bukan menunggu ketahuan di peta.
+        var warn = res.routeKnown === false
+          ? ' — WARNING: route "'+routeId+'" is not in the ROUTE registry; these coordinates will not show on the FIR map.'
+          : '';
+        toast('Saved '+res.count+' ('+res.inserted+' inserted, '+res.updated+' updated) — '+res.mode+warn);
         renderPreview([], null);
         await window.latlongRefresh();
       } else {
@@ -307,6 +356,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     $('ll-preview-btn').addEventListener('click', doPreview);
     $('ll-save-btn').addEventListener('click', doSave);
     $('ll-search').addEventListener('input', function(){ state.filter=$('ll-search').value; renderList(); });
+    $('ll-orphan-btn').addEventListener('click', function(){
+      state.orphanOnly = !state.orphanOnly;
+      renderKpi(); renderList();
+    });
     $('ll-order').addEventListener('change', function(){ renderPreview([], null); });
     $('ll-paste').addEventListener('input', function(){ renderPreview([], null); });
     $('ll-clear-btn').addEventListener('click', async function(){

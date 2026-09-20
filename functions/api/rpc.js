@@ -1,5 +1,6 @@
 import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
 import { fetchLatestTafs } from '../../shared/taf.mjs';
+import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, validityCoversWindow } from '../../shared/wxtime.mjs';
 import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
@@ -320,24 +321,17 @@ async function handleGetFlightDashboardData(context) {
     try {
         const { results: flights } = await context.env.DB.prepare('SELECT * FROM flights').all();
         const { results: aircraft } = await context.env.DB.prepare('SELECT registration FROM aircraft').all();
-        const { results: allRoutes } = await context.env.DB.prepare('SELECT * FROM routes').all();
-        
+        // Sumber route yang sama dengan halaman ROUTE, supaya penanda waypoint di
+        // selector route Flight tidak bisa berbeda dari badge di halaman ROUTE.
+        const allRoutes = await fetchRoutesWithWaypointCount(context.env.DB);
+
         // Group routes by DEP+ARR key, as expected by the frontend
         const routeMap = {};
         allRoutes.forEach(r => {
-            const key = r.dep_airport + r.arr_airport;
+            const route = formatRouteForUi(r);
+            const key = route.DEP_AIRPORT + route.ARR_AIRPORT;
             if (!routeMap[key]) routeMap[key] = [];
-            routeMap[key].push({
-                ID: r.id,
-                DEP_AIRPORT: r.dep_airport,
-                ARR_AIRPORT: r.arr_airport,
-                DEP_RWY: r.dep_rwy,
-                SID: r.sid,
-                WAYPOINT_SEQ: r.waypoint_seq,
-                STAR: r.star,
-                ARR_RWY: r.arr_rwy,
-                ROUTE_STRING: r.route_string
-            });
+            routeMap[key].push(route);
         });
         
         return Response.json({ 
@@ -540,24 +534,16 @@ async function handleSaveFlightRoute(context, args) {
         const dashboardDataRes = await handleGetFlightDashboardData(context);
         const dashboardDataJson = await dashboardDataRes.json();
         
-        // Also fetch all routes as UI expects
-        const { results: allRoutes } = await context.env.DB.prepare('SELECT * FROM routes').all();
-        const formattedRoutes = allRoutes.map(r => ({
-            ID: r.id,
-            DEP_AIRPORT: r.dep_airport,
-            ARR_AIRPORT: r.arr_airport,
-            DEP_RWY: r.dep_rwy,
-            SID: r.sid,
-            WAYPOINT_SEQ: r.waypoint_seq,
-            STAR: r.star,
-            ARR_RWY: r.arr_rwy,
-            ROUTE_STRING: r.route_string
-        }));
-        
+        // Also fetch all routes as UI expects. Reuse the getAllRoutes formatter so
+        // the route page keeps its WAYPOINT_COUNT marker after a save from the
+        // Flight modal — a second hand-rolled mapper is how the two drift apart.
+        const allRoutesRes = await handleGetAllRoutes(context);
+        const allRoutesJson = await allRoutesRes.json();
+
         return Response.json({ 
             data: { 
                 dashboardData: dashboardDataJson.data, 
-                allRoutes: formattedRoutes 
+                allRoutes: allRoutesJson.data 
             } 
         });
     } catch (e) {
@@ -565,21 +551,45 @@ async function handleSaveFlightRoute(context, args) {
     }
 }
 
+// WAYPOINT_COUNT = jumlah baris LATLONG yang route_id-nya cocok dengan id profil
+// ini. Kunci dinormalisasi UPPER+TRIM karena route_id di WAYPOINT MANAGER diketik
+// manual sementara routes.id datang dari profil route — tanpa normalisasi, beda
+// spasi/huruf kecil terbaca sebagai "belum ada waypoint".
+// Halaman ROUTE dan Flight Board (selector route) membaca dari sini, jadi kedua
+// penanda itu tidak mungkin berbeda.
+async function fetchRoutesWithWaypointCount(DB) {
+    const { results } = await DB.prepare(`
+        SELECT r.*, COALESCE(w.waypoint_count, 0) AS waypoint_count
+        FROM routes r
+        LEFT JOIN (
+            SELECT UPPER(TRIM(route_id)) AS route_key, COUNT(*) AS waypoint_count
+            FROM latlong
+            WHERE route_id IS NOT NULL AND TRIM(route_id) <> ''
+            GROUP BY route_key
+        ) w ON w.route_key = UPPER(TRIM(r.id))
+    `).all();
+    return results;
+}
+
+function formatRouteForUi(r) {
+    return {
+        ID: r.id,
+        DEP_AIRPORT: r.dep_airport,
+        ARR_AIRPORT: r.arr_airport,
+        DEP_RWY: r.dep_rwy,
+        SID: r.sid,
+        WAYPOINT_SEQ: r.waypoint_seq,
+        STAR: r.star,
+        ARR_RWY: r.arr_rwy,
+        ROUTE_STRING: r.route_string,
+        WAYPOINT_COUNT: Number(r.waypoint_count) || 0
+    };
+}
+
 async function handleGetAllRoutes(context) {
     try {
-        const { results } = await context.env.DB.prepare('SELECT * FROM routes').all();
-        const formattedRoutes = results.map(r => ({
-            ID: r.id,
-            DEP_AIRPORT: r.dep_airport,
-            ARR_AIRPORT: r.arr_airport,
-            DEP_RWY: r.dep_rwy,
-            SID: r.sid,
-            WAYPOINT_SEQ: r.waypoint_seq,
-            STAR: r.star,
-            ARR_RWY: r.arr_rwy,
-            ROUTE_STRING: r.route_string
-        }));
-        return Response.json({ data: formattedRoutes });
+        const results = await fetchRoutesWithWaypointCount(context.env.DB);
+        return Response.json({ data: results.map(formatRouteForUi) });
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
     }
@@ -1070,24 +1080,30 @@ async function handleGetActiveFlightDataForWarning(context) {
         const { results: flightRows } = await context.env.DB.prepare('SELECT * FROM flights').all();
         if (!flightRows || flightRows.length === 0) return Response.json({ data: JSON.stringify([]) });
 
-        // 2. Fetch TAF data
+        // 2. Fetch TAF data. One row per station wins: the newest issue_time
+        //    (see newestTafRows). Previously the LAST row of an unordered SELECT
+        //    won, so which TAF got analysed depended on physical row order.
         const { results: tafRows } = await context.env.DB.prepare('SELECT * FROM tafs').all();
         const tafMap = {};
-        
-        tafRows.forEach(row => {
+
+        newestTafRows(tafRows).forEach(row => {
             const icao = String(row.station || "").trim().toUpperCase();
-            let timestamp = "---";
-            if (row.issue_time) {
-                const dateObj = new Date(row.issue_time);
-                if (!isNaN(dateObj.getTime())) {
-                    // Format to HH:mm (UTC)
-                    timestamp = String(dateObj.getUTCHours()).padStart(2, '0') + ':' + String(dateObj.getUTCMinutes()).padStart(2, '0');
-                }
-            }
-            if (icao) tafMap[icao] = { raw: row.raw_text, time: timestamp };
+            if (!icao) return;
+            tafMap[icao] = {
+                raw: row.raw_text,
+                time: issueClockLabel(row.issue_time),
+                issueMs: row.issue_time ? new Date(row.issue_time).getTime() : NaN
+            };
         });
 
-        // 3. Combine
+        // 3. Combine. A leg is only analysed when the TAF validity period actually
+        //    covers that leg window (STD for DEP, STA for ARR, STA+1h..+3h for ALT).
+        //    A TAF issued for another day is NO_DATA — never a verdict built on a
+        //    forecast that does not apply. An unreadable validity group (NIL, or a
+        //    value with no "DDHH/DDHH" block) keeps the displayed text instead of
+        //    being dropped, so the drawer can still show it verbatim.
+        const WX_NO_TAF_IN_WINDOW = 'No TAF data in database — TAF validity window does not cover this flight.';
+
         const flights = flightRows.map(row => {
             const flightNo = String(row.callsign || row.flight || "").trim();
             const depApt = String(row.dep || "").trim().toUpperCase();
@@ -1095,11 +1111,21 @@ async function handleGetActiveFlightDataForWarning(context) {
             const altApt = String(row.alt || "").trim().toUpperCase();
             const std = String(row.etd || row.std || "").trim();
             const sta = String(row.eta || row.sta || "").trim();
-            
-            const getTaf = (icao) => tafMap[icao] || { raw: "No TAF data in database", time: "---" };
-            const d = getTaf(depApt);
-            const a = getTaf(arrApt);
-            const alt = getTaf(altApt);
+            const dof = String(row.dof || "").trim();
+            const legWindows = flightLegWindows(std, sta, dof);
+
+            const getTaf = (icao, window) => {
+                const hit = tafMap[icao];
+                if (!hit) return { raw: "No TAF data in database", time: "---" };
+                const validity = parseTafValidity(hit.raw, hit.issueMs);
+                const covered = validityCoversWindow(validity, window ? window[0] : NaN, window ? window[1] : NaN);
+                if (covered === false) return { raw: WX_NO_TAF_IN_WINDOW, time: hit.time };
+                return { raw: hit.raw, time: hit.time };
+            };
+
+            const d = getTaf(depApt, legWindows.dep);
+            const a = getTaf(arrApt, legWindows.arr);
+            const alt = getTaf(altApt, legWindows.alt);
 
             return {
                 rowIdx: row.id,
@@ -1108,6 +1134,7 @@ async function handleGetActiveFlightDataForWarning(context) {
                 arrApt: arrApt,
                 std: std,
                 sta: sta,
+                dof: dof,
                 altApt: altApt,
                 tafDep: d.raw,
                 tafDepTime: d.time,
@@ -1217,6 +1244,7 @@ async function handleAnalyzeWxWithManual(context, args) {
             + 'TAF ALT ' + String(p.tafAlt || '') + '\n'
             + 'WINDOW DEP ' + String(p.stdH || '') + ' ARR ' + String(p.staH || '')
             + ' ALT ' + String(p.altH || '') + '\n'
+            + (p.windowLabel ? 'WINDOW UTC (date-aware) ' + String(p.windowLabel).slice(0, 200) + '\n' : '')
             + 'TASK: Return JSON {dep,arr,alt:{status,reason,chapter,action}} with status DANGER/WARNING/CLEAR/NO_DATA per manual thresholds. Shape example: {"dep":{"status":"CLEAR","reason":"...","chapter":"","action":""},"arr":{...},"alt":{...}}.';
 
         const body = {
@@ -1697,19 +1725,30 @@ async function handleGetActiveFlightList(context) {
 async function handleLatlongGetEditorData(context) {
     try {
         const { results: rows } = await context.env.DB.prepare('SELECT * FROM latlong ORDER BY route_id COLLATE NOCASE ASC, sequence_order ASC, id ASC').all();
-        const formatted = rows.map(r => ({
-            rowId: r.id,
-            ID: r.route_id,
-            Waypoint: r.waypoint,
-            Latitude: r.latitude,
-            Longitude: r.longitude
-        }));
+        // Baris yatim = route_id yang tidak punya profil di tabel routes (mis. ID
+        // salah ketik) atau kosong. Baris seperti ini tidak pernah dipakai peta FIR
+        // dan tidak muncul sebagai cakupan di halaman ROUTE, jadi harus kelihatan
+        // di sini — kalau tidak, koordinatnya hilang diam-diam.
+        const { results: routeRows } = await context.env.DB.prepare('SELECT id FROM routes').all();
+        const knownRoutes = new Set(routeRows.map(r => String(r.id == null ? '' : r.id).trim().toUpperCase()).filter(Boolean));
+        const formatted = rows.map(r => {
+            const routeKey = String(r.route_id == null ? '' : r.route_id).trim().toUpperCase();
+            return {
+                rowId: r.id,
+                ID: r.route_id,
+                Waypoint: r.waypoint,
+                Latitude: r.latitude,
+                Longitude: r.longitude,
+                orphan: !routeKey || !knownRoutes.has(routeKey)
+            };
+        });
         return Response.json({
             data: {
                 ok: true,
                 header: ['ID', 'Waypoint', 'Latitude', 'Longitude'],
                 rows: formatted,
                 count: formatted.length,
+                orphanCount: formatted.filter(row => row.orphan).length,
                 colMap: { idIdx: 0, wptIdx: 1, latIdx: 2, lonIdx: 3, headerRow: 0 }
             }
         });

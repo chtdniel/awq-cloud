@@ -3,6 +3,8 @@
 // Printable Airline Dispatch Release for FOO & Flight Crew
 // ============================================================================
 
+import { newestTafRows } from '../shared/wxtime.mjs';
+
 export async function onRequest(context) {
     try {
         const url = new URL(context.request.url);
@@ -33,7 +35,8 @@ export async function onRequest(context) {
         const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
         const { results: tafRows } = await context.env.DB.prepare('SELECT * FROM tafs').all();
         const tafMap = {};
-        (tafRows || []).forEach(t => {
+        // Newest issue_time per station wins — the table accumulates rows.
+        newestTafRows(tafRows).forEach(t => {
             tafMap[String(t.station).toUpperCase()] = t.raw_text;
         });
 

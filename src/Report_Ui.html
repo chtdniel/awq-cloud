@@ -14,8 +14,8 @@
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.openBriefingForm()" id="btn-open-form">
         <svg class="ic ic-sm"><use href="#i-bolt"/></svg> OPEN EDITABLE FORM
       </button>
-      <button class="btn-execute-cbr btn-solid-primary" onclick="window.downloadReportXlsx()" id="btn-download-sheet" title="Download Crew Briefing Report as .xlsx sheet (CBR + WX + NOTAM)">
-        <svg class="ic ic-sm"><use href="#i-save"/></svg> DOWNLOAD SHEET (XLSX)
+      <button class="btn-execute-cbr btn-solid-primary" onclick="window.openReportWeb1()" id="btn-download-sheet" title="Open the Google Sheets report generator">
+        <svg class="ic ic-sm"><use href="#i-download"/></svg> DOWNLOAD SHEET
       </button>
       <button class="btn-execute-cbr btn-solid-primary" onclick="window.createReportGoogleSheet()" id="btn-google-sheet" disabled title="Create the report in your Google Drive and open Google Sheets">CREATE GOOGLE SHEET</button>
     </div>
@@ -374,6 +374,215 @@
         noSigMap: getNoSigStationMap()
       };
     };
+
+    // ============================================================
+    // WEB 1 REPORT HANDOFF (B0 transport proof build)
+    // READY -> CONTEXT -> ACCEPTED, iframe-aware per implementation plan §3.
+    // Audit/generation backend is Gate B; this build only proves transport.
+    // ============================================================
+    const REPORT_WEB1_URL = window.__REPORT_WEB1_URL_OVERRIDE || 'https://script.google.com/macros/s/AKfycbz0gdvfrKdGu-7LovIZylT7q-REolKKBNmCRUOL13Dd9gdUZhDmeb6134hMKfv5wLPajA/exec';
+    const REPORT_WEB1_ORIGINS = window.__REPORT_WEB1_ORIGINS || null; // exact-origin override for local tests
+    const REPORT_MAX_TOTAL_BYTES = 64 * 1024; // locked from real-data measurement (tests/measure_payload_size.mjs)
+    const REPORT_MAX_TEXT_BYTES = 8 * 1024;
+    // Receipt window: must cover an Apps Script cold start of the receipt RPC
+    // (measured ~34 s on the first call). Overridable for fast tests.
+    const REPORT_RECEIPT_TIMEOUT_MS = window.__REPORT_RECEIPT_TIMEOUT_MS || 45000;
+
+    function reportByteLength_(s) {
+      try { return new TextEncoder().encode(String(s)).length; } catch (e) { return String(s).length; }
+    }
+
+    function reportOversizeText_(payload) {
+      var taf = payload.tafContext || [];
+      for (var i = 0; i < taf.length; i++) {
+        if (taf[i].text && reportByteLength_(taf[i].text) > REPORT_MAX_TEXT_BYTES) {
+          return { kind: 'TAF', label: taf[i].station, bytes: reportByteLength_(taf[i].text) };
+        }
+      }
+      var notam = payload.notamContext || [];
+      for (var j = 0; j < notam.length; j++) {
+        if (notam[j].text && reportByteLength_(notam[j].text) > REPORT_MAX_TEXT_BYTES) {
+          return { kind: 'NOTAM', label: notam[j].id, bytes: reportByteLength_(notam[j].text) };
+        }
+      }
+      return null;
+    }
+
+    function isReportWeb1Origin(origin) {
+      if (REPORT_WEB1_ORIGINS) return REPORT_WEB1_ORIGINS.includes(origin);
+      if (origin === 'https://script.google.com') return true;
+      if (origin === 'https://script.googleusercontent.com') return true;
+      // hashed Apps Script user-content subdomain, e.g. n-<hash>-<n>-lu-script.googleusercontent.com
+      return /^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/.test(origin);
+    }
+    let reportWeb1Window = null;    // top-level popup returned by window.open()
+    let reportWeb1Transfer = null;  // { nonce, payload, peer, peerOrigin, sent, receiptTimer }
+
+    function getReportWeb1Payload() {
+      const selectedFlights = window.getSelectedFlightObjects ? window.getSelectedFlightObjects() : [];
+      const rid = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : ('req-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+
+      // Station metadata: which roles/flights use each station (DEP/ARR/ALT/ENR).
+      const roleFor = { DEP: 'DEP', ARR: 'ARR', ALT: 'ALT', ENR1: 'ENR', ENR2: 'ENR', ENR3: 'ENR' };
+      const stationMeta = {};
+      const stationOrder = [];
+      selectedFlights.forEach(function(f) {
+        ['DEP', 'ARR', 'ALT', 'ENR1', 'ENR2', 'ENR3'].forEach(function(k) {
+          const s = f[k] ? String(f[k]).trim().toUpperCase() : '';
+          if (!s) return;
+          if (!stationMeta[s]) { stationMeta[s] = { roles: [], flights: [] }; stationOrder.push(s); }
+          if (stationMeta[s].roles.indexOf(roleFor[k]) === -1) stationMeta[s].roles.push(roleFor[k]);
+          if (stationMeta[s].flights.indexOf(f.FLIGHT) === -1) stationMeta[s].flights.push(f.FLIGHT);
+        });
+      });
+
+      // Full raw TAF text from Web 2's registry view (Taf_Ui); unavailable is explicit.
+      const tafBase = (typeof window.getReportTafContext === 'function')
+        ? window.getReportTafContext(stationOrder)
+        : stationOrder.map(function(s) { return { station: s, text: '', issueTime: null, available: false }; });
+      const tafContext = tafBase.map(function(t) {
+        const meta = stationMeta[t.station] || { roles: [], flights: [] };
+        return Object.assign({}, t, { roles: meta.roles, flights: meta.flights });
+      });
+
+      // Full selected NOTAM text from Web 2's analyzeNotams response (Notam_Ui).
+      // Aerodrome scope only: FIR/UIR-wide NOTAMs are dropped in the builder.
+      const notamContext = (typeof window.getReportNotamContext === 'function')
+        ? window.getReportNotamContext(selectedFlights)
+        : [];
+      const notamScope = (window.reportNotamScope && window.reportNotamScope.available)
+        ? {
+            rule: 'AERODROME_ONLY',
+            droppedFirWide: (window.reportNotamScope.dropped || []).length,
+            dropped: (window.reportNotamScope.dropped || []).map(function(d) {
+              return { id: d.id, station: d.station };
+            })
+          }
+        : { rule: 'AERODROME_ONLY', droppedFirWide: 0, dropped: [] };
+
+      return {
+        version: 1,
+        reportRequestId: rid,
+        requestedAt: new Date().toISOString(),
+        flights: selectedFlights,
+        tafContext: tafContext,
+        notamContext: notamContext,
+        notamScope: notamScope,
+        savedNotamAnalysis: window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {},
+        noSigStationMap: getNoSigStationMap()
+      };
+    }
+
+    function isReportWeb1ReadyMessage(event) {
+      if (!reportWeb1Transfer || !reportWeb1Transfer.nonce) return false;
+      if (!isReportWeb1Origin(event.origin)) return false;
+      if (!event.data || event.data.type !== 'AWQ_REPORT_READY' || event.data.nonce !== reportWeb1Transfer.nonce) return false;
+      // iframe-aware: READY source must belong to the tab we opened (event.source.top === popup)
+      try { return !!event.source && event.source.top === reportWeb1Window; }
+      catch (e) { return false; }
+    }
+
+    function isReportWeb1ReceiptMessage(event) {
+      if (!reportWeb1Transfer || !reportWeb1Transfer.peer) return false;
+      return event.source === reportWeb1Transfer.peer &&
+        event.origin === reportWeb1Transfer.peerOrigin &&
+        !!event.data &&
+        (event.data.type === 'AWQ_REPORT_ACCEPTED' || event.data.type === 'AWQ_REPORT_REJECTED') &&
+        event.data.nonce === reportWeb1Transfer.nonce;
+    }
+
+    window.openReportWeb1 = function() {
+      if (window.reportState.isBusy) return;
+      const payload = getReportWeb1Payload();
+      if (!Array.isArray(payload.flights) || payload.flights.length < 1 || payload.flights.length > 4) {
+        printTerminalLine('DOWNLOAD SHEET: Select 1 to 4 flights first.', 'warn');
+        return;
+      }
+      // Locked size limits: reject oversized context outright (never truncate).
+      const totalBytes = reportByteLength_(JSON.stringify(payload));
+      if (totalBytes > REPORT_MAX_TOTAL_BYTES) {
+        printTerminalLine('DOWNLOAD SHEET: Report context is ' + totalBytes + ' bytes, over the ' + Math.round(REPORT_MAX_TOTAL_BYTES / 1024) + ' KiB limit. Reduce the selected NOTAMs.', 'error');
+        return;
+      }
+      const oversize = reportOversizeText_(payload);
+      if (oversize) {
+        printTerminalLine('DOWNLOAD SHEET: ' + oversize.kind + ' text for ' + oversize.label + ' is ' + oversize.bytes + ' bytes, over the ' + Math.round(REPORT_MAX_TEXT_BYTES / 1024) + ' KiB per-text limit.', 'error');
+        return;
+      }
+      const sourceOrigin = window.location.origin;
+      if (!/^https?:$/.test(window.location.protocol) || !sourceOrigin || sourceOrigin === 'null') {
+        printTerminalLine('DOWNLOAD SHEET: The report handoff requires the deployed Web 2 origin.', 'error');
+        return;
+      }
+      const nonce = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+      const reportUrl = new URL(REPORT_WEB1_URL);
+      reportUrl.searchParams.set('page', 'report');
+      // one-time control values in the fragment (never sent as HTTP query/referrer)
+      reportUrl.hash = 'nonce=' + encodeURIComponent(nonce) + '&sourceOrigin=' + encodeURIComponent(sourceOrigin);
+      window.__gatecPendingHandoff = { nonce: nonce, reportRequestId: payload.reportRequestId };
+
+      reportWeb1Transfer = { nonce: nonce, payload: payload, peer: null, peerOrigin: null, sent: false, receiptTimer: null };
+      reportWeb1Window = window.open(reportUrl.toString(), '_blank');
+      if (!reportWeb1Window) {
+        window.__gatecTransferState = { state: 'POPUP_BLOCKED', reportRequestId: payload.reportRequestId };
+        reportWeb1Transfer = null;
+        printTerminalLine('DOWNLOAD SHEET: Allow pop-ups to open the Google Sheets report.', 'error');
+        return;
+      }
+      printTerminalLine('DOWNLOAD SHEET: Opening Web 1 REPORT and waiting for readiness...', 'info');
+      // 30-second readiness timeout
+      var reportReadyTimeoutMs = window.__REPORT_READY_TIMEOUT_MS || 30000;
+      setTimeout(function() {
+        if (reportWeb1Transfer && !reportWeb1Transfer.sent) {
+          window.__gatecTransferState = { state: 'READY_TIMEOUT', reportRequestId: reportWeb1Transfer.payload.reportRequestId };
+          printTerminalLine('DOWNLOAD SHEET: Web 1 did not signal ready within ' + Math.round(reportReadyTimeoutMs / 1000) + ' seconds.', 'error');
+          reportWeb1Transfer = null;
+        }
+      }, reportReadyTimeoutMs);
+    };
+
+    window.addEventListener('message', function(event) {
+      if (reportWeb1Transfer && !reportWeb1Transfer.sent && isReportWeb1ReadyMessage(event)) {
+        // pin the validated iframe peer; send CONTEXT to the peer, not the outer popup
+        reportWeb1Transfer.peer = event.source;
+        reportWeb1Transfer.peerOrigin = event.origin;
+        reportWeb1Transfer.sent = true;
+        window.__gatecContextSent = { reportRequestId: reportWeb1Transfer.payload.reportRequestId, nonce: reportWeb1Transfer.nonce, peerOrigin: event.origin };
+        event.source.postMessage(
+          { type: 'AWQ_REPORT_CONTEXT', nonce: reportWeb1Transfer.nonce, payload: reportWeb1Transfer.payload },
+          event.origin
+        );
+        printTerminalLine('DOWNLOAD SHEET: Flight context sent to validated Web 1 iframe peer.', 'success');
+        // 10-second receipt timeout
+        reportWeb1Transfer.receiptTimer = setTimeout(function() {
+          if (reportWeb1Transfer) {
+            window.__gatecTransferState = { state: 'RECEIPT_UNKNOWN', reportRequestId: reportWeb1Transfer.payload.reportRequestId };
+            printTerminalLine('DOWNLOAD SHEET: No receipt within ' + Math.round(REPORT_RECEIPT_TIMEOUT_MS / 1000) + ' seconds. Web 1 may still be starting; CHECK REPORT STATUS in Web 1 with request ID ' + reportWeb1Transfer.payload.reportRequestId + '.', 'warn');
+          }
+        }, REPORT_RECEIPT_TIMEOUT_MS);
+        return;
+      }
+      if (isReportWeb1ReceiptMessage(event)) {
+        if (event.data.type === 'AWQ_REPORT_ACCEPTED') {
+          printTerminalLine('DOWNLOAD SHEET: Web 1 accepted the report context (request ' + event.data.reportRequestId + '). Confirm in Web 1 to generate.', 'success');
+          // Scope warning: the report carries aerodrome NOTAMs only.
+          if (event.data.warning) printTerminalLine('DOWNLOAD SHEET: ' + event.data.warning, 'warn');
+        } else {
+          printTerminalLine('DOWNLOAD SHEET: Web 1 rejected the report context: ' + (event.data.reason || 'unknown reason'), 'error');
+        }
+        if (reportWeb1Transfer && reportWeb1Transfer.receiptTimer) clearTimeout(reportWeb1Transfer.receiptTimer);
+        window.__gatecTransferState = {
+          state: event.data.type === 'AWQ_REPORT_ACCEPTED' ? 'ACCEPTED' : 'REJECTED',
+          reportRequestId: event.data.reportRequestId || '',
+          reason: event.data.reason || ''
+        };
+        reportWeb1Transfer = null;
+      }
+    });
 
     // Helper: accept absolute http/https OR same-origin relative /briefing or /briefing-form URLs
     window.isValidReportUrl = function(u) {

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Service — AWQ Cloud Briefing</title>
+  <meta name="description" content="Ketentuan layanan AWQ Cloud Briefing: ketentuan pemakaian aplikasi briefing penerbangan, akun, data operasional, dan layanan pihak ketiga.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Saira+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-void: #F1F3F6;
+      --bg-panel: #FFFFFF;
+      --bg-panel-alt: #F7F8FA;
+      --bg-panel-sunken: #EEF1F5;
+      --border-subtle: #E2E8F0;
+      --border-light: #CBD5E1;
+      --text-primary: #0F172A;
+      --text-secondary: #334155;
+      --text-muted: #5B6B7F;
+      --accent-primary: #C8102E;
+      --font-ui: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      --font-display: 'Saira Condensed', 'Arial Narrow', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+      --radius-md: 6px;
+      --radius-lg: 10px;
+      --shadow-soft: 0 2px 10px rgba(15, 23, 42, 0.06);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-void: #0B1120;
+        --bg-panel: #111827;
+        --bg-panel-alt: #0F172A;
+        --bg-panel-sunken: #1A2436;
+        --border-subtle: #1F2937;
+        --border-light: #334155;
+        --text-primary: #E2E8F0;
+        --text-secondary: #CBD5E1;
+        --text-muted: #94A3B8;
+        --shadow-soft: 0 2px 10px rgba(0, 0, 0, 0.4);
+      }
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg-void);
+      color: var(--text-secondary);
+      font: 500 15px/1.7 var(--font-ui);
+      padding: 0 0 64px;
+    }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
+    header.legal-header {
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+      box-shadow: var(--shadow-soft);
+      margin-bottom: 28px;
+    }
+    header.legal-header .wrap {
+      display: flex; flex-wrap: wrap; align-items: center;
+      justify-content: space-between; gap: 10px 24px; padding-block: 16px;
+    }
+    .brand { display: grid; gap: 2px; }
+    .brand b {
+      font: 800 15px var(--font-display); letter-spacing: .06em;
+      text-transform: uppercase; color: var(--text-primary);
+    }
+    .brand span { font: 500 11px var(--font-mono); color: var(--text-muted); }
+    .legal-nav { display: flex; flex-wrap: wrap; gap: 18px; }
+    .legal-nav a {
+      font: 700 11px var(--font-ui); letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-secondary); text-decoration: none;
+      border-bottom: 1px solid transparent; padding-bottom: 1px;
+    }
+    .legal-nav a:hover { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+    h1 {
+      font: 800 clamp(26px, 4vw, 34px)/1.15 var(--font-display);
+      letter-spacing: .02em; text-transform: uppercase; color: var(--text-primary);
+      margin: 0 0 6px;
+    }
+    h1::after {
+      content: ''; display: block; width: 56px; height: 4px;
+      background: var(--accent-primary); border-radius: 2px; margin-top: 12px;
+    }
+    h2 {
+      font: 700 17px/1.3 var(--font-ui); color: var(--text-primary);
+      margin: 34px 0 10px; padding-top: 18px; border-top: 1px solid var(--border-subtle);
+    }
+    h2:first-of-type { border-top: 0; padding-top: 0; }
+    p, li { margin: 0 0 10px; }
+    ul { padding-left: 22px; }
+    a { color: var(--accent-primary); }
+    .meta { font: 500 12px var(--font-mono); color: var(--text-muted); margin: 0 0 8px; }
+    .lede { font-size: 16px; color: var(--text-secondary); }
+    .card {
+      background: var(--bg-panel); border: 1px solid var(--border-subtle);
+      border-left: 3px solid var(--accent-primary); border-radius: var(--radius-md);
+      padding: 14px 16px; box-shadow: var(--shadow-soft); margin: 18px 0;
+    }
+    .card p:last-child { margin-bottom: 0; }
+    .card strong { color: var(--text-primary); }
+    .note {
+      background: var(--bg-panel-sunken); border: 1px dashed var(--border-light);
+      border-radius: var(--radius-md); padding: 12px 14px; font-size: 14px; margin: 16px 0;
+    }
+    .note p:last-child { margin-bottom: 0; }
+    code { font: 600 13px var(--font-mono); background: var(--bg-panel-sunken); padding: 1px 5px; border-radius: 4px; color: var(--text-primary); }
+    footer.legal-footer {
+      margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--border-subtle);
+      font: 500 12px var(--font-mono); color: var(--text-muted);
+      display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <header class="legal-header">
+    <div class="wrap">
+      <div class="brand">
+        <b>AWQ Cloud Briefing</b>
+        <span>christiandaniel.my.id</span>
+      </div>
+      <nav class="legal-nav" aria-label="Legal">
+        <a href="/">Home</a>
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/terms" aria-current="page">Terms of Service</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <h1>Terms of Service</h1>
+    <p class="meta">Terakhir diperbarui: 20 September 2026 · Berlaku untuk https://christiandaniel.my.id</p>
+    <p class="lede">Ketentuan ini mengatur penggunaan aplikasi AWQ Cloud Briefing. Dengan mengakses atau memakai aplikasi ini, Anda menyetujui ketentuan di bawah.</p>
+
+    <h2>1. Deskripsi layanan</h2>
+    <p>AWQ Cloud Briefing adalah aplikasi kerja untuk operasi briefing penerbangan. Aplikasi menyediakan tampilan dan analisis data flight watch, NOTAM, TAF, cuaca, FIR, waypoint, serta pembuatan crew briefing report. Laporan dapat diunduh sebagai berkas XLSX atau dibuat sebagai Google Sheets di akun Google Anda sendiri.</p>
+
+    <h2>2. Akun dan keamanan</h2>
+    <ul>
+      <li>Akses aplikasi hanya diberikan kepada akun yang terdaftar dan diaktifkan oleh administrator, dengan role tertentu (admin, registered, atau read only).</li>
+      <li>Anda bertanggung jawab menjaga kerahasiaan password Anda dan atas semua aktivitas yang terjadi melalui akun Anda.</li>
+      <li>Segera hubungi administrator bila Anda menduga akun Anda dipakai tanpa izin.</li>
+      <li>Administrator dapat mengubah role, menonaktifkan, atau menghapus akun untuk menjaga keamanan dan integritas data operasional.</li>
+    </ul>
+
+    <h2>3. Penggunaan yang diizinkan</h2>
+    <p>Aplikasi ini hanya untuk keperluan operasional dan administratif penerbangan yang sah. Anda tidak boleh:</p>
+    <ul>
+      <li>mengakses data yang bukan menjadi kewenangan role Anda, atau mencoba melewati pembatasan akses;</li>
+      <li>mengubah, memalsukan, atau menghapus data operasional di luar kewenangan Anda;</li>
+      <li>mengunggah kode berbahaya, melakukan uji penetrasi tanpa izin tertulis, atau mengganggu ketersediaan layanan;</li>
+      <li>memakai aplikasi untuk kegiatan yang melanggar hukum atau peraturan penerbangan yang berlaku.</li>
+    </ul>
+
+    <h2>4. Sifat alat bantu dan tanggung jawab operasional</h2>
+    <div class="card">
+      <p><strong>Penting.</strong> Aplikasi ini adalah alat bantu penyusunan dan penyajian informasi. Keputusan operasional, keputusan penerbangan, dan kepatuhan terhadap regulasi tetap berada pada operator dan personel yang berwenang. Data yang ditampilkan dapat berasal dari sumber pihak ketiga dan dapat terlambat, tidak lengkap, atau tidak tersedia.</p>
+    </div>
+    <p>Setiap keluaran aplikasi — termasuk analisis NOTAM, TAF, cuaca, dan laporan briefing — harus diverifikasi terhadap sumber resmi sebelum dipakai untuk pengambilan keputusan operasional. Aplikasi tidak menggantikan penilaian manusia, prosedur perusahaan, atau ketentuan otoritas penerbangan.</p>
+
+    <h2>5. Layanan pihak ketiga</h2>
+    <ul>
+      <li><strong>Google:</strong> fitur "Create Google Sheet" memakai izin OAuth Google (<code>https://www.googleapis.com/auth/drive.file</code>) untuk membuat berkas di Google Drive Anda sendiri. Pemakaian layanan Google juga tunduk pada ketentuan Google. Anda dapat mencabut izin ini kapan saja di <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer" target="_blank">myaccount.google.com/permissions</a>. Perlakuan kami terhadap data Google dijelaskan di <a href="/privacy">Privacy Policy</a>.</li>
+      <li><strong>Cloudflare:</strong> aplikasi ini di-host dan datanya disimpan melalui layanan Cloudflare.</li>
+      <li>Sumber data eksternal seperti informasi NOTAM, TAF, dan cuaca tetap milik penyedinya masing-masing.</li>
+    </ul>
+
+    <h2>6. Ketersediaan layanan</h2>
+    <p>Aplikasi disediakan sebagaimana adanya. Kami dapat mengubah, membatasi, atau menghentikan sebagian maupun seluruh fitur untuk keperluan pemeliharaan, perbaikan, atau alasan operasional lain. Kami tidak menjamin layanan selalu tersedia tanpa gangguan.</p>
+
+    <h2>7. Kekayaan intelektual</h2>
+    <p>Perangkat lunak, tata letak, dan materi aplikasi ini dilindungi hak kekayaan intelektual pemiliknya. Anda tidak boleh menyalin, menjual, atau mendistribusikan aplikasi ini tanpa izin. Data operasional yang Anda masukkan tetap milik organisasi Anda; berkas laporan yang dibuat di Google Drive Anda tetap milik Anda.</p>
+
+    <h2>8. Penafian jaminan</h2>
+    <p>Aplikasi ini disediakan "sebagaimana adanya" dan "sebagaimana tersedia", tanpa jaminan apa pun, baik tersurat maupun tersirat, termasuk jaminan kelayakan untuk tujuan tertentu, keakuratan data, atau tidak adanya gangguan. Anda memakai aplikasi ini dengan risiko Anda sendiri.</p>
+
+    <h2>9. Batasan tanggung jawab</h2>
+    <p>Sejauh diizinkan hukum yang berlaku, kami tidak bertanggung jawab atas kerugian tidak langsung, insidental, khusus, atau konsekuensial — termasuk kehilangan data, kehilangan keuntungan, gangguan operasional, atau kerugian yang timbul dari keputusan operasional yang diambil berdasarkan keluaran aplikasi ini.</p>
+
+    <h2>10. Penghentian akses</h2>
+    <p>Akses Anda dapat dibatasi atau dihentikan bila Anda melanggar ketentuan ini, membahayakan keamanan sistem, atau menyalahgunakan data operasional.</p>
+
+    <h2>11. Perubahan ketentuan</h2>
+    <p>Ketentuan ini dapat diperbarui sewaktu-waktu. Versi terbaru selalu tersedia di halaman ini dengan tanggal pembaruan di bagian atas. Pemakaian aplikasi setelah pembaruan berarti Anda menyetujui ketentuan yang berlaku saat itu.</p>
+
+    <h2>12. Hukum yang berlaku</h2>
+    <p>Ketentuan ini diatur dan ditafsirkan berdasarkan hukum yang berlaku di Republik Indonesia.</p>
+
+    <h2>13. Kontak</h2>
+    <p>Pertanyaan tentang ketentuan ini: <a href="mailto:chtdniel@gmail.com">chtdniel@gmail.com</a>.</p>
+
+    <footer class="legal-footer">
+      <span>AWQ Cloud Briefing — christiandaniel.my.id</span>
+      <span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></span>
+    </footer>
+  </main>
+</body>
+</html>

@@ -10,6 +10,7 @@
 
 import { getRequestUser } from './api/auth.js';
 import { qrPngDataUri } from '../shared/qr.mjs';
+import { newestTafRows } from '../shared/wxtime.mjs';
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -116,10 +117,11 @@ export async function onRequest(context) {
         const legs = orderedFlights.slice(0, MAX_LEGS);
         const truncated = orderedFlights.length > MAX_LEGS ? orderedFlights.length - MAX_LEGS : 0;
 
-        // 2. TAFs -> map keyed by station (raw text + issue time)
+        // 2. TAFs -> map keyed by station (raw text + issue time). Newest issue_time
+        //    per station wins: the table accumulates rows, so "last row" is arbitrary.
         const { results: tafRows } = await context.env.DB.prepare('SELECT * FROM tafs').all();
         const tafMap = {};
-        (tafRows || []).forEach(t => {
+        newestTafRows(tafRows).forEach(t => {
             const stn = stationCode(t.station);
             if (!stn) return;
             tafMap[stn] = { raw: t.raw_text || '', issue_time: t.issue_time || '' };

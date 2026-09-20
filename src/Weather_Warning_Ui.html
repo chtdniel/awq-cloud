@@ -370,11 +370,108 @@
 
   <script>
   (function() {
-  // Normalisasi waktu HHMM polos (DB legacy) maupun HH:MM → jam 2 digit + label HH:MM.
-  // ponytail: split(':')[0] lama PECAH di '1230' → staH='1230' → parseInt%24=6, alt window ngaco.
+  // ── Time normalisation ────────────────────────────────────────────────────
+  // flights.etd/eta di D1 menyimpan ISO UTC ("2026-09-08T04:00:00.000Z"), "HH:MM",
+  // atau legacy HHMM/DDHHMM. Aturan parsing di sini identik dengan compactTime()
+  // di functions/briefing-form.js + functions/api/briefing-xlsx.js dan dengan
+  // shared/wxtime.mjs di server — satu aturan waktu untuk seluruh aplikasi.
+  function wxPad2(n) { return String(n).length < 2 ? '0' + n : String(n); }
+
+  // → { hh:'04', mm:'00', label:'04:00', utcMs:Number|null } | null
+  // Nilai ber-colon menang: itu jam literal, jadi tidak boleh dikonversi timezone.
+  function wxParseTime(v) {
+    const s = String(v === null || v === undefined ? '' : v).trim();
+    if (!s) return null;
+    let hh, mm, day = null, month = null, year = null;
+    const withColon = s.match(/(\d{1,2}):(\d{2})/);
+    if (withColon) {
+      hh = parseInt(withColon[1], 10); mm = parseInt(withColon[2], 10);
+      const date = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (date) { year = parseInt(date[1], 10); month = parseInt(date[2], 10); day = parseInt(date[3], 10); }
+    } else {
+      const d = s.replace(/[^0-9]/g, '');
+      if (d.length === 4) { hh = +d.slice(0, 2); mm = +d.slice(2, 4); }                          // HHMM
+      else if (d.length === 6) { day = +d.slice(0, 2); hh = +d.slice(2, 4); mm = +d.slice(4, 6); } // DDHHMM
+      else if (d.length >= 12) {                                                                 // YYYYMMDDHHMM[SS]
+        year = +d.slice(0, 4); month = +d.slice(4, 6); day = +d.slice(6, 8);
+        hh = +d.slice(8, 10); mm = +d.slice(10, 12);
+      } else return null;
+    }
+    if (!(hh >= 0 && hh <= 23) || !(mm >= 0 && mm <= 59)) return null;
+    if (day !== null && !(day >= 1 && day <= 31)) return null;
+    if (month !== null && !(month >= 1 && month <= 12)) return null;
+    const hasDate = day !== null && month !== null && year !== null;
+    return {
+      hh: wxPad2(hh), mm: wxPad2(mm), label: wxPad2(hh) + ':' + wxPad2(mm),
+      utcMs: hasDate ? Date.UTC(year, month - 1, day, hh, mm) : null
+    };
+  }
+
+  // Bentuk lama (dipakai label kartu): { hh, label }.
+  // Sebelumnya fungsi ini menghapus semua non-digit lalu mengambil 4 digit pertama,
+  // sehingga ISO "2026-09-08T04:00:00.000Z" menghasilkan tahun "20:26" — dan itu
+  // yang membuat STD/STA semua flight tampak sama.
   function wxHourParts(v) {
-    const d = String(v || '').replace(/[^0-9]/g, '').padStart(4, '0');
-    return { hh: d.slice(0, 2), label: d.slice(0, 2) + ':' + d.slice(2, 4) };
+    const t = wxParseTime(v);
+    return t ? { hh: t.hh, label: t.label } : { hh: '', label: '' };
+  }
+
+  // Instant UTC absolut satu titik flight. ISO sudah membawa tanggal; nilai legacy
+  // HH:MM mengambil tanggalnya dari flights.dof (YYYYMMDD) supaya window tetap
+  // punya tanggal, bukan hanya jam.
+  function wxFlightInstant(raw, dof) {
+    const t = wxParseTime(raw);
+    if (!t) return null;
+    if (t.utcMs !== null) return t.utcMs;
+    const d = String(dof === null || dof === undefined ? '' : dof).replace(/[^0-9]/g, '');
+    if (d.length < 8) return null;
+    const y = +d.slice(0, 4), m = +d.slice(4, 6), day = +d.slice(6, 8);
+    if (!(m >= 1 && m <= 12) || !(day >= 1 && day <= 31)) return null;
+    return Date.UTC(y, m - 1, day, +t.hh, +t.mm);
+  }
+
+  // TAF menulis hari+jam tanpa bulan ("1218/1400"). Anchor ke bulan terdekat
+  // dengan referensi — pola sama dengan tafDate() di shared/taf.mjs.
+  function wxDayHourNear(day, hour, minute, referenceMs) {
+    const ref = new Date(referenceMs);
+    let best = null;
+    for (const offset of [-1, 0, 1]) {
+      const candidate = Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + offset, day, hour, minute || 0);
+      if (best === null || Math.abs(candidate - referenceMs) < Math.abs(best - referenceMs)) best = candidate;
+    }
+    return best;
+  }
+
+  // Window satu leg: jam-of-day + instant absolut (null bila tanggal tak diketahui).
+  // shiftHours dipakai untuk window ALT (STA+1h).
+  function wxLegWindow(raw, dof, shiftHours) {
+    const t = wxParseTime(raw);
+    if (!t) return { hour: null, instant: null };
+    const shift = shiftHours || 0;
+    const hour = (parseInt(t.hh, 10) + shift) % 24;
+    const base = wxFlightInstant(raw, dof);
+    return { hour: hour, instant: base === null ? null : base + shift * 3600000 };
+  }
+
+  // Label window UTC untuk prompt AI: "08SEP 04:00Z → 07:50Z · ALT 08:00–11:00Z".
+  function wxWindowLabel(f) {
+    const dep = wxLegWindow(f.std, f.dof, 0);
+    const arr = wxLegWindow(f.sta, f.dof, 0);
+    const alt = wxLegWindow(f.sta, f.dof, 1);
+    const clock = (inst) => {
+      if (inst === null) return '--:--';
+      const d = new Date(inst);
+      return wxPad2(d.getUTCHours()) + ':' + wxPad2(d.getUTCMinutes()) + 'Z';
+    };
+    const dayTag = (inst) => {
+      if (inst === null) return '--';
+      const d = new Date(inst);
+      const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      return wxPad2(d.getUTCDate()) + months[d.getUTCMonth()];
+    };
+    return dayTag(dep.instant) + ' DEP ' + clock(dep.instant)
+      + ' · ARR ' + clock(arr.instant)
+      + ' · ALT ' + clock(alt.instant) + '–' + clock(alt.instant === null ? null : alt.instant + 2 * 3600000);
   }
   // TAF timestamp mentah → label pendek yang bisa dibaca: ISO penuh "2026-09-11T17:00:00.000Z"
   // menjadi "17:00" bila hari ini (UTC), atau "11 17:00" bila beda tanggal.
@@ -395,10 +492,15 @@
       window.wxAiResults = {}; // rowIdx → AI payload (survives tab switches + re-renders)
       window.wxAiPending = {}; // rowIdx → true while a request is in flight
 
-      function evaluateWeather(icao, startHour, rawTaf) {
+      // `win` = { hour, instant } dari wxLegWindow(): jam-of-day + instant absolut.
+      // Angka mentah masih diterima supaya pemanggil lama tidak pecah (hour-only).
+      function evaluateWeather(icao, win, rawTaf) {
         window.wxTriggerBlock = '';
         // Never fabricate a verdict when TAF is unavailable — report NO DATA.
-        if (!rawTaf || String(rawTaf).includes("No TAF data")) {
+        // NIL/CNL mean "no forecast published / cancelled" in TAF syntax, not clear
+        // weather; shared/taf.mjs and the server rule engine already read them that way.
+        if (!rawTaf || String(rawTaf).includes("No TAF data")
+          || /\b(?:NIL|CNL)\b/.test(String(rawTaf).toUpperCase())) {
           return 'NO_DATA';
         }
 
@@ -480,34 +582,58 @@
         mergeRefs(window.wxRefs, baseM.refs);
         if (baseM.status === 'DANGER' || baseM.status === 'WARNING') window.wxTriggerBlock = parts[0];
 
-        const flightHour = parseInt(startHour);
+        const wxWin = (win && typeof win === 'object') ? win : { hour: win, instant: null };
+        const flightHour = parseInt(wxWin.hour, 10);
+        const flightMs = (typeof wxWin.instant === 'number' && isFinite(wxWin.instant)) ? wxWin.instant : null;
         let worstStatus = baseStatus;
 
         // 3. Analyze change blocks
         for (let i = 1; i < parts.length; i++) {
           const block = parts[i];
+          // Grup perubahan TAF: DDHH/DDHH (TEMPO/PECMG/BECMG/PROB/INTER) atau FM DDHHMM.
           const timeMatch = block.match(/(\d{2})(\d{2})\/(\d{2})(\d{2})/);
-          
+          const fmMatch = block.match(/FM(\d{2})(\d{2})(\d{2})/);
+
           let isActive = false;
           let isPermanent = block.includes('BECMG') || block.includes('FM');
 
           if (timeMatch) {
-            const startH = parseInt(timeMatch[2]);
-            const endH = parseInt(timeMatch[4]);
-            
-            if (startH <= endH) {
-              // Inclusive window for safety (e.g. 08/12 covers hour 12)
-              if (flightHour >= startH && flightHour <= endH) isActive = true;
-              // Persistence for BECMG/FM
-              if (isPermanent && flightHour > endH) isActive = true;
-            } else {
-              // Over midnight
-              if (flightHour >= startH || flightHour <= endH) isActive = true;
-              if (isPermanent && flightHour > endH && flightHour < startH) isActive = true;
+            const startDay = parseInt(timeMatch[1], 10);
+            const startH = parseInt(timeMatch[2], 10);
+            const endDay = parseInt(timeMatch[3], 10);
+            const endH = parseInt(timeMatch[4], 10);
+
+            if (flightMs !== null) {
+              // Date-aware: bandingkan instant absolut, bukan jam-of-day saja.
+              // Tanpa ini blok TAF hari lain ikut aktif hanya karena jamnya sama.
+              const startMs = wxDayHourNear(startDay, startH, 0, flightMs);
+              let endMs = wxDayHourNear(endDay, endH, 0, flightMs);
+              if (endMs <= startMs) endMs += 86400000;   // grup melewati tengah malam
+              isActive = flightMs >= startMs && flightMs <= endMs;
+              // Persistence for BECMG/FM: kondisi permanen bertahan setelah grupnya.
+              if (!isActive && isPermanent && flightMs > endMs) isActive = true;
+            } else if (!isNaN(flightHour)) {
+              // Fallback hour-of-day bila tanggal flight tidak bisa ditentukan.
+              if (startH <= endH) {
+                // Inclusive window for safety (e.g. 08/12 covers hour 12)
+                if (flightHour >= startH && flightHour <= endH) isActive = true;
+                // Persistence for BECMG/FM
+                if (isPermanent && flightHour > endH) isActive = true;
+              } else {
+                // Over midnight
+                if (flightHour >= startH || flightHour <= endH) isActive = true;
+                if (isPermanent && flightHour > endH && flightHour < startH) isActive = true;
+              }
             }
-          } else if (block.includes('FM')) {
-            const fmMatch = block.match(/FM(\d{2})(\d{2})(\d{2})/);
-            if (fmMatch && flightHour >= parseInt(fmMatch[2])) isActive = true;
+          } else if (fmMatch) {
+            const fmDay = parseInt(fmMatch[1], 10);
+            const fmH = parseInt(fmMatch[2], 10);
+            const fmM = parseInt(fmMatch[3], 10);
+            if (flightMs !== null) {
+              isActive = flightMs >= wxDayHourNear(fmDay, fmH, fmM, flightMs);
+            } else if (!isNaN(flightHour)) {
+              isActive = flightHour >= fmH;
+            }
           }
 
           if (isActive) {
@@ -691,9 +817,13 @@
         const orig = btn ? btn.innerText : '';
         if (btn) { btn.disabled = true; btn.innerText = 'ANALYZING...'; }
         if (box) { box.style.display = 'grid'; box.innerHTML = '<div style="font-size:12px;opacity:.65;">ANALYZING... (you may switch tabs, result will be saved)</div>'; }
-        const stdH = wxHourParts(f.std).hh;
-        const staH = wxHourParts(f.sta).hh;
-        const altH = String((parseInt(staH, 10) + 1) % 24);
+        // Window per leg dari DB (jam + instant absolut hasil wxLegWindow).
+        const stdWindow = wxLegWindow(f.std, f.dof, 0);
+        const staWindow = wxLegWindow(f.sta, f.dof, 0);
+        const altWindow = wxLegWindow(f.sta, f.dof, 1);
+        const stdH = stdWindow.hour === null ? '' : wxPad2(stdWindow.hour);
+        const staH = staWindow.hour === null ? '' : wxPad2(staWindow.hour);
+        const altH = altWindow.hour === null ? '' : wxPad2(altWindow.hour);
         const clearWxTimer = () => {
           try { if (window.wxAiTimers && window.wxAiTimers[rowIdx]) { clearTimeout(window.wxAiTimers[rowIdx]); delete window.wxAiTimers[rowIdx]; } } catch (e) {}
         };
@@ -760,7 +890,9 @@
            })
           .analyzeWxWithManual(Object.assign({
             tafDep: f.tafDep, tafArr: f.tafArr, tafAlt: f.tafAlt,
-            stdH: stdH, staH: staH, altH: altH
+            stdH: stdH, staH: staH, altH: altH,
+            // Window UTC lengkap dengan tanggal: AI tidak boleh menilai blok TAF hari lain.
+            windowLabel: wxWindowLabel(f)
           }, window.wxAiChoice()));
       };
 
@@ -932,14 +1064,16 @@
         let kpiDanger = 0, kpiWarn = 0, kpiClear = 0, kpiNoData = 0;
 
         container.innerHTML = activeFlights.map((f, idx) => {
-          const stdH = wxHourParts(f.std).hh;
-          const staH = wxHourParts(f.sta).hh;
-          const altWindowStart = (parseInt(staH) + 1) % 24;
-          const altWindowEnd = (parseInt(staH) + 3) % 24;
+          // Window per leg: jam-of-day + instant absolut (date-aware).
+          const stdWindow = wxLegWindow(f.std, f.dof, 0);
+          const staWindow = wxLegWindow(f.sta, f.dof, 0);
+          const altWindow = wxLegWindow(f.sta, f.dof, 1);
+          const altWindowStart = altWindow.hour;
+          const altWindowEnd = altWindowStart === null ? null : (altWindowStart + 2) % 24;
 
-          const depStatus = evaluateWeather(f.depApt, stdH, f.tafDep); const depRefs = window.wxRefs.slice(); const depTrig = wxShortTrigger(window.wxTriggerBlock);
-          const arrStatus = evaluateWeather(f.arrApt, staH, f.tafArr); const arrRefs = window.wxRefs.slice(); const arrTrig = wxShortTrigger(window.wxTriggerBlock);
-          const altStatus = evaluateWeather(f.altApt, altWindowStart, f.tafAlt); const altRefs = window.wxRefs.slice(); const altTrig = wxShortTrigger(window.wxTriggerBlock);
+          const depStatus = evaluateWeather(f.depApt, stdWindow, f.tafDep); const depRefs = window.wxRefs.slice(); const depTrig = wxShortTrigger(window.wxTriggerBlock);
+          const arrStatus = evaluateWeather(f.arrApt, staWindow, f.tafArr); const arrRefs = window.wxRefs.slice(); const arrTrig = wxShortTrigger(window.wxTriggerBlock);
+          const altStatus = evaluateWeather(f.altApt, altWindow, f.tafAlt); const altRefs = window.wxRefs.slice(); const altTrig = wxShortTrigger(window.wxTriggerBlock);
 
           // Flight-level worst status: DANGER > WARNING > NO DATA > CLEAR.
           const statuses = [depStatus, arrStatus, altStatus];
@@ -955,7 +1089,9 @@
               : flightWorst === 'NO_DATA'
                 ? '<span class="wx-pill wx-pill-nodata">NO TAF — CHECK SOURCE</span>'
                 : '<span class="wx-pill wx-pill-clear">OPERATIONAL</span>';
-           const altWindowLabel = String(altWindowStart).padStart(2,'0') + ':00–' + String(altWindowEnd).padStart(2,'0') + ':00';
+           const altWindowLabel = altWindowStart === null
+             ? '--:--'
+             : wxPad2(altWindowStart) + ':00–' + wxPad2(altWindowEnd) + ':00';
            const aiPending = !!((window.wxAiPending || {})[f.rowIdx]);
            const aiOff = window.wxAiEnabled === false;
            const aiBtnHtml = aiOff ? ''

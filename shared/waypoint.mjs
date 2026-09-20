@@ -74,8 +74,12 @@ export async function saveWaypoints(DB, payload) {
   const inserted = mode === 'merge'
     ? parsed.entries.filter(entry => !existingWaypoints.has(entry.waypoint)).length
     : parsed.count;
+  // Route ID yang tidak ada di registry tetap disimpan (alur kerja bisa mengisi
+  // koordinat lebih dulu), tapi pemanggil harus bisa memperingatkan: barisnya
+  // tidak akan terbaca peta FIR maupun dihitung sebagai cakupan halaman ROUTE.
+  const knownRoute = await DB.prepare('SELECT 1 AS found FROM routes WHERE UPPER(TRIM(id)) = ? LIMIT 1').bind(routeId).first();
   return { ok: true, count: parsed.count, inserted, updated: parsed.count - inserted,
-    skipped: parsed.skipped, dupCount: parsed.dupCount, mode, orderMode, routeId };
+    skipped: parsed.skipped, dupCount: parsed.dupCount, mode, orderMode, routeId, routeKnown: !!knownRoute };
 }
 
 export async function deleteWaypoint(DB, waypoint, rowId) {

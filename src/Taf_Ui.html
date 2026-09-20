@@ -227,6 +227,40 @@
   <script>
     let localTafData = [];
 
+    // Gate B handoff: narrow read-only view over localTafData for the report payload.
+    // Precedence: a full registry TAF is authoritative; TIMESTAMP resolves staleness
+    // between two full values; unavailable is returned EXPLICITLY so Web 1 never
+    // silently substitutes a different forecast.
+    window.getReportTafContext = function(stations) {
+      var wanted = [];
+      var seen = {};
+      (stations || []).forEach(function(s) {
+        if (!s) return;
+        var u = String(s).trim().toUpperCase();
+        if (!u || seen[u]) return;
+        seen[u] = true;
+        wanted.push(u);
+      });
+      var best = {};
+      localTafData.forEach(function(d) {
+        if (!d) return;
+        var key = String(d.STATION || '').trim().toUpperCase();
+        if (!key) return;
+        var text = String(d.RAW_TAF || '').trim();
+        if (!text || d.IS_UNAVAILABLE) return;
+        var prev = best[key];
+        if (!prev || String(prev.issueTime || '') < String(d.TIMESTAMP || '')) {
+          best[key] = { station: key, text: text, issueTime: d.TIMESTAMP || null };
+        }
+      });
+      return wanted.map(function(key) {
+        var hit = best[key];
+        return hit
+          ? { station: key, text: hit.text, issueTime: hit.issueTime, available: true }
+          : { station: key, text: '', issueTime: null, available: false };
+      });
+    };
+
     window.tafToast = function(msg, kind) {
       const box = document.getElementById('taf-toastbox');
       if (!box) return;

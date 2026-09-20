@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="utf-8">
   <base target="_top">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AWQ OCC</title>
@@ -778,7 +779,51 @@
       z-index: var(--z-base); /* Layer: Base/content */
       min-width: 0;
     }
-    
+
+    /* PUBLIC SITE FOOTER — the Google OAuth consent screen requires the app
+       homepage to identify the app and link its privacy policy, so these links
+       must stay public and must match the URLs registered in the consent screen
+       (privacy: /privacy, terms: /terms). */
+    .occ-site-footer {
+      position: relative;
+      z-index: var(--z-base);
+      margin-top: 12px;
+      border-top: 1px solid var(--border-subtle);
+      background: var(--nav-bg);
+      backdrop-filter: blur(12px);
+    }
+    .occ-site-footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px 24px;
+      padding: 14px clamp(1rem, 3vw, 2rem);
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    .occ-site-footer-brand { display: grid; gap: 2px; min-width: 0; }
+    .occ-site-footer-name {
+      font: 700 11px var(--font-ui);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-primary);
+    }
+    .occ-site-footer-desc { font: 500 11px var(--font-mono); color: var(--text-muted); }
+    .occ-site-footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
+    .occ-site-footer-links a {
+      font: 700 11px var(--font-ui);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      padding-bottom: 1px;
+      transition: color 0.22s var(--ease-spring), border-color 0.22s var(--ease-spring);
+    }
+    .occ-site-footer-links a:hover { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+    .occ-site-footer-links a:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+
     .view-section { display: none; }
     .view-section.active { display: block; animation: slideUpFade 0.5s var(--ease-spring); }
     @keyframes slideUpFade { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
@@ -1512,6 +1557,22 @@
       </section>
     </div>
 
+  <!-- Public legal footer. Required by the Google OAuth consent screen: the app
+       homepage must identify the app and link its privacy policy. Both links are
+       public (no login) and must keep matching the consent screen URLs. -->
+  <footer class="occ-site-footer">
+    <div class="occ-site-footer-inner">
+      <div class="occ-site-footer-brand">
+        <span class="occ-site-footer-name">AWQ Cloud Briefing</span>
+        <span class="occ-site-footer-desc">Flight dispatch briefing workspace — flight watch, NOTAM, TAF, weather, FIR and crew briefing reports.</span>
+      </div>
+      <nav class="occ-site-footer-links" aria-label="Legal">
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/terms">Terms of Service</a>
+      </nav>
+    </div>
+  </footer>
+
   <script>
     // Initialize Theme
     (function() {
@@ -1715,6 +1776,9 @@
               window.isAdmin = isAdmin;
               var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
               if (wpItem) wpItem.style.display = isAdmin ? '' : 'none';
+              // Modul yang punya aksi admin-only (mis. pintasan waypoint di halaman
+              // ROUTE) menggambar ulang dari cache saat status aksesnya turun.
+              window.dispatchEvent(new CustomEvent('occ:accessResolved', { detail: { isAdmin: isAdmin, canViewSettings: canView } }));
             }).withFailureHandler(function() {
               window.isSettingsAdmin = false;
               var nav2 = document.getElementById('nav-settings');
@@ -1722,6 +1786,7 @@
               window.isAdmin = false;
               var wpItem2 = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
               if (wpItem2) wpItem2.style.display = 'none';
+              window.dispatchEvent(new CustomEvent('occ:accessResolved', { detail: { isAdmin: false, canViewSettings: false } }));
             }).getSettingsAccessInfo();
           }
         } catch (e) { console.warn('[SECURITY] settings gate failed', e); }

@@ -8,6 +8,16 @@ export const { onRequestPost } = await import('data:text/javascript;base64,' + B
 export async function createWaypointFixture(role = 'admin') {
   const database = new DatabaseSync(':memory:');
   database.exec('CREATE TABLE latlong (id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT, waypoint TEXT, latitude TEXT, longitude TEXT, sequence_order INTEGER)');
+  // Registry route ikut dibuat: tabel latlong sendiri tidak cukup untuk memutuskan
+  // sebuah baris "yatim" (route_id tanpa profil), dan fixture harus mencerminkan
+  // skema produksi supaya jalur itu benar-benar teruji.
+  database.exec(`
+    CREATE TABLE routes (
+      id TEXT PRIMARY KEY, dep_airport TEXT, arr_airport TEXT, dep_rwy TEXT, sid TEXT,
+      waypoint_seq TEXT, star TEXT, arr_rwy TEXT, route_string TEXT
+    );
+    INSERT INTO routes (id, dep_airport, arr_airport) VALUES ('ROUTE-A', 'WIII', 'WADD');
+  `);
   function statement(sql, values = []) {
     return {
       bind(...parameters) { return statement(sql, parameters); },

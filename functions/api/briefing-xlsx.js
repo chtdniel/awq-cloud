@@ -1,6 +1,7 @@
 import { decodeNotamText } from './notamUtils.js';
 import { getRequestUser } from './auth.js';
 import { qrEncode, qrPngBytes } from '../../shared/qr.mjs';
+import { newestTafRows } from '../../shared/wxtime.mjs';
 
 // ============================================================================
 // BRIEFING XLSX GENERATION - Native .xlsx output using template-edit approach
@@ -571,7 +572,8 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
     const legs = orderedFlights;
     const { results: tafRows } = await context.env.DB.prepare('SELECT * FROM tafs').all();
     const tafMap = {};
-    (tafRows || []).forEach(t => {
+    // Newest issue_time per station wins — the table accumulates rows.
+    newestTafRows(tafRows).forEach(t => {
         const stn = stationCode(t.station);
         if (!stn) return;
         tafMap[stn] = { raw: t.raw_text || '', issue_time: t.issue_time || '' };

@@ -415,6 +415,73 @@
   <script>
     window.lastFetchedFlightIds = "";
     window.savedNotamAnalysis = window.safeStorage ? window.safeStorage.get('occ_notam_analysis', {}) : {};
+
+    // Gate C rule: the report carries AERODROME NOTAMs only. A NOTAM is aerodrome
+    // scoped when its station is one of the selected flights' aerodromes
+    // (DEP/ARR/ALT/ENR). FIR/UIR-wide NOTAMs are keyed by their FIR designator, so
+    // they never match that set and are dropped here — before the payload, before
+    // the size check and before the audit hash.
+    window.reportStationSet = function(flights) {
+      var set = {};
+      (flights || []).forEach(function(f) {
+        ['DEP', 'ARR', 'ALT', 'ENR1', 'ENR2', 'ENR3'].forEach(function(k) {
+          var s = f && f[k] ? String(f[k]).trim().toUpperCase() : '';
+          if (s) set[s] = true;
+        });
+      });
+      return set;
+    };
+    window.isAerodromeReportNotam = function(notam, stationSet) {
+      var stn = String((notam && notam.station) || '').trim().toUpperCase();
+      if (!stn) return false;
+      return !!(stationSet && stationSet[stn]);
+    };
+
+    // Gate B handoff: narrow view over the last analyzeNotams response, limited to the
+    // selected flights, their actually-selected NOTAMs, and aerodrome scope only.
+    window.getReportNotamContext = function(flights) {
+      var resp = window.awqReportState && window.awqReportState.notamResponse;
+      // Fresh scope report per call: the payload builder reports what was dropped.
+      window.reportNotamScope = { dropped: [], available: false };
+      if (!resp || !Array.isArray(resp.data)) return [];
+      window.reportNotamScope.available = true;
+      var analysis = window.savedNotamAnalysis || {};
+      var stationSet = window.reportStationSet(flights);
+      var selectedByFlight = {};
+      (flights || []).forEach(function(f) {
+        var num = String(f && f.FLIGHT || '').trim();
+        if (num) selectedByFlight[num] = (analysis[num] || []).map(function(x) { return String(x); });
+      });
+      var out = [];
+      resp.data.forEach(function(stnObj) {
+        if (!stnObj) return;
+        var station = String(stnObj.station || '').trim().toUpperCase();
+        var stnFlights = String(stnObj.flightsStr || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        var relevant = stnFlights.filter(function(fn) { return !!selectedByFlight[fn]; });
+        if (!relevant.length) return;
+        (stnObj.notams || []).forEach(function(n) {
+          if (!n) return;
+          var id = String(n.notamNum || n.id || '').trim();
+          if (!id) return;
+          var owners = relevant.filter(function(fn) { return selectedByFlight[fn].indexOf(id) !== -1; });
+          if (!owners.length) return;
+          var record = {
+            id: id,
+            station: station,
+            flights: owners,
+            text: String(n.rawText == null ? '' : n.rawText),
+            status: String(n.status || ''),
+            selected: true
+          };
+          if (!window.isAerodromeReportNotam(record, stationSet)) {
+            window.reportNotamScope.dropped.push({ id: id, station: station, flights: owners });
+            return;
+          }
+          out.push(record);
+        });
+      });
+      return out;
+    };
     window.activeStationGlobalState = "";
 
     window.loadNotamsForSelected = function(isForced = false) {
@@ -465,6 +532,9 @@
         google.script.run
           .withSuccessHandler(res => {
             try {
+              window.awqReportState = window.awqReportState || {};
+              window.awqReportState.notamResponse = res;
+              window.awqReportState.notamReceivedAt = new Date().toISOString();
               window.renderStationCentricGrid(res);
             } catch (err) {
               console.error('[NOTAM] Render error:', err);

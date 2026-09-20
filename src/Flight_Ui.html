@@ -1183,22 +1183,42 @@
   window.parseToDbDate = parseToDbDate;
 
   // Normalisasi tampilan waktu ke HH:MM — terima ISO penuh ('2026-09-08T03:25:00.000Z'),
-  // 'HHMM' polos DB lama, dan 'HH:MM'. Jam selalu UTC (ops Zulu).
+  // datetime berpemisah selain 'T' ('2026-09-08 03:25:00'), 'HHMM' polos DB lama, dan 'HH:MM'.
+  // Jam selalu UTC (ops Zulu) dan tidak digeser timezone browser.
   function displayTime(v) {
     const s = String(v || '');
     if (/T/.test(s)) {
       const d = new Date(s);
       if (!isNaN(d.getTime())) return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
     }
-    const d = s.replace(/[^0-9]/g, '').padStart(4, '0');
+    // Jam literal menang: pemisah spasi/dll tetap datetime, bukan HHMM polos.
+    // Tanpa cabang ini nilai seperti '2026-09-08 03:25:00' jatuh ke fallback dan
+    // dikembalikan mentah ke input maxlength=5 (dan merusak timeToMins).
+    const clock = s.match(/(\d{1,2}):(\d{2})/);
+    if (clock) {
+      const hh = Number(clock[1]), mm = Number(clock[2]);
+      if (hh <= 23 && mm <= 59) return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+    }
+    const digits = s.replace(/[^0-9]/g, '');
+    // Datetime tanpa pemisah: YYYYMMDDHHMM[SS] → HH:MM di posisi 8.
+    if (digits.length >= 12) {
+      const hh = digits.slice(8, 10), mm = digits.slice(10, 12);
+      if (Number(hh) <= 23 && Number(mm) <= 59) return hh + ':' + mm;
+      return s;
+    }
+    const d = digits.padStart(4, '0');
     if (d === '0000') return '00:00';
     if (!/^\d{4}$/.test(d)) return s;
     return d.substring(0, 2) + ':' + d.substring(2, 4);
   }
   function timeToMins(tStr) {
     if (!tStr) return 0;
-    let s = displayTime(tStr).replace(/[^0-9]/g, '').padStart(4, '0');
-    return parseInt(s.substring(0, 2)) * 60 + parseInt(s.substring(2, 4));
+    // Hanya percaya keluaran HH:MM. Menghitung ulang digit dari output displayTime
+    // membuat nilai bukan-jam ikut jadi menit (mis. tanggal polos '2026-09-08' →
+    // 20*60+26 = 1226) dan bar timeline salah tempat tanpa error.
+    const m = /^(\d{2}):(\d{2})$/.exec(displayTime(tStr));
+    if (!m) return 0;
+    return Number(m[1]) * 60 + Number(m[2]);
   }
 
   function normalizeAcList(list) {
@@ -3071,6 +3091,13 @@
         if (!r) return;
         let isPrimary = String(r.ID).endsWith('10');
         let label = isPrimary ? `${r.ID} (Primary)` : `${r.ID} (Alternate)`;
+        // Penanda koordinat: peta FIR menggambar rute dari tabel LATLONG, jadi
+        // profil tanpa baris di sana akan tampil sebagai rute kosong di peta.
+        // Ditandai di titik pemilihan supaya operator tidak baru sadar di peta.
+        const wpCount = Number(r.WAYPOINT_COUNT);
+        if (r.WAYPOINT_COUNT !== null && r.WAYPOINT_COUNT !== undefined && r.WAYPOINT_COUNT !== '' && Number.isFinite(wpCount)) {
+          label += wpCount > 0 ? ` · ${wpCount} WP` : ' · NO WP';
+        }
         opts.push(`<option value="${esc(r.ID)}">${esc(label)}</option>`);
       });
       opts.push(`<option value="__NEW_ALT__">+ Add Alternate Route</option>`);

@@ -11,6 +11,7 @@
     <div class="kpi-card accent"><span class="kpi-label">Registered Profiles</span><span class="kpi-val" id="route-kpi-total">0</span><span class="kpi-sub">approved routing profiles</span></div>
     <div class="kpi-card"><span class="kpi-label">Route Pairs</span><span class="kpi-val" id="route-kpi-pairs">0</span><span class="kpi-sub">unique city pairs</span></div>
     <div class="kpi-card warn"><span class="kpi-label">Status</span><span class="kpi-val text">REGISTRY</span><span class="kpi-sub">live from route DB</span></div>
+    <div class="kpi-card safe" id="route-kpi-wp-card"><span class="kpi-label">WP Coverage</span><span class="kpi-val text" id="route-kpi-wp">0/0</span><span class="kpi-sub">with registered waypoints</span></div>
   </div>
 
   <div class="route-manager-container">
@@ -25,10 +26,12 @@
           <span class="filter-chip" onclick="window.setRouteFilter(this, 'WMKK')">WMKK (KUL)</span>
           <span class="filter-chip" onclick="window.setRouteFilter(this, 'WSSS')">WSSS (SIN)</span>
           <span class="filter-chip" onclick="window.setRouteFilter(this, 'YPPH')">YPPH (PER)</span>
+          <span class="filter-chip wp-gap-filter" id="route-filter-wp-gap" onclick="window.toggleRouteWpFilter(this)" title="Show only routes with no waypoints registered in the WAYPOINT database">NO WAYPOINTS</span>
         </div>
       </div>
       <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); text-align: right; padding-top: 12px; flex-shrink: 0;">
         <span id="route-total-count" style="font-weight: 700; color: var(--accent-primary); font-size: 16px;">0</span><br>PROFILES
+        <div style="margin-top: 8px; font-size: 9px; letter-spacing: 0.05em; color: var(--text-muted);">WP = REGISTERED IN WAYPOINT DB</div>
       </div>
     </div>
 
@@ -79,7 +82,20 @@
       align-items: flex-start;
       gap: 10px;
     }
+    .route-id-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
     .route-id-cell { font-family: var(--font-mono); font-weight: 800; color: var(--accent-primary); letter-spacing: 0.02em; font-size: 14px; }
+    /* Waypoint-registration marker: text + icon, not colour alone, so the state
+       survives greyscale and screen readers. */
+    .wp-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 1px 7px; border-radius: var(--radius-pill);
+      border: 1px solid transparent;
+      font-family: var(--font-mono); font-size: 9px; font-weight: 800;
+      letter-spacing: 0.05em; white-space: nowrap;
+    }
+    .wp-badge-ok { background: var(--status-safe-bg); color: var(--status-safe); border-color: var(--status-safe); }
+    .wp-badge-gap { background: var(--status-warning-bg); color: var(--status-warning); border-color: var(--status-warning); }
+    .wp-badge-unknown { background: var(--bg-panel-sunken); color: var(--text-muted); border-color: var(--border-medium); }
     .route-pair-cell { font-weight: 700; letter-spacing: 0.04em; font-size: 11px; color: var(--text-secondary); margin-top: 2px; display: flex; align-items: center; gap: 5px; }
     .route-card-actions { display: flex; gap: 8px; }
 
@@ -125,6 +141,10 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .action-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); background: var(--status-info-bg); }
+    /* Shortcut ke WAYPOINT MANAGER: hanya untuk admin, dan hanya pada route yang
+       koordinatnya belum terdaftar. Begitu gap-nya terisi, tombolnya hilang. */
+    .action-btn.btn-wp-gap { border-color: var(--status-warning); color: var(--status-warning); }
+    .action-btn.btn-wp-gap:hover { border-color: var(--status-warning); color: #fff; background: var(--status-warning); }
     .action-btn:focus-visible, .filter-chip:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
     @media (max-width: 480px) {
       .route-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; }
@@ -149,12 +169,80 @@
     }
     .filter-chip:hover { border-color: var(--accent-primary); color: var(--text-primary); }
     .filter-chip.active { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); box-shadow: 0 2px 8px rgba(0,163,255,0.3); }
+    /* Coverage gap filter is amber, not accent: it is a "work still to do" view. */
+    .filter-chip.wp-gap-filter.active { background: var(--status-warning); color: #fff; border-color: var(--status-warning); box-shadow: none; }
   </style>
 
   <script>
     window.allRoutesCache = [];
+    window.routeShowMissingWpOnly = false;
+
+    // Penanda "waypoint sudah terdaftar di database" untuk kartu route.
+    // WAYPOINT_COUNT dihitung server-side dari tabel latlong. Nilai yang tidak
+    // terbaca sengaja jadi badge netral, bukan "NO WP" — salah tampil "belum ada"
+    // lebih berbahaya daripada tampil "tidak diketahui".
+    window.routeWpBadgeMarkup = function(route) {
+      const esc = window.escapeHtml || (v => String(v == null ? '' : v));
+      const raw = route.WAYPOINT_COUNT;
+      if (raw === null || raw === undefined || raw === '' || !Number.isFinite(Number(raw))) {
+        return '<span class="wp-badge wp-badge-unknown" title="Waypoint registration status unavailable — reload the route registry." aria-label="Waypoint registration status unavailable"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-circle"/></svg>WP ?</span>';
+      }
+      const count = Number(raw);
+      if (count > 0) {
+        return `<span class="wp-badge wp-badge-ok" title="${esc(count)} waypoint(s) registered for this route in the WAYPOINT database" aria-label="${esc(count)} waypoints registered in the waypoint database"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-check"/></svg>${esc(count)} WP</span>`;
+      }
+      return '<span class="wp-badge wp-badge-gap" title="No waypoints registered for this route in the WAYPOINT database" aria-label="No waypoints registered in the waypoint database"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-warn"/></svg>NO WP</span>';
+    }
+
+    // Tombol pintasan ke WAYPOINT MANAGER. Gagal-tertutup: WAYPOINT MANAGER
+    // admin-only, jadi non-admin tidak diberi tombol yang pasti ditolak. Selama
+    // status akses belum diketahui (isAdmin masih null saat boot), tombol juga
+    // belum muncul — dan digambar ulang saat occ:accessResolved tiba.
+    window.routeWpActionMarkup = function(route) {
+      if (window.isAdmin !== true) return '';
+      if (Number(route.WAYPOINT_COUNT) > 0) return '';
+      const esc = window.escapeHtml || (v => String(v == null ? '' : v));
+      const id = esc(route.ID);
+      return `<button class="action-btn btn-wp-gap route-wp-btn" data-route-id="${id}" title="No coordinates yet — add waypoints in WAYPOINT MANAGER" aria-label="Add waypoints for route ${id} in WAYPOINT MANAGER"><svg class="ic"><use href="#i-stack"/></svg></button>`;
+    }
+
+    // Pindah ke WAYPOINT MANAGER lalu isikan Route ID-nya. Kalau akses ditolak
+    // (switchTab menolak non-admin tanpa mengaktifkan view), tidak ada yang
+    // diisi — jangan sampai field terisi di halaman yang tidak boleh dibuka.
+    window.openWaypointsForRoute = function(routeId) {
+      if (typeof window.switchTab !== 'function') return;
+      window.switchTab('waypoint');
+      const view = document.getElementById('view-waypoint');
+      if (!view || !view.classList.contains('active')) return;
+      if (typeof window.latlongPrefillRoute === 'function') window.latlongPrefillRoute(routeId);
+    }
+
+    // Status admin baru turun setelah boot (getSettingsAccessInfo). Kalau halaman
+    // route sempat digambar sebelum itu, tombolnya belum ikut ter-render.
+    window.addEventListener('occ:accessResolved', function() {
+      if (Array.isArray(window.allRoutesCache) && window.allRoutesCache.length && document.getElementById('route-manager-tbody')) {
+        window.filterRouteTable();
+      }
+    });
 
     window.initRouteManager = function() {
+      // Event delegation: route card action buttons (C1 fix — no inline handlers).
+      // Dipasang sekali di sini, bukan di dalam render: tbody tidak pernah diganti
+      // (hanya innerHTML-nya), jadi listener yang dipasang saat render menumpuk dan
+      // satu klik jadi beberapa kali aksi.
+      const tbody = document.getElementById('route-manager-tbody');
+      if (tbody && !tbody.dataset.actionsBound) {
+        tbody.dataset.actionsBound = '1';
+        tbody.addEventListener('click', function(e) {
+          const wpBtn = e.target.closest('.route-wp-btn');
+          if (wpBtn) { window.openWaypointsForRoute(wpBtn.dataset.routeId); return; }
+          const editBtn = e.target.closest('.route-edit-btn');
+          if (editBtn) { window.editRouteFromManager(editBtn.dataset.routeId); return; }
+          const deleteBtn = e.target.closest('.route-delete-btn');
+          if (deleteBtn) { window.confirmDeleteRoute(deleteBtn.dataset.routeId); return; }
+        });
+      }
+
       google.script.run
         .withSuccessHandler(routes => {
           window.allRoutesCache = routes;
@@ -174,13 +262,26 @@
       const tbody = document.getElementById('route-manager-tbody');
       const esc = window.escapeHtml;
       document.getElementById('route-total-count').innerText = routes.length;
+
+      // Cakupan dihitung dari registry penuh, bukan dari hasil filter, supaya
+      // angka KPI tidak berubah saat operator mengetik pencarian. KPI lain ikut
+      // registry supaya satu baris kartu tidak mencampur dua definisi; jumlah
+      // baris yang sedang tampil tetap ada di counter kanan atas.
+      const registry = (Array.isArray(window.allRoutesCache) && window.allRoutesCache.length) ? window.allRoutesCache : routes;
       const kpiTotal = document.getElementById('route-kpi-total');
-      if (kpiTotal) kpiTotal.innerText = routes.length;
+      if (kpiTotal) kpiTotal.innerText = registry.length;
       const kpiPairs = document.getElementById('route-kpi-pairs');
-      if (kpiPairs) kpiPairs.innerText = new Set(routes.map(r => `${r.DEP_AIRPORT}-${r.ARR_AIRPORT}`)).size;
+      if (kpiPairs) kpiPairs.innerText = new Set(registry.map(r => `${r.DEP_AIRPORT}-${r.ARR_AIRPORT}`)).size;
+      const withWaypoints = registry.filter(r => Number(r.WAYPOINT_COUNT) > 0).length;
+      const kpiWp = document.getElementById('route-kpi-wp');
+      if (kpiWp) kpiWp.innerText = `${withWaypoints}/${registry.length}`;
+      const kpiWpCard = document.getElementById('route-kpi-wp-card');
+      if (kpiWpCard) kpiWpCard.className = 'kpi-card ' + (registry.length > 0 && withWaypoints === registry.length ? 'safe' : 'warn');
 
       if (routes.length === 0) {
-        tbody.innerHTML = '<div class="route-empty">NO ROUTES FOUND IN REGISTRY</div>';
+        tbody.innerHTML = (window.routeShowMissingWpOnly && registry.length > 0)
+          ? '<div class="route-empty">EVERY ROUTE IN THE REGISTRY HAS REGISTERED WAYPOINTS</div>'
+          : '<div class="route-empty">NO ROUTES FOUND IN REGISTRY</div>';
         return;
       }
 
@@ -188,10 +289,11 @@
         <div class="route-card">
           <div class="route-card-head">
             <div>
-              <div class="route-id-cell">${esc(r.ID)}</div>
+              <div class="route-id-line"><span class="route-id-cell">${esc(r.ID)}</span>${window.routeWpBadgeMarkup(r)}</div>
               <div class="route-pair-cell">${esc(r.DEP_AIRPORT)} <svg class="ic ic-sm" style="opacity:0.6;"><use href="#i-arrow-r"/></svg> ${esc(r.ARR_AIRPORT)}</div>
             </div>
             <div class="route-card-actions">
+              ${window.routeWpActionMarkup(r)}
               <button class="action-btn route-edit-btn" data-route-id="${esc(r.ID)}" title="Edit Profile" aria-label="Edit route profile"><svg class="ic"><use href="#i-pen"/></svg></button>
               <button class="action-btn btn-delete route-delete-btn" data-route-id="${esc(r.ID)}" title="Delete Profile" aria-label="Delete route profile"><svg class="ic"><use href="#i-trash"/></svg></button>
             </div>
@@ -211,35 +313,46 @@
           </div>
         </div>
       `).join('');
-
-      // Event delegation: route card action buttons (C1 fix — no inline handlers)
-      tbody.addEventListener('click', function(e) {
-        const editBtn = e.target.closest('.route-edit-btn');
-        if (editBtn) { window.editRouteFromManager(editBtn.dataset.routeId); return; }
-        const deleteBtn = e.target.closest('.route-delete-btn');
-        if (deleteBtn) { window.confirmDeleteRoute(deleteBtn.dataset.routeId); return; }
-      });
     }
 
     window.setRouteFilter = function(chipEl, val) {
+      // Chip bandara dan chip gap waypoint saling eksklusif — operator memilih
+      // satu sudut pandang, bukan menumpuk filter diam-diam.
+      window.routeShowMissingWpOnly = false;
       const input = document.getElementById('route-search-input');
-      if (input) {
-        input.value = val;
-        window.filterRouteTable();
-      }
-      
-      // Update UI active state
-      const chips = document.querySelectorAll('.filter-chip');
+      if (input) input.value = val;
+      const chips = document.querySelectorAll('#route-filter-chips .filter-chip');
       chips.forEach(c => c.classList.remove('active'));
       if (chipEl) chipEl.classList.add('active');
+      window.filterRouteTable();
+    }
+
+    window.toggleRouteWpFilter = function(chipEl) {
+      window.routeShowMissingWpOnly = !window.routeShowMissingWpOnly;
+      const input = document.getElementById('route-search-input');
+      if (input) input.value = '';
+      const chips = document.querySelectorAll('#route-filter-chips .filter-chip');
+      chips.forEach(c => c.classList.remove('active'));
+      if (window.routeShowMissingWpOnly && chipEl) {
+        chipEl.classList.add('active');
+      } else {
+        const allChip = document.querySelector('#route-filter-chips .filter-chip');
+        if (allChip) allChip.classList.add('active');
+      }
+      window.filterRouteTable();
     }
 
     window.filterRouteTable = function() {
-      const query = document.getElementById('route-search-input').value.toUpperCase();
-      const filtered = window.allRoutesCache.filter(r => 
-        r.ID.toUpperCase().includes(query) || 
-        r.DEP_AIRPORT.toUpperCase().includes(query) || 
-        r.ARR_AIRPORT.toUpperCase().includes(query)
+      const input = document.getElementById('route-search-input');
+      const query = (input ? input.value : '').toUpperCase().trim();
+      const missingOnly = window.routeShowMissingWpOnly === true;
+      const filtered = window.allRoutesCache.filter(r =>
+        (!missingOnly || !(Number(r.WAYPOINT_COUNT) > 0)) && (
+          !query ||
+          String(r.ID || '').toUpperCase().includes(query) ||
+          String(r.DEP_AIRPORT || '').toUpperCase().includes(query) ||
+          String(r.ARR_AIRPORT || '').toUpperCase().includes(query)
+        )
       );
       window.renderRouteManagerTable(filtered);
     }
