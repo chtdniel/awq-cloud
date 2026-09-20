@@ -173,6 +173,82 @@ function setInlineCell(sheetXml, ref, value) {
         + xmlEscape(value) + '</t></is></c>' + sheetXml.slice(end + closeTag.length);
 }
 
+// --- DATE row (report page) -------------------------------------------------
+// The report prints TODAY (UTC) into the DATE row (D9) as a real Excel date:
+// a numeric serial with the DD-MMM-YYYY format plus a date data-validation, so
+// the operator can change it before printing. Google Sheets shows its calendar
+// picker for a validated, date-formatted cell; Excel only enforces/annotates it
+// (a click-to-pick calendar inside a plain .xlsx is not possible without macros).
+
+const DATE_CELL_REF = 'D9';
+const DATE_CELL_FORMAT = 'DD-MMM-YYYY';
+
+function excelUtcDateSerial(date) {
+    // Excel serial day number (1900 system, post-1900-03-01) for a UTC calendar day.
+    return Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / 86400000) + 25569;
+}
+
+// Writes a numeric value (no inlineStr) into an existing template cell.
+function setNumberCell(sheetXml, ref, value, styleId) {
+    const start = sheetXml.indexOf('<c r="' + ref + '"');
+    if (start === -1) throw new Error('Template cell missing: ' + ref);
+    const tagEnd = sheetXml.indexOf('>', start);
+    if (tagEnd === -1) return sheetXml;
+    const selfClosing = sheetXml[tagEnd - 1] === '/';
+    const attrs = sheetXml.slice(start, selfClosing ? tagEnd - 1 : tagEnd)
+        .replace(/\s+t="[^"]*"/, '')
+        .replace(/\s+s="[^"]*"/, '');
+    const cell = attrs + ' s="' + styleId + '"><v>' + value + '</v></c>';
+    if (selfClosing) return sheetXml.slice(0, start) + cell + sheetXml.slice(tagEnd + 1);
+    const end = sheetXml.indexOf('</c>', tagEnd);
+    if (end === -1) return sheetXml;
+    return sheetXml.slice(0, start) + cell + sheetXml.slice(end + '</c>'.length);
+}
+
+// Clones the template's own DATE-cell xf onto a new DD-MMM-YYYY number format so
+// borders/centering/font survive; returns the new cellXfs index.
+function addDateCellStyle(get, templateStyleId) {
+    const stylesFile = get('xl/styles.xml');
+    if (!stylesFile || stylesFile.text === null) throw new Error('Template styles.xml missing');
+    let styles = stylesFile.text;
+    const usedIds = [...styles.matchAll(/<numFmt numFmtId="(\d+)"/g)].map(m => Number(m[1]));
+    const numFmtId = Math.max(163, ...usedIds) + 1;
+    const numFmtTag = '<numFmt numFmtId="' + numFmtId + '" formatCode="' + DATE_CELL_FORMAT + '"/>';
+    const numFmtsTag = styles.match(/<numFmts([^>]*)>/);
+    if (numFmtsTag) {
+        const declared = Number((numFmtsTag[1].match(/count="(\d+)"/) || [])[1] || 0);
+        styles = styles.replace(/<numFmts([^>]*)>([\s\S]*?)<\/numFmts>/, (m, attrs, body) =>
+            '<numFmts' + attrs.replace(/count="\d+"/, 'count="' + (declared + 1) + '"') + '>' + body + numFmtTag + '</numFmts>');
+    } else {
+        styles = styles.replace(/(<styleSheet[^>]*>)/, '$1<numFmts count="1">' + numFmtTag + '</numFmts>');
+    }
+    const cellXfs = styles.match(/<cellXfs([^>]*)>([\s\S]*?)<\/cellXfs>/);
+    if (!cellXfs) throw new Error('Template cellXfs missing');
+    const xfs = [...cellXfs[2].matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(m => m[0]);
+    const source = xfs[templateStyleId];
+    const styleId = xfs.length;
+    const dateXf = source
+        ? source.replace(/numFmtId="\d+"/, 'numFmtId="' + numFmtId + '"').replace(/<xf\b/, '<xf applyNumberFormat="1"')
+        : '<xf numFmtId="' + numFmtId + '" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>';
+    const declaredXfs = Number((cellXfs[1].match(/count="(\d+)"/) || [])[1] || xfs.length);
+    styles = styles.replace(cellXfs[0],
+        '<cellXfs' + cellXfs[1].replace(/count="\d+"/, 'count="' + (declaredXfs + 1) + '"') + '>' + cellXfs[2] + dateXf + '</cellXfs>');
+    stylesFile.text = styles;
+    return styleId;
+}
+
+// Date rule for the DATE cell: keeps typed input a valid date and gives Google
+// Sheets (and Excel) an explicit, annotated edit affordance.
+function dateCellValidationXml() {
+    return '<dataValidations count="1"><dataValidation type="date" operator="between" allowBlank="1"'
+        + ' showInputMessage="1" showErrorMessage="1" errorStyle="stop"'
+        + ' errorTitle="Tanggal tidak valid" error="Masukkan tanggal yang valid, contoh 18-SEP-2026."'
+        + ' promptTitle="Tanggal briefing" prompt="Ketik atau pilih tanggal (DD-MMM-YYYY)."'
+        + ' sqref="' + DATE_CELL_REF + '">'
+        + '<formula1>DATE(2000,1,1)</formula1><formula2>DATE(2100,12,31)</formula2>'
+        + '</dataValidation></dataValidations>';
+}
+
 function findSheetFile(workbookXml, workbookRelsXml, sheetName) {
     const tagRe = new RegExp('<sheet[^>]*name="' + sheetName + '"[^>]*/?>');
     const tag = workbookXml.match(tagRe);
@@ -418,8 +494,12 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
 // options.embedSignatureQr: true (default) keeps the DXR signature QR in the CBR
 // drawing. The report page passes false: its XLSX (downloaded directly or
 // imported into Google Sheets) prints the DXR name only, without a QR.
+// options.dateCellToday: true writes TODAY (UTC) into the DATE row as a real,
+// changeable date (DD-MMM-YYYY + date validation) instead of the flight-date
+// range. Used by the report page; the editable briefing form keeps the range.
 async function buildXlsxResponse(context, form, options = {}) {
     const embedSignatureQr = options.embedSignatureQr !== false;
+    const dateCellToday = options.dateCellToday === true;
     form = { ...form, notams: (form.notams || []).map(notam => ({ ...notam, text: decodeNotamText(notam?.text) })) };
     if ((form.legs || []).length > 6) throw new RangeError('Template supports at most 6 flights; split the report.');
     if ((form.tafs || []).length > WX_NOTAM_CAPACITY || (form.notams || []).length > WX_NOTAM_CAPACITY) throw new RangeError('Template supports at most 30 weather or NOTAM entries; split the report.');
@@ -450,7 +530,15 @@ async function buildXlsxResponse(context, form, options = {}) {
     const legs = form.legs || [];
     const distinctLegValues = key => [...new Set(legs.map(leg => key === 'date' ? formatReportDate(leg[key]) : leg[key]).filter(Boolean))].join(' / ');
     xml = setInlineCell(xml, 'D7', distinctLegValues('flightNo'));
-    xml = setInlineCell(xml, 'D9', distinctLegValues('date'));
+    if (dateCellToday) {
+        const templateStyleId = Number((xml.match(new RegExp('<c r="' + DATE_CELL_REF + '"[^>]*\\ss="(\\d+)"')) || [])[1]);
+        const styleId = addDateCellStyle(get, Number.isFinite(templateStyleId) ? templateStyleId : -1);
+        xml = setNumberCell(xml, DATE_CELL_REF, excelUtcDateSerial(new Date()), styleId);
+        // dataValidations must sit after mergeCells and before printOptions.
+        xml = xml.replace('</mergeCells>', '</mergeCells>' + dateCellValidationXml());
+    } else {
+        xml = setInlineCell(xml, 'D9', distinctLegValues('date'));
+    }
     xml = setInlineCell(xml, 'D11', distinctLegValues('reg'));
     for (let index = 0; index < 6; index++) {
         const leg = legs[index] || {};
@@ -627,8 +715,9 @@ export async function handleGenerateReportXlsx(context, args) {
             const noSigMap = payload.noSigMap || payload.noSigStationMap || {};
             form = await buildFormFromFlights(context, flightArr, savedNotamAnalysis, noSigMap);
         }
-        // Report page (DOWNLOAD SHEET XLSX / CREATE GOOGLE SHEET): no signature QR.
-        return await buildXlsxResponse(context, form, { embedSignatureQr: false });
+        // Report page (DOWNLOAD SHEET XLSX / CREATE GOOGLE SHEET): no signature QR,
+        // and the DATE row defaults to today (UTC) with a date picker/validation.
+        return await buildXlsxResponse(context, form, { embedSignatureQr: false, dateCellToday: true });
     } catch (e) {
         console.error('[XLSX report] generate failed:', e);
         return Response.json({ error: 'XLSX report generation failed: ' + e.message }, { status: e instanceof RangeError ? 400 : 500 });

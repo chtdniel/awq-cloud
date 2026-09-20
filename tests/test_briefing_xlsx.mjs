@@ -1,7 +1,7 @@
 // E2E self-check: server-side functions simulating the Worker runtime pieces
 // used by briefing-xlsx.js (ZIP round-trip + inline cell edit).
 // Run: node tests/test_briefing_xlsx.mjs
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
@@ -164,7 +164,11 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   const reportRequest = new Request('http://localhost/api/rpc', { method: 'POST', headers, body: JSON.stringify({ method: 'generateReportXlsx', args: [payload] }) });
   const reportResponse = await onRequestPost({ request: reportRequest, env: { DB, ASSETS } });
   assert(reportResponse.status === 200, 'generateReportXlsx returns 200');
-  const reportParts = zipPartMap(new Uint8Array(await reportResponse.arrayBuffer()));
+  const reportBytes = new Uint8Array(await reportResponse.arrayBuffer());
+  // Manual QA hook: AWQ_XLSX_DUMP=<path> writes the generated report so it can be
+  // opened in Excel / Google Sheets to eyeball the DATE picker.
+  if (process.env.AWQ_XLSX_DUMP) await writeFile(process.env.AWQ_XLSX_DUMP, Buffer.from(reportBytes));
+  const reportParts = zipPartMap(reportBytes);
 
   const templateMedia = entries.map(e => e.name).filter(n => n.startsWith('xl/media/')).sort();
   const reportMedia = [...reportParts.keys()].filter(n => n.startsWith('xl/media/')).sort();
@@ -176,7 +180,45 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   assert(!/qr/i.test(reportDrawingRels) && !reportDrawingRels.includes('../media/image3.png'), 'report drawing relationships add no QR image target');
   assert((reportDrawing.match(/<xdr:oneCellAnchor>/g) || []).length === 1, 'report CBR drawing keeps only the template anchor');
   assert(new TextDecoder().decode(reportParts.get('xl/worksheets/sheet5.xml')).includes('CHRIS DANIEL (LIC: FOOL-881234)'), 'report E48 still carries the saved DXR signature text');
-  console.log('PASS: report XLSX (report page) carries no QR image part or anchor.');
+
+  // --- Report page DATE row: today (UTC) as a real, changeable date ---------
+  // D9 must be a numeric date serial (not the flight-date text), carry the
+  // DD-MMM-YYYY number format on its own cloned xf, and expose a date validation
+  // so Google Sheets shows its calendar and Excel enforces a valid date.
+  const reportSheet = new TextDecoder().decode(reportParts.get('xl/worksheets/sheet5.xml'));
+  const d9 = (reportSheet.match(/<c r="D9"[^>]*>[\s\S]*?<\/c>/) || [''])[0];
+  assert(!d9.includes('inlineStr') && /<v>\d+<\/v>/.test(d9), 'report D9 holds a numeric date serial, not text (' + d9 + ')');
+  const d9Serial = Number((d9.match(/<v>(\d+)<\/v>/) || [])[1]);
+  const nowUtc = new Date();
+  const expectedSerial = Math.floor(Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate()) / 86400000) + 25569;
+  assert(d9Serial === expectedSerial, 'report D9 serial is today in UTC (' + d9Serial + ' === ' + expectedSerial + ')');
+
+  const d9StyleId = Number((d9.match(/s="(\d+)"/) || [])[1]);
+  const reportStyles = new TextDecoder().decode(reportParts.get('xl/styles.xml'));
+  const formSheet = new TextDecoder().decode(parts.get('xl/worksheets/sheet5.xml'));
+  const formStyles = new TextDecoder().decode(parts.get('xl/styles.xml'));
+  const xfsOf = (styles) => [...(styles.match(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/) || [''])[0]
+    .matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(m => m[0]);
+  const reportXfs = xfsOf(reportStyles);
+  assert(reportStyles.includes('formatCode="DD-MMM-YYYY"'), 'report styles add the DD-MMM-YYYY number format');
+  const xfCount = Number((reportStyles.match(/<cellXfs count="(\d+)"/) || [])[1]);
+  assert(reportXfs.length === xfCount, 'cellXfs count matches the appended date style (' + reportXfs.length + ' === ' + xfCount + ')');
+  const dateXf = reportXfs[d9StyleId] || '';
+  const formD9StyleId = Number((formSheet.match(/<c r="D9"[^>]*s="(\d+)"/) || [])[1]);
+  const formD9Xf = xfsOf(formStyles)[formD9StyleId] || '';
+  const borderOf = (xf) => (xf.match(/borderId="(\d+)"/) || [])[1];
+  const dateNumFmtId = (dateXf.match(/numFmtId="(\d+)"/) || [])[1];
+  assert(dateXf.includes('applyNumberFormat="1"') && new RegExp('numFmtId="' + dateNumFmtId + '" formatCode="DD-MMM-YYYY"').test(reportStyles), 'D9 xf applies the DD-MMM-YYYY format (numFmtId ' + dateNumFmtId + ')');
+  assert(!!borderOf(formD9Xf) && borderOf(dateXf) === borderOf(formD9Xf), 'D9 keeps the template border on the cloned xf (' + borderOf(dateXf) + ')');
+  assert(/horizontal="center"/.test(dateXf) && /horizontal="center"/.test(formD9Xf), 'D9 keeps the template centering on the cloned xf');
+
+  const reportValidation = (reportSheet.match(/<dataValidations[\s\S]*?<\/dataValidations>/) || [''])[0];
+  assert(/type="date"/.test(reportValidation) && /sqref="D9"/.test(reportValidation), 'report D9 carries a date data-validation');
+  assert(reportSheet.indexOf('</mergeCells>') < reportSheet.indexOf('<dataValidations') && reportSheet.indexOf('<dataValidations') < reportSheet.indexOf('<printOptions'), 'dataValidations sits between mergeCells and printOptions (schema order)');
+  assert(/<c r="D9"[^>]*t="inlineStr"/.test(formSheet), 'briefing-form D9 still holds the flight-date TEXT');
+  assert(!/<dataValidations/.test(formSheet), 'briefing-form XLSX gets no date validation (out of scope for the report-page rule)');
+
+  console.log('PASS: report XLSX (report page) carries no QR image part or anchor; DATE row defaults to today (UTC) with DD-MMM-YYYY + date validation.');
   database.close();
 }
 console.log('All briefing-xlsx contract checks passed.');
