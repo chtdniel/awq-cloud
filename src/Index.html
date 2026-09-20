@@ -668,6 +668,13 @@
 
     /* DATA parent tab dropdown (submenu) — lives inside .nav-btn-group */
     .nav-data-container { position: relative; display: inline-flex; flex-shrink: 0; }
+    /* WX uses the same container: the tab itself still opens WX MONITORING, the
+       caret next to it opens the WX pages list (WX MONITORING / WX WARNING), so
+       the existing one-click route to the monitoring page is not taken away. */
+    .nav-data-container .nav-caret-btn { padding: 7px 9px; color: var(--text-muted); font-size: 8px; }
+    .nav-data-container .nav-caret-btn .chevron { font-size: 8px; opacity: 0.7; transition: 0.3s; }
+    .nav-data-container .nav-caret-btn[aria-expanded="true"] { color: var(--text-primary); background: var(--nav-item-hover); }
+    .nav-data-container .nav-caret-btn[aria-expanded="true"] .chevron { transform: rotate(180deg); }
     .nav-data-container .nav-tab .chevron { font-size: 8px; opacity: 0.5; transition: 0.3s; }
     .nav-data-container .nav-tab[aria-expanded="true"] .chevron { transform: rotate(180deg); }
     .nav-data-container .data-submenu {
@@ -1492,7 +1499,14 @@
       <button id="nav-taf" class="nav-tab" onclick="window.switchTab('taf')" title="TAF Manager"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-note"/></svg>TAF</button>
       <button id="nav-notam" class="nav-tab" onclick="window.switchTab('notam')" title="NOTAM Analysis"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-alert"/></svg>NOTAM<span id="nav-notam-badge" style="display:none; background:var(--status-critical); color:#fff; font-size:9px; font-weight:900; min-width:16px; height:16px; line-height:16px; border-radius:8px; padding:0 4px; text-align:center; margin-left:6px;">0</span></button>
       <button id="nav-report" class="nav-tab" onclick="window.switchTab('report')" title="Release Compiler"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-files"/></svg>REPORT</button>
-      <button id="nav-weather" class="nav-tab" onclick="window.switchTab('weather')" title="Weather Monitoring"><svg class="ic ic-sm" style="margin-right:6px; color:var(--status-warning);"><use href="#i-warn"/></svg>WX</button>
+      <div class="nav-data-container">
+        <button id="nav-weather" class="nav-tab" onclick="window.switchTab('weather')" title="Weather Monitoring (WX)"><svg class="ic ic-sm" style="margin-right:6px; color:var(--status-warning);"><use href="#i-warn"/></svg>WX</button>
+        <button id="nav-weather-toggle" class="nav-tab nav-caret-btn" type="button" aria-expanded="false" aria-controls="wx-submenu" aria-haspopup="true" onclick="window.toggleWxSubmenu()" title="WX pages"><svg class="ic chevron"><use href="#i-caret-dn"/></svg></button>
+        <div id="wx-submenu" class="dropdown-menu data-submenu" role="menu" aria-label="WX pages">
+          <button type="button" class="dropdown-item" role="menuitem" data-tab="weather" onclick="window.switchTab('weather')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-eye"/></svg>WX MONITORING</button>
+          <button type="button" class="dropdown-item" role="menuitem" data-tab="wx-warning" onclick="window.switchTab('wx-warning')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-alert"/></svg>WX WARNING</button>
+        </div>
+      </div>
        <button id="nav-fir" class="nav-tab" onclick="window.switchTab('fir')" title="FIR Dispatch Control"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-arrow-r"/></svg>FIR</button>
         <button id="nav-fir-notam" class="nav-tab" onclick="window.switchTab('fir-notam')" title="FIR NOTAM Editor"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-pen"/></svg>FIR NOTAM</button>
         <button id="nav-checklist" class="nav-tab" onclick="window.switchTab('checklist')" title="Operational Checklist"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-check-circle"/></svg>CHECKLIST</button>
@@ -1543,6 +1557,7 @@
     <?!= include('Route_Ui'); ?>
     <?!= include('Taf_Ui'); ?>
     <?!= include('Weather_Warning_Ui'); ?>
+    <?!= include('Wx_Warning_Ui'); ?>
     <section id="view-fir" class="view-section">
       <div id="fir-dashboard">
         <?!= include('FIR_Ui'); ?>
@@ -1626,12 +1641,17 @@
 
       const targetView = document.getElementById('view-' + tabName);
       const targetNav = document.getElementById('nav-' + tabName);
-      // Submenu entries (NOTAM UPDATE / FIR UPDATE / WAYPOINT / ROUTE) live under the DATA parent.
-      // Their views have no dedicated top-level nav button, so active state + aria-current
-      // fall back to the DATA parent tab.
-      const dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint', 'route'];
-      const isDataSubmenu = dataSubmenuTabs.indexOf(tabName) !== -1;
-      
+      // Submenu entries live under a parent tab. DATA parent: NOTAM UPDATE / FIR
+      // UPDATE / WAYPOINT / ROUTE. WX parent: WX WARNING (WX MONITORING keeps its
+      // own nav button, so it is listed against the WX parent only for the menu
+      // highlight). Submenu views have no dedicated top-level button of their own,
+      // so active state + aria-current fall back to the parent.
+      var OCC_SUBMENUS = [
+        { menuId: 'data-submenu', parentId: 'nav-data', tabs: ['update-notam', 'fir-update', 'waypoint', 'route'] },
+        { menuId: 'wx-submenu', parentId: 'nav-weather', tabs: ['weather', 'wx-warning'] }
+      ];
+      var submenuOwner = OCC_SUBMENUS.filter(function (menu) { return menu.tabs.indexOf(tabName) !== -1; })[0] || null;
+
       if (!targetView) {
         console.error('[ERROR] Target view not found: view-' + tabName);
         return;
@@ -1647,21 +1667,28 @@
        });
       
        targetView.classList.add('active');
-        document.querySelectorAll('#data-submenu .dropdown-item').forEach(function(b){
-          var on = isDataSubmenu && b.getAttribute('data-tab') === tabName;
-          b.classList.toggle('active', on);
-          if (on) { b.setAttribute('aria-current', 'true'); } else { b.removeAttribute('aria-current'); }
+        OCC_SUBMENUS.forEach(function (menu) {
+          document.querySelectorAll('#' + menu.menuId + ' .dropdown-item').forEach(function (b) {
+            var on = !!submenuOwner && submenuOwner.menuId === menu.menuId && b.getAttribute('data-tab') === tabName;
+            b.classList.toggle('active', on);
+            if (on) { b.setAttribute('aria-current', 'true'); } else { b.removeAttribute('aria-current'); }
+          });
         });
-        if (isDataSubmenu) {
-         var dataParent = document.getElementById('nav-data');
-         if (dataParent) {
-           dataParent.classList.add('active');
-           dataParent.setAttribute('aria-current', 'page');
-         }
-       } else if (targetNav) {
-         targetNav.classList.add('active');
-         targetNav.setAttribute('aria-current', 'page');
-       }
+        // The WX parent is only highlighted by its child page; the tab itself
+        // still owns WX MONITORING.
+        var parentHighlighted = false;
+        if (submenuOwner) {
+          var parentTab = document.getElementById(submenuOwner.parentId);
+          if (parentTab) {
+            parentTab.classList.add('active');
+            parentTab.setAttribute('aria-current', 'page');
+            parentHighlighted = true;
+          }
+        }
+        if (!parentHighlighted && targetNav) {
+          targetNav.classList.add('active');
+          targetNav.setAttribute('aria-current', 'page');
+        }
        document.querySelectorAll('.nav-tab .tl-lamp').forEach(function(el) { el.remove(); });
        var __activeTab = document.querySelector('.nav-tab.active');
        if (__activeTab) {
@@ -1703,6 +1730,14 @@
            window.initLatlongManager();
          } else if (tabName === 'fir-update' && typeof window.initFirUpdateDashboard === 'function') {
            window.initFirUpdateDashboard();
+         } else if (tabName === 'wx-warning' && typeof window.initWxWarning === 'function') {
+           // Leaflet is shared with the FIR pages (one CDN load, promise-cached).
+           if (typeof window.occEnsureLeaflet === 'function') {
+             window.occEnsureLeaflet().then(function() { window.initWxWarning(); })
+               .catch(function(err) { console.error('[ERROR] Leaflet load failed:', err); });
+           } else {
+             window.initWxWarning();
+           }
          }
       } catch (err) {
         console.error('[ERROR] Initialization failed for ' + tabName + ':', err);
@@ -1711,9 +1746,10 @@
       // Auto-scroll to top on tab change
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
-      // Close DATA submenu after selecting an entry
-      if (isDataSubmenu && typeof window.closeDataSubmenu === 'function') {
-        window.closeDataSubmenu();
+      // Switching to any tab dismisses every open nav submenu: a menu left open
+      // over the page it just navigated to swallows the next click.
+      if (Array.isArray(window.OCC_NAV_SUBMENUS)) {
+        window.OCC_NAV_SUBMENUS.forEach(function (entry) { window.setNavSubmenu(entry.menuId, false); });
       }
     };
 
@@ -1731,21 +1767,26 @@
     // Diagnostic after templated includes are rendered — never FATAL on known HtmlService includes
     (function() {
       var __occRunDiagnostics = function() {
-        var sections = ['flight', 'update-notam', 'fir-update', 'taf', 'notam', 'report', 'weather', 'route', 'waypoint'];
-        var dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint', 'route'];
+        var sections = ['flight', 'update-notam', 'fir-update', 'taf', 'notam', 'report', 'weather', 'wx-warning', 'route', 'waypoint'];
+        // Sections that live behind a parent dropdown: {view suffix -> parent nav button}
+        var submenuParents = {
+          'update-notam': 'nav-data', 'fir-update': 'nav-data', 'waypoint': 'nav-data', 'route': 'nav-data',
+          'wx-warning': 'nav-weather'
+        };
         var missing = [];
         sections.forEach(function(s) {
           var el = document.getElementById('view-' + s);
           if (!el) missing.push('view-' + s);
-          // Submenu tabs live under the DATA parent — no dedicated nav button by design
-          if (dataSubmenuTabs.indexOf(s) !== -1) {
-            if (!document.getElementById('nav-data')) console.warn('[DIAGNOSTIC] Missing nav button: nav-data');
+          // Submenu pages have no dedicated nav button by design; check the parent.
+          if (submenuParents[s]) {
+            if (!document.getElementById(submenuParents[s])) console.warn('[DIAGNOSTIC] Missing nav button: ' + submenuParents[s]);
             return;
           }
           var nav = document.getElementById('nav-' + s);
           if (!nav) console.warn('[DIAGNOSTIC] Missing nav button: nav-' + s);
         });
         if (!document.getElementById('nav-fir')) console.warn('[DIAGNOSTIC] Missing nav button: nav-fir');
+        if (!document.getElementById('wx-submenu')) console.warn('[DIAGNOSTIC] Missing nav submenu: wx-submenu');
         if (missing.length > 0) {
           console.warn('[DIAGNOSTIC] Missing UI Modules:', missing.join(', '));
         } else {
@@ -1872,21 +1913,39 @@
         menu.classList.remove('show');
         btn.classList.remove('open');
         btn.setAttribute('aria-expanded', 'false');
-        // Don't drop nav layer while DATA submenu is still open
-        var dataMenu = document.getElementById('data-submenu');
-        if (!dataMenu || !dataMenu.classList.contains('show')) {
+        // Don't drop the nav layer while any nav submenu is still open
+        if (typeof window.occAnyNavSubmenuOpen === 'function' ? !window.occAnyNavSubmenuOpen() : true) {
           document.querySelector('.occ-nav-bar').classList.remove('dropdown-open');
         }
       }
     });
 
-    // DATA parent tab submenu logic (mimics ext-links dropdown mechanics)
-    // Anchor submenu to the viewport (position:fixed from button rect) so it
-    // escapes every overflow clipping ancestor —incl. the horizontal tab
-    // scroller at 390px— and stays inside the viewport horizontally.
-    window.positionDataSubmenu = function() {
-      const menu = document.getElementById('data-submenu');
-      const btn = document.getElementById('nav-data');
+    // ---------------------------------------------------------------- submenus --
+    // Nav dropdown submenus (DATA and WX) share this machinery. A menu is
+    // anchored to the viewport (position:fixed from the trigger rect) so it
+    // escapes every overflow clipping ancestor — including the horizontal tab
+    // scroller at 390px — and stays inside the viewport horizontally.
+    // The WX tab itself still opens WX MONITORING; only the caret opens the list.
+    window.OCC_NAV_SUBMENUS = [
+      { menuId: 'data-submenu', triggerIds: ['nav-data'] },
+      { menuId: 'wx-submenu', triggerIds: ['nav-weather-toggle', 'nav-weather'] }
+    ];
+    function occSubmenuConfig(menuId) {
+      return (window.OCC_NAV_SUBMENUS || []).filter(function (entry) { return entry.menuId === menuId; })[0] || null;
+    }
+    function occSubmenuTriggers(entry) {
+      return (entry.triggerIds || []).map(function (id) { return document.getElementById(id); }).filter(Boolean);
+    }
+    window.occAnyNavSubmenuOpen = function (exceptMenuId) {
+      return (window.OCC_NAV_SUBMENUS || []).some(function (entry) {
+        if (exceptMenuId && entry.menuId === exceptMenuId) return false;
+        var menu = document.getElementById(entry.menuId);
+        return !!(menu && menu.classList.contains('show'));
+      });
+    };
+    window.positionNavSubmenu = function (menuId, triggerId) {
+      const menu = document.getElementById(menuId);
+      const btn = document.getElementById(triggerId);
       if (!menu || !btn) return;
       var r = btn.getBoundingClientRect();
       var w = Math.min(220, window.innerWidth - 16);
@@ -1897,8 +1956,8 @@
       menu.style.right = 'auto';
       menu.style.width = w + 'px';
     };
-    window.clearDataSubmenuPos = function() {
-      const menu = document.getElementById('data-submenu');
+    window.clearNavSubmenuPos = function (menuId) {
+      const menu = document.getElementById(menuId);
       if (!menu) return;
       menu.style.position = '';
       menu.style.top = '';
@@ -1906,90 +1965,112 @@
       menu.style.right = '';
       menu.style.width = '';
     };
-    window.toggleDataSubmenu = function() {
-      const menu = document.getElementById('data-submenu');
-      const btn = document.getElementById('nav-data');
-      if (!menu || !btn) return;
-      const isOpen = menu.classList.contains('show');
-      const nav = document.querySelector('.occ-nav-bar');
-      const group = document.querySelector('.nav-btn-group');
-      menu.classList.toggle('show', !isOpen);
-      btn.setAttribute('aria-expanded', String(!isOpen));
-      if (nav) nav.classList.toggle('dropdown-open', !isOpen);
-      // Unclip: scroll container hides the absolute submenu while open
-      if (group) group.classList.toggle('menu-open', !isOpen);
-      if (!isOpen) window.positionDataSubmenu();
-      else window.clearDataSubmenuPos();
-    };
-    window.closeDataSubmenu = function() {
-      const menu = document.getElementById('data-submenu');
-      const btn = document.getElementById('nav-data');
-      if (!menu || !btn) return;
-      menu.classList.remove('show');
-      btn.setAttribute('aria-expanded', 'false');
-      window.clearDataSubmenuPos();
+    window.setNavSubmenu = function (menuId, open) {
+      var entry = occSubmenuConfig(menuId);
+      var menu = document.getElementById(menuId);
+      if (!entry || !menu) return;
+      menu.classList.toggle('show', !!open);
+      occSubmenuTriggers(entry).forEach(function (btn) { btn.setAttribute('aria-expanded', String(!!open)); });
+      var stillOpen = !!open || window.occAnyNavSubmenuOpen(menuId);
+      var nav = document.querySelector('.occ-nav-bar');
       var group = document.querySelector('.nav-btn-group');
-      if (group) group.classList.remove('menu-open');
-      var extStillOpen = false;
-      var extMenu = document.getElementById('ext-links-menu');
-      if (extMenu) extStillOpen = extMenu.classList.contains('show');
-      if (!extStillOpen) document.querySelector('.occ-nav-bar').classList.remove('dropdown-open');
+      if (nav) nav.classList.toggle('dropdown-open', stillOpen);
+      // Unclip: the scroll container hides the absolute submenu while open
+      if (group) group.classList.toggle('menu-open', stillOpen);
+      if (open) window.positionNavSubmenu(menuId, entry.triggerIds[0]);
+      else window.clearNavSubmenuPos(menuId);
     };
-    // Close DATA submenu on click outside / entry select
-    document.addEventListener('click', function(event) {
-      const menu = document.getElementById('data-submenu');
-      const btn = document.getElementById('nav-data');
-      if (!menu || !btn) return;
-      if (!btn.contains(event.target) && !menu.contains(event.target)) {
-        window.closeDataSubmenu();
+    window.toggleNavSubmenu = function (menuId) {
+      var menu = document.getElementById(menuId);
+      if (!menu) return;
+      var willOpen = !menu.classList.contains('show');
+      // One nav submenu at a time.
+      (window.OCC_NAV_SUBMENUS || []).forEach(function (entry) {
+        if (entry.menuId !== menuId) window.setNavSubmenu(entry.menuId, false);
+      });
+      window.setNavSubmenu(menuId, willOpen);
+    };
+    window.closeNavSubmenu = function (menuId, focusId) {
+      window.setNavSubmenu(menuId, false);
+      if (focusId) {
+        var btn = document.getElementById(focusId);
+        if (btn) btn.focus();
+      }
+    };
+    // DATA names kept for the existing markup and any module that calls them.
+    window.positionDataSubmenu = function () { window.positionNavSubmenu('data-submenu', 'nav-data'); };
+    window.clearDataSubmenuPos = function () { window.clearNavSubmenuPos('data-submenu'); };
+    window.toggleDataSubmenu = function () { window.toggleNavSubmenu('data-submenu'); };
+    window.closeDataSubmenu = function () { window.closeNavSubmenu('data-submenu'); };
+    window.toggleWxSubmenu = function () { window.toggleNavSubmenu('wx-submenu'); };
+    window.closeWxSubmenu = function () { window.closeNavSubmenu('wx-submenu'); };
+
+    // Close a submenu on click outside it (its trigger click is handled by the
+    // trigger itself, which either toggles the menu or navigates).
+    document.addEventListener('click', function (event) {
+      (window.OCC_NAV_SUBMENUS || []).forEach(function (entry) {
+        var menu = document.getElementById(entry.menuId);
+        if (!menu || !menu.classList.contains('show')) return;
+        var clickedTrigger = occSubmenuTriggers(entry).some(function (btn) { return btn.contains(event.target); });
+        if (!clickedTrigger && !menu.contains(event.target)) window.setNavSubmenu(entry.menuId, false);
+      });
+      if (!window.occAnyNavSubmenuOpen()) {
+        var group = document.querySelector('.nav-btn-group');
+        var nav = document.querySelector('.occ-nav-bar');
+        if (group) group.classList.remove('menu-open');
+        var extMenu = document.getElementById('ext-links-menu');
+        if (nav && !(extMenu && extMenu.classList.contains('show'))) nav.classList.remove('dropdown-open');
       }
     });
-    // Close DATA submenu on Escape
-    document.addEventListener('keydown', function(event) {
-      const menu = document.getElementById('data-submenu');
-      const btn = document.getElementById('nav-data');
-      if (!menu || !btn) return;
-      if (event.key === 'Escape' && menu.classList.contains('show')) {
-        event.preventDefault();
-        window.closeDataSubmenu();
-        btn.focus();
-      }
-    });
-    // Keep viewport-anchored submenu glued to DATA button on resize/scroll
-    (function() {
-      if (window.__dataSubmenuRepositionBound) return;
-      window.__dataSubmenuRepositionBound = true;
-      var reposition = function() {
-        var menu = document.getElementById('data-submenu');
-        if (menu && menu.classList.contains('show') && typeof window.positionDataSubmenu === 'function') {
-          window.positionDataSubmenu();
+    // Escape closes the open submenu and returns focus to its trigger.
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      (window.OCC_NAV_SUBMENUS || []).forEach(function (entry) {
+        var menu = document.getElementById(entry.menuId);
+        if (menu && menu.classList.contains('show')) {
+          event.preventDefault();
+          window.closeNavSubmenu(entry.menuId, entry.triggerIds[0]);
         }
+      });
+    });
+    // Keep the viewport-anchored submenu glued to its trigger on resize/scroll.
+    (function() {
+      if (window.__navSubmenuRepositionBound) return;
+      window.__navSubmenuRepositionBound = true;
+      var reposition = function() {
+        (window.OCC_NAV_SUBMENUS || []).forEach(function (entry) {
+          var menu = document.getElementById(entry.menuId);
+          if (menu && menu.classList.contains('show')) window.positionNavSubmenu(entry.menuId, entry.triggerIds[0]);
+        });
       };
       window.addEventListener('resize', reposition);
       window.addEventListener('scroll', reposition, true);
     })();
-    // Keyboard: arrows move through DATA submenu items (checklist: Tab-Enter-panah-Enter-Escape)
-    document.addEventListener('keydown', function(event) {
-      const menu = document.getElementById('data-submenu');
-      const btn = document.getElementById('nav-data');
-      if (!menu || !btn) return;
-      var items = Array.prototype.slice.call(menu.querySelectorAll('.dropdown-item'));
-      if (!items.length) return;
-      var inMenu = menu.contains(document.activeElement);
-      var onBtn = document.activeElement === btn;
-      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (onBtn || inMenu)) {
-        event.preventDefault();
-        if (!menu.classList.contains('show')) window.toggleDataSubmenu();
-        var idx = items.indexOf(document.activeElement);
-        var next = (event.key === 'ArrowDown')
-          ? items[(idx + 1) % items.length]
-          : items[(idx - 1 + items.length) % items.length];
-        (next || items[0]).focus();
-      } else if (event.key === 'Home' && inMenu) {
-        event.preventDefault(); items[0].focus();
-      } else if (event.key === 'End' && inMenu) {
-        event.preventDefault(); items[items.length - 1].focus();
-      }
+    // Keyboard: arrows move through submenu items (checklist: Tab-Enter-panah-Enter-Escape)
+    document.addEventListener('keydown', function (event) {
+      (window.OCC_NAV_SUBMENUS || []).forEach(function (entry) {
+        var menu = document.getElementById(entry.menuId);
+        if (!menu) return;
+        var triggers = occSubmenuTriggers(entry);
+        var onTrigger = triggers.some(function (btn) { return document.activeElement === btn; });
+        var inMenu = menu.contains(document.activeElement);
+        if (!onTrigger && !inMenu) return;
+        var items = Array.prototype.slice.call(menu.querySelectorAll('.dropdown-item'));
+        if (!items.length) return;
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          if (!menu.classList.contains('show')) window.setNavSubmenu(entry.menuId, true);
+          var idx = items.indexOf(document.activeElement);
+          var next = (event.key === 'ArrowDown')
+            ? items[(idx + 1) % items.length]
+            : items[(idx - 1 + items.length) % items.length];
+          (next || items[0]).focus();
+        } else if (event.key === 'Home' && inMenu) {
+          event.preventDefault(); items[0].focus();
+        } else if (event.key === 'End' && inMenu) {
+          event.preventDefault(); items[items.length - 1].focus();
+        }
+      });
     });
 
     // UTC Clock Logic

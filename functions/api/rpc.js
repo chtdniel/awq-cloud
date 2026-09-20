@@ -1,5 +1,10 @@
 import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
 import { fetchLatestTafs } from '../../shared/taf.mjs';
+import {
+    fromWarningRow, toManualWarningRow, computeRouteHits, parseProducts, asPreviewWarning,
+    WX_WARNING_UPSERT, warningBindValues, SOURCE_LABELS, DEFAULT_BUFFER_NM
+} from '../../shared/wxwarning.mjs';
+import { resolveRouteForFlight } from '../../shared/routegeom.mjs';
 import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, tafValidityLabel, validityCoversWindow } from '../../shared/wxtime.mjs';
 import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam, parseNotamGeometry } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
@@ -13,6 +18,9 @@ const REGISTERED_WRITE_METHODS = new Set([
   'saveAirportNotes', 'saveFlightData', 'addNewFlightToDb', 'bulkUpdateFlightDof',
   'bulkClearTafColumns', 'bulkClearCgoColumns', 'saveFlightEnr',
   'persistAnalysisResults',
+  // Manual WX WARNING entries are shared with every operator (shift handover), so
+  // they need the registered tier + CSRF like any other shared write.
+  'saveWxWarningManual', 'deleteWxWarningManual',
   // Sync CGO Data writes the cargo weight onto the board, so it needs the same
   // tier and CSRF checks as every other write — not the read tier it used to sit
   // in while it was a no-op.
@@ -43,7 +51,8 @@ const AUTHENTICATED_READ_METHODS = new Set([
   'getExtLinks',
   'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
   'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'getSettingsAccessInfo',
-  'getBoardState', 'getCgoPushUrl'
+  'getBoardState', 'getCgoPushUrl',
+  'getWxWarningData', 'parseWxWarningManual'
 ]);
 
 function rpcGuard(context) {
@@ -228,6 +237,18 @@ export async function onRequestPost(context) {
 
       case 'getWxManualExcerpt':
         return Response.json({ data: { sections: [], source: 'default' } });
+
+      case 'getWxWarningData':
+        return await handleGetWxWarningData(context, args);
+
+      case 'parseWxWarningManual':
+        return await handleParseWxWarningManual(args);
+
+      case 'saveWxWarningManual':
+        return await handleSaveWxWarningManual(context, access.requestUser, args);
+
+      case 'deleteWxWarningManual':
+        return await handleDeleteWxWarningManual(context, access.requestUser, args);
 
       case 'wxAiGetCatalog':
         return await handleWxAiGetCatalog(context);
@@ -1085,6 +1106,206 @@ async function handleFetchLatestTafFromApi(context, args) {
         
         const tafMap = await fetchLatestTafs(icaoList);
         return Response.json({ data: tafMap });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+/* ------------------------------------------------------------ WX WARNING --- */
+// The page reads only from D1: the cron worker owns every outbound request (see
+// workers/cron/index.js). That is what keeps the button fast and the advisory
+// sources unhammered, and it is why a source outage degrades into a health flag
+// instead of a blank map.
+//
+// Manual entries are pasted products (JTWC warning text / VAAC advisory text).
+// They are parsed by the same shared parser as the ingested ones and are stored
+// in the same table with is_manual = 1, so every operator sees the same overlay
+// while the ingest cleanup leaves them alone.
+
+const WX_WARNING_TEXT_MAX = 200000;
+
+// D1 answers `{ meta: { changes } }`; the node:sqlite harness used by the tests
+// answers `{ changes }`. Both must report the same number to the operator.
+function writeChanges(result) {
+    if (!result) return null;
+    if (result.meta && typeof result.meta.changes === 'number') return result.meta.changes;
+    if (typeof result.changes === 'number') return result.changes;
+    return null;
+}
+
+function wxWarningManualLabel(user) {
+    if (!user) return null;
+    return user.email || user.full_name || (user.id ? `user:${user.id}` : null);
+}
+
+function wxWarningManualParse(text) {
+    if (typeof text !== 'string' || !text.trim()) {
+        return { error: 'Paste at least one product first.' };
+    }
+    if (text.length > WX_WARNING_TEXT_MAX) {
+        return { error: `Paste is too long (${text.length} characters, limit ${WX_WARNING_TEXT_MAX}).` };
+    }
+    return { products: parseProducts(text) };
+}
+
+// Report shape for the paste box: what was recognised, what was not, and a
+// mappable preview of each accepted product.
+function wxWarningPreview(products) {
+    return {
+        ok: products.some(product => product.ok),
+        products: products.map(product => ({
+            header: product.header,
+            kind: product.kind,
+            ok: product.ok,
+            reason: product.reason,
+            notes: product.notes,
+            warning: product.warning ? asPreviewWarning(product.warning) : null
+        }))
+    };
+}
+
+async function handleGetWxWarningData(context, args) {
+    try {
+        const [rowIdRaw, bufferRaw] = args || [];
+        const requested = Number(bufferRaw);
+        const bufferNm = Number.isFinite(requested)
+            ? Math.max(10, Math.min(200, Math.round(requested)))
+            : DEFAULT_BUFFER_NM;
+
+        const { results } = await context.env.DB.prepare('SELECT * FROM wx_warnings ORDER BY kind ASC, dtg DESC').all();
+        const warnings = (results || []).map(fromWarningRow).filter(Boolean);
+
+        let route = null;
+        let hits = {};
+        const rowId = Number(rowIdRaw);
+        if (Number.isInteger(rowId) && rowId > 0) {
+            const flight = await context.env.DB.prepare('SELECT * FROM flights WHERE id = ?').bind(rowId).first();
+            if (flight) {
+                const { results: routeRows } = await context.env.DB.prepare('SELECT * FROM routes').all();
+                const { results: latlongRows } = await context.env.DB.prepare('SELECT * FROM latlong').all();
+                const resolved = resolveRouteForFlight(flight, { routes: routeRows || [], latlong: latlongRows || [] });
+                route = {
+                    rowId,
+                    callsign: flight.callsign || null,
+                    dof: flight.dof || null,
+                    dep: resolved.dep,
+                    arr: resolved.arr,
+                    alt: String(flight.alt || '').trim().toUpperCase() || null,
+                    etd: flight.etd || null,
+                    eta: flight.eta || null,
+                    routeId: resolved.routeId,
+                    coords: resolved.coords,
+                    waypoints: resolved.waypoints,
+                    missing: resolved.missing
+                };
+                hits = computeRouteHits(warnings, resolved.coords, bufferNm);
+            }
+        }
+
+        const autoRows = (results || []).filter(row => Number(row.is_manual) !== 1);
+        const fetchedAt = autoRows.reduce(
+            (latest, row) => (row.fetched_at && (!latest || row.fetched_at > latest) ? row.fetched_at : latest),
+            null
+        );
+        const ageHours = fetchedAt ? (Date.now() - new Date(fetchedAt).getTime()) / 3600000 : null;
+
+        return Response.json({
+            data: {
+                warnings,
+                route,
+                hits,
+                bufferNm,
+                bufferOptions: [25, 50, 100],
+                fetchedAt,
+                ageHours: ageHours === null ? null : Math.round(ageHours * 10) / 10,
+                stale: ageHours === null || ageHours > 6,
+                counts: {
+                    TC: warnings.filter(warning => warning.kind === 'TC').length,
+                    VA: warnings.filter(warning => warning.kind === 'VA').length,
+                    manual: warnings.filter(warning => warning.isManual).length,
+                    affecting: Object.values(hits).filter(hit => hit && hit.hit).length
+                },
+                sourceLabels: SOURCE_LABELS
+            }
+        }, { headers: { 'Cache-Control': 'no-store' } });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleParseWxWarningManual(args) {
+    const [text] = args || [];
+    const parsed = wxWarningManualParse(text);
+    if (parsed.error) return Response.json({ error: parsed.error }, { status: 400 });
+    return Response.json({ data: wxWarningPreview(parsed.products) }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
+async function handleSaveWxWarningManual(context, user, args) {
+    try {
+        const [text] = args || [];
+        const parsed = wxWarningManualParse(text);
+        if (parsed.error) return Response.json({ error: parsed.error }, { status: 400 });
+
+        const usable = parsed.products.filter(product => product.ok && product.warning);
+        const skipped = parsed.products.length - usable.length;
+        if (!usable.length) {
+            // Fail closed: an unparsed paste is reported, never stored as a
+            // half-understood hazard somebody might brief from.
+            const why = parsed.products.map(product => product.reason).filter(Boolean).join(' | ') || 'No recognised product.';
+            return Response.json({ error: `Nothing to save: ${why}`, code: 'WX_WARNING_UNPARSED' }, { status: 400 });
+        }
+
+        const savedAt = new Date().toISOString();
+        const label = wxWarningManualLabel(user);
+        const statements = usable.map(product => {
+            const warning = {
+                ...product.warning,
+                parseNotes: [
+                    ...(product.warning.parseNotes || []),
+                    `HEADER ${product.header || 'UNKNOWN'}`,
+                    'OPERATOR PASTE'
+                ]
+            };
+            const row = toManualWarningRow(warning, { fetchedAt: savedAt, createdBy: label });
+            return context.env.DB.prepare(WX_WARNING_UPSERT).bind(...warningBindValues(row));
+        });
+        await context.env.DB.batch(statements);
+        await audit(context, user && user.id, 'wx_warning_manual_save', null, 'success',
+            `${usable.length} product(s), ${skipped} skipped: ${usable.map(product => product.warning.title).join('; ').slice(0, 400)}`);
+
+        return Response.json({
+            data: {
+                ok: true,
+                saved: usable.length,
+                skipped,
+                savedAt,
+                by: label,
+                titles: usable.map(product => product.warning.title)
+            }
+        });
+    } catch (e) {
+        return Response.json({ error: e.message }, { status: 500 });
+    }
+}
+
+async function handleDeleteWxWarningManual(context, user, args) {
+    try {
+        const [target] = args || [];
+        if (String(target).toUpperCase() === 'ALL') {
+            const cleared = await context.env.DB.prepare('DELETE FROM wx_warnings WHERE is_manual = 1').run();
+            const deleted = writeChanges(cleared);
+            await audit(context, user && user.id, 'wx_warning_manual_clear', null, 'success', `deleted ${deleted} manual entr(ies)`);
+            return Response.json({ data: { ok: true, deleted, scope: 'ALL' } });
+        }
+        const id = Number(target);
+        if (!Number.isInteger(id) || id <= 0) {
+            return Response.json({ error: 'A manual entry id (or "ALL") is required.' }, { status: 400 });
+        }
+        const removed = await context.env.DB.prepare('DELETE FROM wx_warnings WHERE id = ? AND is_manual = 1').bind(id).run();
+        const deleted = writeChanges(removed) || 0;
+        if (!deleted) return Response.json({ error: 'Manual entry not found.' }, { status: 404 });
+        await audit(context, user && user.id, 'wx_warning_manual_delete', null, 'success', `id ${id}`);
+        return Response.json({ data: { ok: true, deleted, scope: 'ONE', id } });
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
     }

@@ -3,7 +3,9 @@ main = "index.js"
 compatibility_date = "2024-03-20"
 
 [triggers]
-crons = ["*/30 * * * *"]
+# 30 min: live TAFs. 4 h: WX WARNING feed (JTWC TC warnings, VAAC advisories,
+# VA/TC SIGMETs). The worker dispatches on event.cron.
+crons = ["*/30 * * * *", "0 */4 * * *"]
 
 [[d1_databases]]
 binding = "DB"

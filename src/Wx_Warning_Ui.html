@@ -1,0 +1,1081 @@
+<!-- WX WARNING — TC / volcanic-ash overlay map (child page of WX).
+     Hazard polygons, TC forecast tracks and wind radii are drawn over the route
+     and waypoints of a flight picked on this page. Every row comes from D1
+     (wx_warnings), filled by workers/cron every 4 hours; nothing is scraped from
+     the browser. Operators can also paste a product by hand — those entries are
+     parsed by the same shared parser and stored shared (is_manual = 1).
+     Sources: JTWC TC warnings and VAAC advisories relayed by NOAA's WMO feed,
+     plus VA/TC SIGMET polygons from aviationweather.gov. -->
+<div id="view-wx-warning" class="view-section">
+  <style>
+    #view-wx-warning button:focus-visible,
+    #view-wx-warning [role="button"]:focus-visible,
+    #view-wx-warning select:focus-visible,
+    #view-wx-warning input:focus-visible,
+    #view-wx-warning textarea:focus-visible,
+    #view-wx-warning a:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+
+    #view-wx-warning .wxw-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+    #view-wx-warning .wxw-title { color: var(--accent-primary); font-weight: 900; font-size: 32px; letter-spacing: -0.02em; }
+    #view-wx-warning .wxw-title span { color: var(--text-primary); opacity: 0.9; }
+    #view-wx-warning .wxw-sub { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--text-muted); margin-top: 6px; }
+    #view-wx-warning .wxw-head-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    #view-wx-warning .wxw-badge { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono);
+      font-size: 10px; font-weight: 800; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 999px;
+      border: 1px solid var(--border-medium); color: var(--text-muted); background: var(--bg-panel-sunken); text-transform: uppercase; }
+    #view-wx-warning .wxw-badge.ok { color: var(--status-safe); border-color: var(--status-safe); background: var(--status-safe-bg); }
+    #view-wx-warning .wxw-badge.warn { color: var(--status-warning); border-color: var(--status-warning); background: var(--status-warning-bg); }
+    #view-wx-warning .wxw-badge.crit { color: var(--status-critical); border-color: var(--status-critical); background: var(--status-critical-bg); }
+
+    #view-wx-warning .wxw-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 1100px) { #view-wx-warning .wxw-layout { grid-template-columns: minmax(0, 1fr); } }
+
+    #view-wx-warning .wxw-card { background: var(--bg-panel-raised); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-inner); box-shadow: var(--shadow-soft); padding: 14px; }
+    [data-theme="dark"] #view-wx-warning .wxw-card { box-shadow: 0 0 0 1px #16294A, 0 12px 32px rgba(0,0,0,0.45); }
+
+    #view-wx-warning .wxw-toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    #view-wx-warning .wxw-toolbar label { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.08em; color: var(--text-muted); }
+    #view-wx-warning select, #view-wx-warning input[type="text"] {
+      background: var(--bg-panel-sunken); color: var(--text-primary); border: 1px solid var(--border-medium);
+      border-radius: 999px; padding: 6px 12px; font-family: var(--font-mono); font-size: 11px; min-height: 34px; }
+    #view-wx-warning .wxw-chips { display: inline-flex; gap: 4px; background: var(--bg-panel-sunken); border: 1px solid var(--border-subtle); border-radius: 999px; padding: 3px; }
+    #view-wx-warning .wxw-chip { border: 0; background: none; color: var(--text-muted); font-family: var(--font-mono);
+      font-size: 10px; font-weight: 800; letter-spacing: 0.06em; padding: 5px 10px; border-radius: 999px; cursor: pointer; }
+    #view-wx-warning .wxw-chip:hover { color: var(--text-primary); }
+    #view-wx-warning .wxw-chip[aria-pressed="true"] { background: var(--accent-primary); color: #fff; }
+    #view-wx-warning .wxw-toggles { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    #view-wx-warning .wxw-toggle { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--text-muted); cursor: pointer; }
+
+    #view-wx-warning .wxw-map-wrap { position: relative; }
+    #view-wx-warning #wxw-map { height: 560px; width: 100%; border-radius: var(--radius-inner); overflow: hidden;
+      border: 1px solid var(--border-subtle); background: var(--bg-panel-sunken); }
+    @media (max-width: 700px) { #view-wx-warning #wxw-map { height: 380px; } }
+    /* A notice strip, not a full overlay: the route of the selected flight is
+       still worth looking at when no warning is active, and covering the map
+       would hide it. */
+    #view-wx-warning .wxw-map-empty { position: absolute; left: 12px; right: 12px; top: 12px; display: none;
+      padding: 10px 14px; text-align: center; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px;
+      background: var(--bg-panel-sunken); border: 1px solid var(--border-subtle); border-radius: 12px; pointer-events: none; }
+    #view-wx-warning .wxw-map-wrap.is-empty .wxw-map-empty { display: block; }
+
+    #view-wx-warning .wxw-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+    #view-wx-warning .wxw-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+    #view-wx-warning .wxw-legend i.dot { width: 9px; height: 9px; border-radius: 50%; }
+
+    #view-wx-warning .wxw-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+    #view-wx-warning .wxw-panel-head h3 { margin: 0; font-size: 13px; font-weight: 900; letter-spacing: 0.06em; font-family: var(--font-mono); }
+    #view-wx-warning .wxw-sources { border: 1px dashed var(--border-subtle); border-radius: var(--radius-inner); padding: 10px 12px; margin-bottom: 10px; }
+    #view-wx-warning .wxw-source-row { display: flex; justify-content: space-between; gap: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); padding: 2px 0; }
+
+    #view-wx-warning .wxw-list { display: grid; gap: 8px; max-height: 620px; overflow: auto; }
+    #view-wx-warning .wxw-item { border: 1px solid var(--border-subtle); border-left: 4px solid var(--border-medium);
+      border-radius: 12px; padding: 10px 12px; background: var(--bg-panel-raised); }
+    #view-wx-warning .wxw-item.hit { border-left-color: var(--status-critical); }
+    #view-wx-warning .wxw-item.kind-TC { border-left-style: solid; }
+    #view-wx-warning .wxw-item.kind-VA:not(.hit) { border-left-color: var(--status-warning); }
+    #view-wx-warning .wxw-item-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+    #view-wx-warning .wxw-item-title { font-weight: 800; font-size: 12px; line-height: 1.35; }
+    #view-wx-warning .wxw-item-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+    #view-wx-warning .wxw-item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    #view-wx-warning .wxw-mini { border: 1px solid var(--border-medium); background: none; color: var(--text-muted);
+      border-radius: 999px; font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.05em; padding: 4px 9px; cursor: pointer; }
+    #view-wx-warning .wxw-mini:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+    #view-wx-warning .wxw-mini.danger:hover { border-color: var(--status-critical); color: var(--status-critical); }
+    #view-wx-warning details.wxw-raw { margin-top: 8px; }
+    #view-wx-warning details.wxw-raw summary { cursor: pointer; font-family: var(--font-mono); font-size: 10px; font-weight: 800; color: var(--text-muted); }
+    #view-wx-warning details.wxw-raw pre { white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono);
+      font-size: 10px; line-height: 1.5; background: var(--bg-panel-sunken); border: 1px solid var(--border-subtle);
+      border-radius: 10px; padding: 10px; margin: 8px 0 0; max-height: 240px; overflow: auto; }
+    #view-wx-warning .wxw-item-geo { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+    #view-wx-warning .wxw-empty { padding: 22px; text-align: center; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; }
+
+    #view-wx-warning .wxw-manual { margin-top: 16px; }
+    #view-wx-warning .wxw-manual textarea { width: 100%; min-height: 180px; resize: vertical; background: var(--bg-panel-sunken);
+      color: var(--text-primary); border: 1px solid var(--border-medium); border-radius: 14px; padding: 12px;
+      font-family: var(--font-mono); font-size: 11px; line-height: 1.5; }
+    #view-wx-warning .wxw-manual-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+    #view-wx-warning .wxw-report { margin-top: 12px; display: grid; gap: 8px; }
+    #view-wx-warning .wxw-report-row { border: 1px solid var(--border-subtle); border-left: 4px solid var(--status-safe);
+      border-radius: 12px; padding: 8px 12px; background: var(--bg-panel-sunken); font-size: 11px; }
+    #view-wx-warning .wxw-report-row.bad { border-left-color: var(--status-critical); }
+    #view-wx-warning .wxw-report-head { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: 0.05em; color: var(--text-muted); }
+    #view-wx-warning .wxw-report-body { margin-top: 4px; }
+
+    #view-wx-warning .wxw-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+    @media (max-width: 700px) { #view-wx-warning .wxw-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    #view-wx-warning .wxw-kpi { border: 1px solid var(--border-subtle); border-radius: var(--radius-inner); padding: 10px 12px; background: var(--bg-panel-raised); }
+    #view-wx-warning .wxw-kpi b { display: block; font-size: 22px; font-weight: 900; letter-spacing: -0.02em; }
+    #view-wx-warning .wxw-kpi span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--text-muted); text-transform: uppercase; }
+    #view-wx-warning .wxw-kpi.crit b { color: var(--status-critical); }
+    #view-wx-warning .wxw-kpi.warn b { color: var(--status-warning); }
+    #view-wx-warning .wxw-kpi.safe b { color: var(--status-safe); }
+
+    #view-wx-warning .leaflet-container { font-family: var(--font-mono); }
+    #view-wx-warning .leaflet-popup-content-wrapper, #view-wx-warning .leaflet-popup-tip { background: var(--bg-panel-raised); color: var(--text-primary); border: 1px solid var(--border-medium); }
+    #view-wx-warning .leaflet-popup-content { font-family: var(--font-mono); font-size: 11px; }
+    #view-wx-warning .leaflet-tooltip { background: var(--bg-panel-raised); color: var(--text-primary); border: 1px solid var(--border-medium); font-family: var(--font-mono); font-size: 10px; }
+    [data-theme="dark"] #view-wx-warning .leaflet-tooltip:before { border-top-color: var(--border-medium); }
+    [data-theme="dark"] #view-wx-warning .leaflet-popup-close-button { color: var(--text-primary); }
+
+    @media (prefers-reduced-motion: reduce) {
+      #view-wx-warning .wxw-item, #view-wx-warning .wxw-chip { transition: none; }
+    }
+  </style>
+
+  <div class="wxw-head">
+    <div>
+      <div class="wxw-title">WX <span>WARNING</span></div>
+      <div id="wxw-last-update" class="wxw-sub" role="status" aria-live="polite">TROPICAL CYCLONE &amp; VOLCANIC ASH OVERLAY • LAST FEED: --</div>
+    </div>
+    <div class="wxw-head-actions">
+      <span id="wxw-feed-badge" class="wxw-badge">FEED —</span>
+      <button class="control-btn btn-solid-primary" style="padding:10px 18px;" onclick="window.wxWarningRefresh(true)">
+        <svg class="ic ic-sm"><use href="#i-sync"/></svg> REFRESH
+      </button>
+    </div>
+  </div>
+
+  <div class="wxw-kpis" id="wxw-kpis">
+    <div class="wxw-kpi crit"><b id="wxw-kpi-tc">0</b><span>Tropical cyclone</span></div>
+    <div class="wxw-kpi warn"><b id="wxw-kpi-va">0</b><span>Volcanic ash</span></div>
+    <div class="wxw-kpi crit"><b id="wxw-kpi-hit">0</b><span>Affects route</span></div>
+    <div class="wxw-kpi"><b id="wxw-kpi-manual">0</b><span>Manual entries</span></div>
+  </div>
+
+  <div class="wxw-layout">
+    <section class="wxw-card" aria-label="WX warning map">
+      <div class="wxw-toolbar">
+        <label for="wxw-flight">FLIGHT</label>
+        <select id="wxw-flight" aria-label="Active flight"></select>
+        <label for="wxw-buffer">CORRIDOR</label>
+        <div class="wxw-chips" id="wxw-buffer" role="group" aria-label="Route corridor buffer">
+          <button type="button" class="wxw-chip" data-buffer="25" aria-pressed="false">25 NM</button>
+          <button type="button" class="wxw-chip" data-buffer="50" aria-pressed="true">50 NM</button>
+          <button type="button" class="wxw-chip" data-buffer="100" aria-pressed="false">100 NM</button>
+        </div>
+        <button type="button" class="wxw-mini" onclick="window.wxWarningFit()">FIT ROUTE</button>
+      </div>
+      <div class="wxw-toolbar">
+        <div class="wxw-toggles" id="wxw-layers">
+          <label class="wxw-toggle"><input type="checkbox" data-layer="TC" checked> TC TRACK</label>
+          <label class="wxw-toggle"><input type="checkbox" data-layer="VA" checked> VA CLOUD</label>
+          <label class="wxw-toggle"><input type="checkbox" data-layer="SIGMET" checked> SIGMET</label>
+          <label class="wxw-toggle"><input type="checkbox" data-layer="ROUTE" checked> ROUTE</label>
+          <label class="wxw-toggle"><input type="checkbox" data-layer="LABELS" checked> LABELS</label>
+        </div>
+      </div>
+      <div class="wxw-map-wrap" id="wxw-map-wrap">
+        <div id="wxw-map" role="application" aria-label="Warning map"></div>
+        <div class="wxw-map-empty" id="wxw-map-empty">No active TC / VA warnings in the Asia-Pacific box for this feed.<br>Paste a product below or press REFRESH.</div>
+      </div>
+      <div class="wxw-legend">
+        <span><i style="background:var(--status-critical);"></i>TC track + 34 KT radii</span>
+        <span><i style="background:var(--status-warning);"></i>Volcanic ash (solid = observed, dashed = forecast)</span>
+        <span><i style="background:var(--accent-primary);"></i>SIGMET polygon</span>
+        <span><i class="dot" style="background:#f0b429;"></i>Route + waypoints</span>
+      </div>
+    </section>
+
+    <aside class="wxw-card" aria-label="Warning list">
+      <div class="wxw-panel-head">
+        <h3>ACTIVE WARNINGS</h3>
+        <div class="wxw-chips" id="wxw-filter" role="group" aria-label="Filter by hazard kind">
+          <button type="button" class="wxw-chip" data-filter="ALL" aria-pressed="true">ALL</button>
+          <button type="button" class="wxw-chip" data-filter="TC" aria-pressed="false">TC</button>
+          <button type="button" class="wxw-chip" data-filter="VA" aria-pressed="false">VA</button>
+          <button type="button" class="wxw-chip" data-filter="HIT" aria-pressed="false">ROUTE</button>
+          <button type="button" class="wxw-chip" data-filter="MANUAL" aria-pressed="false">MANUAL</button>
+        </div>
+      </div>
+      <div class="wxw-sources" id="wxw-sources"></div>
+      <div class="wxw-list" id="wxw-list"></div>
+      <div class="wxw-manual-actions" style="margin-top:10px;">
+        <button type="button" class="wxw-mini" onclick="window.wxWarningCopy()">COPY SUMMARY</button>
+        <button type="button" class="wxw-mini" onclick="window.wxWarningExport('txt')">EXPORT .TXT</button>
+        <button type="button" class="wxw-mini" onclick="window.wxWarningExport('csv')">EXPORT .CSV</button>
+      </div>
+      <div id="wxw-copy-status" class="wxw-item-meta" role="status" aria-live="polite"></div>
+    </aside>
+  </div>
+
+  <section class="wxw-card wxw-manual" aria-label="Manual product input">
+    <div class="wxw-panel-head">
+      <h3>MANUAL PRODUCT INPUT</h3>
+      <span class="wxw-badge">Paste JTWC warning or VAAC advisory text — shared with all operators</span>
+    </div>
+    <textarea id="wxw-manual-text" spellcheck="false"
+      aria-label="Paste JTWC or VAAC product text"
+      placeholder="WTPN31 PGTW 202100&#10;SUBJ/TROPICAL STORM 24W (DUJUAN) WARNING NR 022//&#10;...&#10;&#10;FVAU02 ADRM 201550&#10;VA ADVISORY&#10;DTG: 20260920/1550Z&#10;..."></textarea>
+    <div class="wxw-manual-actions">
+      <button type="button" class="control-btn btn-solid-primary" style="padding:8px 16px;" onclick="window.wxWarningParsePaste()">PARSE PREVIEW</button>
+      <button type="button" class="control-btn" id="wxw-manual-save" style="padding:8px 16px;" onclick="window.wxWarningSavePaste()" disabled>SAVE TO SHARED BOARD</button>
+      <button type="button" class="wxw-mini" onclick="window.wxWarningClearPaste()">CLEAR BOX</button>
+      <button type="button" class="wxw-mini danger" onclick="window.wxWarningDeleteManual('ALL')">DELETE ALL MANUAL</button>
+      <span id="wxw-manual-status" class="wxw-item-geo" role="status" aria-live="polite"></span>
+    </div>
+    <div class="wxw-report" id="wxw-manual-report"></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var state = {
+    loaded: false,
+    loading: false,
+    payload: null,
+    bufferNm: 50,
+    filter: 'ALL',
+    flightId: null,
+    flights: [],
+    layers: { TC: true, VA: true, SIGMET: true, ROUTE: true, LABELS: true },
+    map: null,
+    layerGroup: null,
+    flightRetried: false,
+    drawnCount: 0,
+    lastFetchMs: 0
+  };
+
+  function $(id) { return document.getElementById(id); }
+
+  function esc(value) {
+    return String(value === null || value === undefined ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Same RPC wrapper as the other pages: google.script.run in GAS, /api/rpc via
+  // the Cloudflare shim, and a readable error instead of a silent hang.
+  function run(fnName) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve) {
+      if (typeof google === 'undefined' || !google.script || !google.script.run) {
+        resolve({ error: 'google.script.run unavailable (local preview).' });
+        return;
+      }
+      var ok = function (data) {
+        if (data === null || data === undefined) resolve({ error: fnName + ' returned no data.' });
+        else resolve(data);
+      };
+      var fail = function (e) { resolve({ error: (e && e.message) || String(e) || 'Server error' }); };
+      var chain = google.script.run.withSuccessHandler(ok).withFailureHandler(fail);
+      try { chain[fnName].apply(chain, args); } catch (e) { resolve({ error: String((e && e.message) || e) }); }
+    });
+  }
+
+  function toast(message) {
+    if (typeof window.addToast === 'function') { window.addToast(message); return; }
+    var el = $('wxw-manual-status');
+    if (el) el.textContent = message;
+  }
+
+  function fmtUtc(value) {
+    if (!value) return '--';
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+    return date.toISOString().slice(11, 16) + 'Z';
+  }
+
+  function fmtStamp(value) {
+    if (!value) return '--';
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+    return date.toISOString().slice(0, 16).replace('T', ' ') + 'Z';
+  }
+
+  function ageLabel(value) {
+    if (!value) return null;
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return null;
+    var hours = (Date.now() - date.getTime()) / 3600000;
+    if (hours < 0) return 'FUTURE';
+    if (hours < 1) return Math.round(hours * 60) + 'M OLD';
+    if (hours < 48) return Math.round(hours) + 'H OLD';
+    return Math.round(hours / 24) + 'D OLD';
+  }
+
+  function kindLabel(kind) { return kind === 'TC' ? 'TC' : 'VA'; }
+
+  function sourceBadge(warning) {
+    if (warning.isManual) return '<span class="wxw-badge warn">MANUAL</span>';
+    if (warning.source === 'JTWC') return '<span class="wxw-badge crit">JTWC</span>';
+    if (warning.source === 'VAAC') return '<span class="wxw-badge warn">VAAC</span>';
+    if (warning.source === 'ISIGMET') return '<span class="wxw-badge">SIGMET</span>';
+    return '<span class="wxw-badge">' + esc(warning.source) + '</span>';
+  }
+
+  /* ------------------------------------------------------------- board list --- */
+
+  // Same source of truth as the FIR page: the active Flight Board, with the
+  // per-user localStorage cache as the fallback before the board has loaded.
+  function boardRowIds() {
+    try {
+      if (Array.isArray(window.activeBoardRowIds) && window.activeBoardRowIds.length) {
+        return window.activeBoardRowIds.map(Number).filter(function (n) { return !isNaN(n); });
+      }
+      var cached = typeof window.readCachedBoardForCurrentUser === 'function'
+        ? window.readCachedBoardForCurrentUser()
+        : (function () { try { return JSON.parse(localStorage.getItem('occ_active_board') || 'null'); } catch (e) { return null; } })();
+      if (Array.isArray(cached) && cached.length) return cached.map(Number).filter(function (n) { return !isNaN(n); });
+    } catch (e) { /* fall through to "no flights" */ }
+    return [];
+  }
+
+  function loadFlightOptions() {
+    var select = $('wxw-flight');
+    var ids = boardRowIds();
+    select.innerHTML = '<option value="">— no active flight —</option>';
+    state.flights = [];
+    state.flightId = null;
+    if (!ids.length) return Promise.resolve();
+    return run('getSelectedFlightsData', ids, true).then(function (data) {
+      if (!data || data.error || !Array.isArray(data.flights)) return;
+      state.flights = data.flights.map(function (flight) {
+        return {
+          rowId: flight._rowId,
+          label: (flight.QZ || 'FLT') + '  ' + (flight.DEP || '????') + '→' + (flight.DES || '????') +
+            (flight.STD ? '  ' + flight.STD + 'Z' : '')
+        };
+      });
+      select.innerHTML = state.flights.map(function (flight) {
+        return '<option value="' + esc(flight.rowId) + '">' + esc(flight.label) + '</option>';
+      }).join('') || '<option value="">— no active flight —</option>';
+      if (state.flights.length) {
+        state.flightId = state.flights[0].rowId;
+        select.value = String(state.flightId);
+      }
+    });
+  }
+
+  // Flight_Ui owns the active board and publishes it after its own load, which
+  // can land after this page has already initialised (the tab can be opened
+  // while the board is still loading). One retry keeps the dropdown from being
+  // permanently empty; after that the operator has REFRESH.
+  function loadFlightOptionsWithRetry() {
+    return loadFlightOptions().then(function () {
+      if (state.flights.length || state.flightRetried) return;
+      state.flightRetried = true;
+      return new Promise(function (resolve) { setTimeout(resolve, 1500); }).then(loadFlightOptions);
+    });
+  }
+
+  /* ------------------------------------------------------------------- data --- */
+
+  function loadData(force) {
+    if (state.loading) return Promise.resolve();
+    if (!force && state.payload && (Date.now() - state.lastFetchMs) < 120000) return Promise.resolve();
+    state.loading = true;
+    var params = [state.flightId || null, state.bufferNm];
+    setFeedBadge('loading');
+    return run('getWxWarningData', params[0], params[1]).then(function (data) {
+      state.loading = false;
+      if (!data || data.error) {
+        setFeedBadge('error', (data && data.error) || 'RPC failed');
+        $('wxw-list').innerHTML = '<div class="wxw-empty">Warning feed unavailable: ' + esc((data && data.error) || 'RPC failed') +
+          '<br><br><button type="button" class="wxw-mini" onclick="window.wxWarningRefresh(true)">RETRY</button></div>';
+        return;
+      }
+      state.payload = data;
+      state.loaded = true;
+      state.lastFetchMs = Date.now();
+      renderAll();
+    });
+  }
+
+  function setFeedBadge(mode, detail) {
+    var badge = $('wxw-feed-badge');
+    if (!badge) return;
+    if (mode === 'loading') { badge.className = 'wxw-badge'; badge.textContent = 'FEED — LOADING'; return; }
+    if (mode === 'error') { badge.className = 'wxw-badge crit'; badge.textContent = 'FEED — ERROR'; badge.title = detail || ''; return; }
+    var payload = state.payload;
+    if (!payload) { badge.className = 'wxw-badge'; badge.textContent = 'FEED —'; return; }
+    if (payload.stale) {
+      badge.className = 'wxw-badge warn';
+      badge.textContent = 'FEED ' + (payload.ageHours === null ? 'NEVER SYNCED' : Math.round(payload.ageHours) + 'H OLD');
+    } else {
+      badge.className = 'wxw-badge ok';
+      badge.textContent = 'FEED ' + Math.round(payload.ageHours || 0) + 'H OLD';
+    }
+    badge.title = payload.fetchedAt ? 'Last ingest: ' + fmtStamp(payload.fetchedAt) : 'No ingest recorded yet — is the awq-cron worker deployed?';
+  }
+
+  // One filter, applied to the list and the map alike: narrowing to VA must not
+  // leave tropical cyclones drawn on the map.
+  function passesFilter(warning) {
+    var hits = (state.payload && state.payload.hits) || {};
+    var hit = hits[String(warning.id)];
+    if (state.filter === 'TC' && warning.kind !== 'TC') return false;
+    if (state.filter === 'VA' && warning.kind !== 'VA') return false;
+    if (state.filter === 'HIT' && !(hit && hit.hit)) return false;
+    if (state.filter === 'MANUAL' && !warning.isManual) return false;
+    return true;
+  }
+
+  function visibleWarnings() {
+    var payload = state.payload;
+    if (!payload || !Array.isArray(payload.warnings)) return [];
+    return payload.warnings.filter(passesFilter);
+  }
+
+  /* ------------------------------------------------------------------ render --- */
+
+  function renderAll() {
+    renderKpis();
+    renderSources();
+    renderList();
+    renderMap();
+    renderHeader();
+  }
+
+  function renderHeader() {
+    var payload = state.payload || {};
+    var text = 'TROPICAL CYCLONE & VOLCANIC ASH OVERLAY • LAST FEED: ' +
+      (payload.fetchedAt ? fmtStamp(payload.fetchedAt) : 'NEVER') +
+      (payload.route ? ' • ROUTE: ' + (payload.route.callsign || '') + ' ' + (payload.route.dep || '') + '→' + (payload.route.arr || '') : '') +
+      ' • CORRIDOR ' + (payload.bufferNm || state.bufferNm) + ' NM';
+    $('wxw-last-update').textContent = text;
+    setFeedBadge('ok');
+  }
+
+  function renderKpis() {
+    var counts = (state.payload && state.payload.counts) || { TC: 0, VA: 0, affecting: 0, manual: 0 };
+    $('wxw-kpi-tc').textContent = counts.TC || 0;
+    $('wxw-kpi-va').textContent = counts.VA || 0;
+    $('wxw-kpi-hit').textContent = counts.affecting || 0;
+    $('wxw-kpi-manual').textContent = counts.manual || 0;
+  }
+
+  function renderSources() {
+    var payload = state.payload || {};
+    var labels = payload.sourceLabels || {};
+    var rows = [];
+    var sources = [];
+    (payload.warnings || []).forEach(function (warning) {
+      var key = warning.isManual ? 'MANUAL' : warning.source;
+      if (sources.indexOf(key) === -1) sources.push(key);
+    });
+    if (!sources.length) {
+      $('wxw-sources').innerHTML = '<div class="wxw-source-row"><span>No rows in D1 yet</span><span>cron */4h</span></div>';
+      return;
+    }
+    sources.forEach(function (key) {
+      var count = (payload.warnings || []).filter(function (warning) {
+        return (warning.isManual ? 'MANUAL' : warning.source) === key;
+      }).length;
+      rows.push('<div class="wxw-source-row"><span title="' + esc(labels[key] || key) + '">' + esc(key) + '</span><span>' + count + ' active</span></div>');
+    });
+    var manualAge = (payload.warnings || []).filter(function (warning) { return warning.isManual; })
+      .map(function (warning) { return warning.createdAt; }).filter(Boolean).sort().pop();
+    if (manualAge) rows.push('<div class="wxw-source-row"><span>Manual entries expire 7 days after paste</span><span>newest ' + esc(fmtStamp(manualAge)) + '</span></div>');
+    $('wxw-sources').innerHTML = rows.join('');
+  }
+
+  function itemHtml(warning, hit) {
+    var meta = [];
+    if (warning.kind === 'TC') {
+      if (warning.intensity && warning.intensity.windKt) meta.push(warning.intensity.windKt + ' KT');
+      if (warning.movement && warning.movement.text) meta.push(warning.movement.text);
+      if (warning.track && warning.track.length) meta.push(warning.track.length + ' FIX' + (warning.track.length > 1 ? 'ES' : ''));
+      if (warning.basin) meta.push(warning.basin);
+    } else {
+      if (warning.volcano && warning.volcano.number) meta.push('GVP ' + warning.volcano.number);
+      if (warning.vaac) meta.push('VAAC ' + warning.vaac);
+      if (warning.flTop) meta.push('SFC/FL' + Math.round(warning.flTop / 100));
+      if (warning.movement && warning.movement.text) meta.push(warning.movement.text);
+    }
+    if (warning.fir && warning.kind === 'TC') meta.push('FIR ' + warning.fir);
+    if (warning.advisoryNr) meta.push('NR ' + warning.advisoryNr);
+    meta.push('DTG ' + fmtUtc(warning.dtg));
+    var age = ageLabel(warning.dtg);
+    if (age) meta.push(age);
+    if (warning.validTo) meta.push('VALID TO ' + fmtUtc(warning.validTo));
+    if (warning.createdBy) meta.push('BY ' + warning.createdBy);
+
+    var hitChip = '';
+    if (hit && hit.reason === 'NO ROUTE') hitChip = '<span class="wxw-badge">NO ROUTE</span>';
+    else if (hit && hit.hit) hitChip = '<span class="wxw-badge crit">AFFECTS ROUTE +' + hit.nm + ' NM</span>';
+    else if (hit && hit.nm !== null) hitChip = '<span class="wxw-badge ok">CLEAR ' + hit.nm + ' NM</span>';
+
+    var geo = [];
+    if (warning.polygons && warning.polygons.length) geo.push(warning.polygons.length + ' POLYGON' + (warning.polygons.length > 1 ? 'S' : ''));
+    if (warning.track && warning.track.length) geo.push(warning.track.length + ' TRACK PT');
+    if (warning.centerLat !== null && warning.centerLon !== null) geo.push(warning.centerLat.toFixed(2) + '/' + warning.centerLon.toFixed(2));
+
+    var actions = '<button type="button" class="wxw-mini" data-locate="' + esc(warning.id) + '">LOCATE</button>';
+    if (warning.sourceUrl) actions += '<a class="wxw-mini" style="text-decoration:none;" href="' + esc(warning.sourceUrl) + '" target="_blank" rel="noopener noreferrer">SOURCE</a>';
+    if (warning.isManual) actions += '<button type="button" class="wxw-mini danger" data-delete="' + esc(warning.id) + '">DELETE</button>';
+
+    return '<article class="wxw-item kind-' + esc(warning.kind) + (hit && hit.hit ? ' hit' : '') + '" data-id="' + esc(warning.id) + '">' +
+      '<div class="wxw-item-top"><div class="wxw-item-title">' + esc(warning.title || kindLabel(warning.kind)) + '</div>' +
+      '<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;">' + sourceBadge(warning) +
+      '<span class="wxw-badge">' + esc(kindLabel(warning.kind)) + '</span></div></div>' +
+      '<div class="wxw-item-meta">' + meta.map(function (part) { return '<span>' + esc(part) + '</span>'; }).join('') + '</div>' +
+      '<div class="wxw-item-meta">' + hitChip + (geo.length ? '<span class="wxw-item-geo">' + esc(geo.join(' • ')) + '</span>' : '') + '</div>' +
+      '<div class="wxw-item-actions">' + actions + '</div>' +
+      (warning.rawText ? '<details class="wxw-raw"><summary>RAW PRODUCT</summary><pre>' + esc(warning.rawText) + '</pre></details>' : '') +
+      '</article>';
+  }
+
+  function renderList() {
+    var list = $('wxw-list');
+    var payload = state.payload || {};
+    var hits = payload.hits || {};
+    var warnings = visibleWarnings();
+    if (!warnings.length) {
+      list.innerHTML = '<div class="wxw-empty">' +
+        (payload.warnings && payload.warnings.length
+          ? 'No warning matches this filter.'
+          : 'No active TC / VA warnings in D1.<br>The cron worker fills this every 4 hours; you can also paste a product below.') +
+        '</div>';
+      return;
+    }
+    list.innerHTML = warnings.map(function (warning) {
+      return itemHtml(warning, hits[String(warning.id)]);
+    }).join('');
+    list.querySelectorAll('[data-locate]').forEach(function (button) {
+      button.addEventListener('click', function () { locateWarning(button.getAttribute('data-locate')); });
+    });
+    list.querySelectorAll('[data-delete]').forEach(function (button) {
+      button.addEventListener('click', function () { window.wxWarningDeleteManual(button.getAttribute('data-delete')); });
+    });
+    setMapNotice(state.drawnCount || 0);
+  }
+
+  /* --------------------------------------------------------------------- map --- */
+
+  // Tile providers, tried in order. CARTO's public basemap now answers with an
+  // "API KEY REQUIRED" watermark instead of failing, so OSM goes first and the
+  // swap is driven by tile errors rather than by a try/catch that never fires.
+  var TILE_PROVIDERS = [
+    { url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', options: { subdomains: 'abc', maxZoom: 19 }, attribution: '&copy; OpenStreetMap contributors' },
+    { url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', options: { maxZoom: 18 }, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }
+  ];
+
+  function addTileLayer(index) {
+    if (!state.map || index >= TILE_PROVIDERS.length) return;
+    var provider = TILE_PROVIDERS[index];
+    if (state.tileLayer) state.map.removeLayer(state.tileLayer);
+    var errors = 0;
+    var layer = L.tileLayer(provider.url, Object.assign({ attribution: provider.attribution }, provider.options));
+    layer.on('tileerror', function () {
+      errors++;
+      // Only the live layer may trigger the swap, and only once: a provider that
+      // is blocked or key-gated fires this for every tile.
+      if (errors >= 2 && state.tileLayer === layer && index + 1 < TILE_PROVIDERS.length) {
+        addTileLayer(index + 1);
+      }
+    });
+    layer.addTo(state.map);
+    state.tileLayer = layer;
+  }
+
+  function ensureMap() {
+    if (state.map || typeof L === 'undefined') return !!state.map;
+    state.map = L.map('wxw-map', { center: [-5, 115], zoom: 4, zoomControl: true, attributionControl: true, worldCopyJump: true });
+    addTileLayer(0);
+    state.layerGroup = L.layerGroup().addTo(state.map);
+    state.routeGroup = L.layerGroup().addTo(state.map);
+    setTimeout(function () { if (state.map) state.map.invalidateSize(); }, 120);
+    setTimeout(function () { if (state.map) state.map.invalidateSize(); }, 400);
+    return true;
+  }
+
+  function clearGroup(group) { if (group) group.clearLayers(); }
+
+  function routeLatLngs() {
+    var payload = state.payload || {};
+    if (!payload.route || !Array.isArray(payload.route.coords)) return [];
+    return payload.route.coords.map(function (coord) { return [coord[1], coord[0]]; });
+  }
+
+  function drawRoute() {
+    if (!state.routeGroup) return;
+    clearGroup(state.routeGroup);
+    if (!state.layers.ROUTE) return;
+    var payload = state.payload || {};
+    var route = payload.route;
+    if (!route || !route.coords || route.coords.length < 2) return;
+    var latlngs = routeLatLngs();
+    L.polyline(latlngs, { color: '#f0b429', weight: 2, dashArray: '4 4', opacity: 0.95 }).addTo(state.routeGroup);
+    (route.waypoints || []).forEach(function (point, index) {
+      var isEnd = index === 0 || index === (route.waypoints.length - 1);
+      var marker = L.circleMarker([point.lat, point.lon], {
+        radius: isEnd ? 6 : 3.5,
+        color: '#13100a',
+        weight: 1,
+        fillColor: isEnd ? (index === 0 ? '#0E7A4B' : '#C8102E') : '#f0b429',
+        fillOpacity: 1
+      });
+      marker.bindPopup('<strong>' + esc(point.name || '') + '</strong><br>' + point.lat.toFixed(3) + ' / ' + point.lon.toFixed(3));
+      if (state.layers.LABELS) marker.bindTooltip(esc(point.name || ''), { permanent: !isEnd, direction: 'top', offset: [0, -6], opacity: 1 });
+      marker.addTo(state.routeGroup);
+    });
+  }
+
+  function warningBBox(warning) {
+    var points = [];
+    (warning.polygons || []).forEach(function (poly) { (poly.coords || []).forEach(function (coord) { points.push(coord); }); });
+    (warning.track || []).forEach(function (entry) { if (isFinite(entry.lat) && isFinite(entry.lon)) points.push([entry.lon, entry.lat]); });
+    if (isFinite(warning.centerLat) && isFinite(warning.centerLon)) points.push([warning.centerLon, warning.centerLat]);
+    if (!points.length) return null;
+    return points.map(function (point) { return [point[1], point[0]]; });
+  }
+
+  function visibleOnMap(warning) {
+    if (!passesFilter(warning)) return false;
+    if (warning.source === 'ISIGMET' && !state.layers.SIGMET) return false;
+    if (warning.kind === 'TC' && warning.source !== 'ISIGMET' && !state.layers.TC) return false;
+    if (warning.kind === 'VA' && warning.source !== 'ISIGMET' && !state.layers.VA) return false;
+    return true;
+  }
+
+  function setMapNotice(drawn) {
+    var wrap = $('wxw-map-wrap');
+    var notice = $('wxw-map-empty');
+    var payload = state.payload || {};
+    var total = (payload.warnings || []).length;
+    var visibleCount = visibleWarnings().length;
+    var hasRoute = routeLatLngs().length >= 2;
+    if (drawn > 0) {
+      wrap.classList.remove('is-empty');
+      return;
+    }
+    wrap.classList.add('is-empty');
+    if (!total) {
+      notice.innerHTML = 'No active TC / VA warnings in the Asia-Pacific box for this feed.' +
+        (hasRoute ? ' Route of the selected flight is shown.' : '') + '<br>Paste a product below or press REFRESH.';
+      return;
+    }
+    if (!visibleCount) {
+      notice.textContent = 'All ' + total + ' active warning(s) are hidden by the current filter.';
+      return;
+    }
+    notice.textContent = visibleCount + ' warning(s) active but hidden by the layer toggles.';
+  }
+
+  function drawWarnings() {
+    if (!state.layerGroup) return;
+    clearGroup(state.layerGroup);
+    var payload = state.payload || {};
+    var hits = payload.hits || {};
+    var drawn = 0;
+    (payload.warnings || []).forEach(function (warning) {
+      if (!visibleOnMap(warning)) return;
+      var hit = hits[String(warning.id)];
+      var affects = !!(hit && hit.hit);
+      var isSigmet = warning.source === 'ISIGMET';
+      var baseColor = warning.kind === 'VA'
+        ? (isSigmet ? '#C8102E' : '#F59E0B')
+        : (isSigmet ? '#C8102E' : '#FF3B52');
+      var popup = '<strong>' + esc(warning.title || '') + '</strong><br>' +
+        esc((warning.isManual ? 'MANUAL • ' : warning.source + ' • ') + kindLabel(warning.kind)) +
+        (warning.advisoryNr ? ' • NR ' + esc(warning.advisoryNr) : '') +
+        '<br>DTG ' + esc(fmtUtc(warning.dtg)) +
+        (warning.flTop ? '<br>TOP FL' + Math.round(warning.flTop / 100) : '') +
+        (hit && hit.nm !== null ? '<br>' + (hit.hit ? 'AFFECTS ROUTE (+' + hit.nm + ' NM)' : 'CLEAR ' + hit.nm + ' NM') : '');
+
+      (warning.geojson || []).forEach(function (entry) {
+        var ring = entry.geometry && entry.geometry.coordinates && entry.geometry.coordinates[0];
+        if (!ring || ring.length < 3) return;
+        var latlngs = ring.map(function (coord) { return [coord[1], coord[0]]; });
+        var isForecast = String(entry.role || '').indexOf('FCST') === 0;
+        L.polygon(latlngs, {
+          color: baseColor,
+          weight: affects ? 3 : 1.6,
+          opacity: 0.95,
+          fillColor: baseColor,
+          fillOpacity: isForecast ? 0.08 : (affects ? 0.22 : 0.14),
+          dashArray: isForecast ? '5 5' : null
+        }).bindPopup(popup + '<br><span style="opacity:.7">' + esc(entry.role || '') + (entry.validAt ? ' ' + esc(fmtUtc(entry.validAt)) : '') + '</span>')
+          .addTo(state.layerGroup);
+        drawn++;
+      });
+
+      if (warning.kind === 'TC' && Array.isArray(warning.track) && warning.track.length) {
+        var trackLatLngs = warning.track
+          .filter(function (entry) { return isFinite(entry.lat) && isFinite(entry.lon); })
+          .map(function (entry) { return [entry.lat, entry.lon]; });
+        if (trackLatLngs.length > 1) {
+          L.polyline(trackLatLngs, { color: baseColor, weight: 2, opacity: 0.9 }).addTo(state.layerGroup);
+        }
+        warning.track.forEach(function (entry) {
+          if (!isFinite(entry.lat) || !isFinite(entry.lon)) return;
+          var radius34 = Math.max(
+            entry.radii && entry.radii.kt34 ? Math.max(entry.radii.kt34.ne || 0, entry.radii.kt34.se || 0, entry.radii.kt34.sw || 0, entry.radii.kt34.nw || 0) : 0,
+            0
+          );
+          if (radius34 > 0) {
+            L.circle([entry.lat, entry.lon], {
+              radius: radius34 * 1852, color: baseColor, weight: 1, opacity: 0.6,
+              fillColor: baseColor, fillOpacity: 0.06
+            }).addTo(state.layerGroup);
+          }
+          var marker = L.circleMarker([entry.lat, entry.lon], {
+            radius: entry.tauHr === 0 ? 6 : 4,
+            color: '#fff', weight: 1.5, fillColor: baseColor, fillOpacity: 1
+          }).bindPopup(popup + '<br><span style="opacity:.7">' + (entry.tauHr === 0 ? 'CURRENT FIX' : 'T+' + entry.tauHr + 'H') +
+            (entry.windKt ? ' • ' + entry.windKt + ' KT' : '') + '</span>');
+          if (state.layers.LABELS && entry.tauHr !== 0) {
+            marker.bindTooltip('T+' + entry.tauHr, { direction: 'right', offset: [6, 0], opacity: 1 });
+          }
+          marker.addTo(state.layerGroup);
+          drawn++;
+        });
+      }
+
+      if (warning.kind === 'VA' && isFinite(warning.centerLat) && isFinite(warning.centerLon)) {
+        L.circleMarker([warning.centerLat, warning.centerLon], {
+          radius: 5, color: '#fff', weight: 1.5, fillColor: baseColor, fillOpacity: 1
+        }).bindPopup(popup + '<br><span style="opacity:.7">' + esc((warning.volcano && warning.volcano.name) || 'VOLCANO') + '</span>')
+          .addTo(state.layerGroup);
+        drawn++;
+      }
+    });
+    state.drawnCount = drawn;
+    setMapNotice(drawn);
+  }
+
+  function renderMap() {
+    var wrap = $('wxw-map-wrap');
+    if (typeof window.occEnsureLeaflet !== 'function') { wrap.classList.add('is-empty'); return; }
+    window.occEnsureLeaflet().then(function () {
+      if (!ensureMap()) { wrap.classList.add('is-empty'); return; }
+      drawRoute();
+      drawWarnings();
+      window.wxWarningFit();
+    }).catch(function () {
+      wrap.classList.add('is-empty');
+      $('wxw-map-empty').innerHTML = 'Map library failed to load (offline?).<br>The warning list on the right is still complete.';
+    });
+  }
+
+  window.wxWarningFit = function () {
+    if (!state.map) return;
+    var points = routeLatLngs();
+    (state.payload && state.payload.warnings ? state.payload.warnings : []).forEach(function (warning) {
+      if (!visibleOnMap(warning)) return;
+      var box = warningBBox(warning);
+      if (box) points = points.concat(box);
+    });
+    if (!points.length) return;
+    if (points.length === 1) { state.map.setView(points[0], 6); return; }
+    state.map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 7 });
+  };
+
+  function locateWarning(id) {
+    if (!state.map) return;
+    var warning = (state.payload && state.payload.warnings || []).filter(function (item) { return String(item.id) === String(id); })[0];
+    if (!warning) return;
+    var box = warningBBox(warning);
+    if (!box) { toast('No mappable geometry for this warning.'); return; }
+    if (box.length === 1) state.map.setView(box[0], 7);
+    else state.map.fitBounds(L.latLngBounds(box), { padding: [50, 50], maxZoom: 8 });
+    var item = $('wxw-list').querySelector('.wxw-item[data-id="' + id + '"]');
+    if (item) item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  /* ------------------------------------------------------- copy / export ------ */
+
+  // Structured, prose-free summary of exactly what the page shows. Built as
+  // plain text so it can be pasted into a shift log or briefing note.
+  function summaryLines() {
+    var payload = state.payload || {};
+    var route = payload.route;
+    var hits = payload.hits || {};
+    var lines = [];
+    lines.push('AWQ CLOUD BRIEFING - WX WARNING SUMMARY');
+    lines.push('GENERATED (UTC): ' + new Date().toISOString().slice(0, 16).replace('T', ' ') + 'Z');
+    lines.push('FEED LAST INGEST (UTC): ' + (payload.fetchedAt ? fmtStamp(payload.fetchedAt) : 'NEVER') +
+      ' | CORRIDOR ' + (payload.bufferNm || state.bufferNm) + ' NM');
+    if (route) {
+      lines.push('FLIGHT: ' + (route.callsign || '-') + ' | ' + (route.dep || '????') + '->' + (route.arr || '????') +
+        (route.alt ? ' | ALT ' + route.alt : '') + ' | DOF ' + (route.dof || '-') +
+        ' | STD ' + (route.etd || '-') + ' | ROUTE ' + (route.routeId || 'UNRESOLVED'));
+      lines.push('ROUTE FIXES: ' + (route.waypoints || []).map(function (point) { return point.name; }).filter(Boolean).join(' '));
+      if (route.missing && route.missing.length) lines.push('UNRESOLVED FIXES: ' + route.missing.join(' '));
+    } else {
+      lines.push('FLIGHT: none selected');
+    }
+    var warnings = visibleWarnings();
+    lines.push('WARNINGS IN VIEW: ' + warnings.length);
+    lines.push('');
+    if (!warnings.length) lines.push('(no warning matches the current filter)');
+    warnings.forEach(function (warning) {
+      var hit = hits[String(warning.id)] || {};
+      var parts = [
+        '[' + (warning.isManual ? 'MANUAL' : warning.source) + ']',
+        kindLabel(warning.kind),
+        warning.title || ''
+      ];
+      if (warning.advisoryNr) parts.push('NR ' + warning.advisoryNr);
+      if (warning.fir) parts.push('FIR ' + warning.fir);
+      if (warning.volcano && warning.volcano.name) parts.push('VOLCANO ' + warning.volcano.name + (warning.volcano.number ? ' ' + warning.volcano.number : ''));
+      if (warning.flBase !== null && warning.flTop !== null) parts.push('SFC-FL' + Math.round(warning.flTop / 100));
+      else if (warning.flTop) parts.push('TOP FL' + Math.round(warning.flTop / 100));
+      if (warning.intensity && warning.intensity.windKt) parts.push(warning.intensity.windKt + ' KT');
+      if (warning.movement && warning.movement.text) parts.push(warning.movement.text);
+      parts.push('DTG ' + fmtUtc(warning.dtg));
+      if (warning.validTo) parts.push('VALID TO ' + fmtUtc(warning.validTo));
+      if (hit.reason === 'NO ROUTE') parts.push('ROUTE IMPACT UNKNOWN (no route)');
+      else if (hit.hit) parts.push('AFFECTS ROUTE (+' + hit.nm + ' NM)');
+      else if (hit.nm !== null) parts.push('CLEAR OF ROUTE ' + hit.nm + ' NM');
+      if (warning.isManual && warning.createdBy) parts.push('BY ' + warning.createdBy);
+      lines.push('- ' + parts.filter(Boolean).join(' | '));
+      if (warning.sourceUrl) lines.push('  SOURCE: ' + warning.sourceUrl);
+    });
+    lines.push('');
+    lines.push('SOURCES: JTWC TC warnings and VAAC advisories via NOAA WMO feed; VA/TC SIGMET via aviationweather.gov. Verify against official products before operational use.');
+    return lines;
+  }
+
+  function download(filename, text, mime) {
+    var blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function stamp() { return new Date().toISOString().slice(0, 16).replace(/[-:T]/g, ''); }
+
+  window.wxWarningCopy = function () {
+    var text = summaryLines().join('\n');
+    var status = $('wxw-copy-status');
+    var done = function (ok) { status.textContent = ok ? 'Summary copied (' + visibleWarnings().length + ' warning lines).' : 'Copy blocked by the browser — use EXPORT .TXT instead.'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }).catch(function () { done(false); });
+      return;
+    }
+    try {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', 'readonly');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      done(document.execCommand('copy'));
+      document.body.removeChild(area);
+    } catch (e) { done(false); }
+  };
+
+  window.wxWarningExport = function (format) {
+    var payload = state.payload || {};
+    if (format === 'csv') {
+      var rows = [['kind', 'source', 'title', 'advisory_nr', 'fir_vaac', 'volcano', 'fl_top_ft', 'wind_kt', 'movement', 'dtg_utc', 'valid_to_utc', 'route_impact_nm', 'affects_route', 'manual', 'created_by', 'source_url']];
+      var hits = payload.hits || {};
+      visibleWarnings().forEach(function (warning) {
+        var hit = hits[String(warning.id)] || {};
+        rows.push([
+          warning.kind, warning.isManual ? 'MANUAL' : warning.source, warning.title || '', warning.advisoryNr || '',
+          warning.fir || (warning.vaac || ''), (warning.volcano && warning.volcano.name) || '',
+          warning.flTop === null ? '' : warning.flTop,
+          warning.intensity && warning.intensity.windKt ? warning.intensity.windKt : '',
+          (warning.movement && warning.movement.text) || '', warning.dtg || '', warning.validTo || '',
+          hit.nm === null || hit.nm === undefined ? '' : hit.nm, hit.hit ? 'YES' : 'NO', warning.isManual ? 'YES' : 'NO',
+          warning.createdBy || '', warning.sourceUrl || ''
+        ]);
+      });
+      var csv = rows.map(function (row) {
+        return row.map(function (cell) {
+          var text = String(cell === null || cell === undefined ? '' : cell);
+          return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+        }).join(',');
+      }).join('\r\n');
+      download('wx-warning-' + stamp() + '.csv', '\ufeff' + csv, 'text/csv;charset=utf-8');
+      return;
+    }
+    download('wx-warning-' + stamp() + '.txt', summaryLines().join('\n') + '\n');
+  };
+
+  window.wxWarningClearPaste = function () {
+    $('wxw-manual-text').value = '';
+    $('wxw-manual-report').innerHTML = '';
+    $('wxw-manual-save').disabled = true;
+    $('wxw-manual-status').textContent = '';
+  };
+
+  /* ------------------------------------------------------------- manual in --- */
+
+  function renderPasteReport(preview) {
+    var box = $('wxw-manual-report');
+    if (!preview || !preview.products || !preview.products.length) {
+      box.innerHTML = '<div class="wxw-report-row bad"><div class="wxw-report-head">NO PRODUCT DETECTED</div>' +
+        '<div class="wxw-report-body">Expected a WMO header such as <code>WTPN31 PGTW 202100</code> or <code>FVAU02 ADRM 201550</code>, or a block starting with VA ADVISORY.</div></div>';
+      return;
+    }
+    box.innerHTML = preview.products.map(function (product) {
+      var ok = product.ok && product.warning;
+      var head = (product.header || 'NO WMO HEADER') + ' • ' + (product.kind || 'UNKNOWN');
+      var body;
+      if (!ok) {
+        body = '<div class="wxw-report-body"><strong>NOT ACCEPTED:</strong> ' + esc(product.reason || 'unrecognised product') +
+          (product.notes && product.notes.length ? ' <em>(' + esc(product.notes.join(', ')) + ')</em>' : '') + '</div>';
+      } else {
+        var warning = product.warning;
+        var bits = [];
+        bits.push(esc(warning.title || ''));
+        if (warning.dtg) bits.push('DTG ' + esc(fmtStamp(warning.dtg)));
+        if (warning.polygons && warning.polygons.length) bits.push(warning.polygons.length + ' polygon(s)');
+        if (warning.track && warning.track.length) bits.push(warning.track.length + ' track point(s)');
+        if (warning.flTop) bits.push('TOP FL' + Math.round(warning.flTop / 100));
+        if (warning.movement && warning.movement.text) bits.push(esc(warning.movement.text));
+        var age = ageLabel(warning.dtg);
+        if (age) bits.push(esc(age));
+        if (warning.polygons && warning.polygons.length) {
+          var pts = warning.polygons[0].coords ? warning.polygons[0].coords.length : 0;
+          bits.push(pts + ' coords in first ring');
+        }
+        body = '<div class="wxw-report-body">' + bits.join(' • ') + '</div>';
+        if (warning.parseNotes && warning.parseNotes.length) {
+          body += '<div class="wxw-report-head" style="margin-top:6px;">' + esc(warning.parseNotes.join(' • ')) + '</div>';
+        }
+        if (age && /D OLD/.test(age)) {
+          body += '<div class="wxw-report-head" style="margin-top:6px;color:var(--status-warning);">PRODUK LAMA — pastikan masih berlaku sebelum dipakai untuk briefing.</div>';
+        }
+      }
+      return '<div class="wxw-report-row' + (ok ? '' : ' bad') + '">' +
+        '<div class="wxw-report-head">' + esc(head) + (ok ? ' • READY' : ' • REJECTED') + '</div>' + body + '</div>';
+    }).join('');
+  }
+
+  window.wxWarningParsePaste = function () {
+    var text = $('wxw-manual-text').value;
+    var status = $('wxw-manual-status');
+    status.textContent = 'Parsing...';
+    $('wxw-manual-save').disabled = true;
+    return run('parseWxWarningManual', text).then(function (data) {
+      if (!data || data.error) {
+        status.textContent = (data && data.error) || 'Parse failed.';
+        $('wxw-manual-report').innerHTML = '<div class="wxw-report-row bad"><div class="wxw-report-head">PARSE FAILED</div>' +
+          '<div class="wxw-report-body">' + esc((data && data.error) || 'Unknown error') + '</div></div>';
+        return;
+      }
+      renderPasteReport(data);
+      var accepted = (data.products || []).filter(function (product) { return product.ok; }).length;
+      status.textContent = accepted + ' of ' + (data.products || []).length + ' product(s) recognised.';
+      $('wxw-manual-save').disabled = accepted === 0;
+      if (accepted) drawPreview(data);
+    });
+  };
+
+  // Preview products are drawn on the map immediately (dashed, grey) so the
+  // operator can see what would be saved before saving it. Only one preview
+  // group exists at a time: parsing again replaces it instead of stacking.
+  function drawPreview(preview) {
+    if (!state.map || !window.L) return;
+    if (state.previewGroup) { state.map.removeLayer(state.previewGroup); state.previewGroup = null; }
+    var group = L.layerGroup().addTo(state.map);
+    (preview.products || []).forEach(function (product) {
+      if (!product.warning) return;
+      (product.warning.geojson || []).forEach(function (entry) {
+        var ring = entry.geometry && entry.geometry.coordinates && entry.geometry.coordinates[0];
+        if (!ring) return;
+        L.polygon(ring.map(function (coord) { return [coord[1], coord[0]]; }), {
+          color: '#6b7280', weight: 2, dashArray: '2 6', fillOpacity: 0.04
+        }).bindTooltip('PREVIEW — not saved yet', { permanent: false }).addTo(group);
+      });
+      (product.warning.track || []).forEach(function (entry) {
+        if (!isFinite(entry.lat) || !isFinite(entry.lon)) return;
+        L.circleMarker([entry.lat, entry.lon], { radius: 4, color: '#6b7280', weight: 2, fillOpacity: 0.2 }).addTo(group);
+      });
+    });
+    state.previewGroup = group;
+  }
+
+  function clearPreview() {
+    if (state.previewGroup && state.map) state.map.removeLayer(state.previewGroup);
+    state.previewGroup = null;
+  }
+
+  window.wxWarningSavePaste = function () {
+    var button = $('wxw-manual-save');
+    var text = $('wxw-manual-text').value;
+    var status = $('wxw-manual-status');
+    if (!text.trim()) { status.textContent = 'Paste a product first.'; return Promise.resolve(); }
+    if (!window.confirm('Save these products to the shared WX WARNING board for every operator?')) return Promise.resolve();
+    button.disabled = true;
+    status.textContent = 'Saving...';
+    return run('saveWxWarningManual', text).then(function (data) {
+      if (!data || data.error) {
+        status.textContent = (data && data.error) || 'Save failed.';
+        button.disabled = false;
+        return;
+      }
+      status.textContent = 'Saved ' + data.saved + ' product(s)' + (data.skipped ? ', skipped ' + data.skipped : '') + '.';
+      toast('WX WARNING: ' + data.saved + ' manual product(s) saved');
+      $('wxw-manual-text').value = '';
+      $('wxw-manual-report').innerHTML = '';
+      clearPreview();
+      return loadData(true);
+    });
+  };
+
+  window.wxWarningDeleteManual = function (target) {
+    var label = target === 'ALL' ? 'all manual entries' : 'this manual entry';
+    if (!window.confirm('Delete ' + label + '? This affects every operator.')) return Promise.resolve();
+    return run('deleteWxWarningManual', target).then(function (data) {
+      if (!data || data.error) { toast('Delete failed: ' + ((data && data.error) || 'unknown error')); return; }
+      toast('Deleted ' + data.deleted + ' manual entr' + (data.deleted === 1 ? 'y' : 'ies'));
+      return loadData(true);
+    });
+  };
+
+  /* ------------------------------------------------------------------ wiring --- */
+
+  function bindControls() {
+    $('wxw-flight').addEventListener('change', function (event) {
+      state.flightId = event.target.value ? Number(event.target.value) : null;
+      loadData(true);
+    });
+    $('wxw-buffer').addEventListener('click', function (event) {
+      var button = event.target.closest('[data-buffer]');
+      if (!button) return;
+      state.bufferNm = Number(button.getAttribute('data-buffer'));
+      $('wxw-buffer').querySelectorAll('[data-buffer]').forEach(function (chip) {
+        chip.setAttribute('aria-pressed', String(chip === button));
+      });
+      loadData(true);
+    });
+    $('wxw-filter').addEventListener('click', function (event) {
+      var button = event.target.closest('[data-filter]');
+      if (!button) return;
+      state.filter = button.getAttribute('data-filter');
+      $('wxw-filter').querySelectorAll('[data-filter]').forEach(function (chip) {
+        chip.setAttribute('aria-pressed', String(chip === button));
+      });
+      renderList();
+      drawWarnings();
+    });
+    $('wxw-layers').addEventListener('change', function (event) {
+      var input = event.target.closest('[data-layer]');
+      if (!input) return;
+      state.layers[input.getAttribute('data-layer')] = input.checked;
+      drawWarnings();
+      drawRoute();
+    });
+  }
+
+  window.wxWarningRefresh = function (force) {
+    return loadFlightOptionsWithRetry().then(function () { return loadData(force !== false); });
+  };
+
+  window.initWxWarning = function () {
+    if (state.loaded && (Date.now() - state.lastFetchMs) < 120000) {
+      if (state.map) { state.map.invalidateSize(); window.wxWarningFit(); }
+      return Promise.resolve();
+    }
+    return window.wxWarningRefresh(true);
+  };
+
+  bindControls();
+})();
+</script>
