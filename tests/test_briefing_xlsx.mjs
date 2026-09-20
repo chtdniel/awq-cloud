@@ -279,6 +279,48 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   assert(htOf(notamSheet, 39) > htOf(reportSheet, 39), 'a longer NOTAM row is taller than the one-line row');
   assert(cellText(notamSheet, 'F50') === 't@example.com', 'F50 falls back to the account email when no profile name exists (' + cellText(notamSheet, 'F50') + ')');
 
+  // --- Per-leg "Forecasts" columns (G:J left, P:S right) ---------------------
+  // Legs 1-3 write the merged G:J cell, legs 4-6 the merged P:S one. The right
+  // forecast must land on the merge anchor (P), and both must grow the shared row.
+  const legPayload = {
+    ...payload,
+    tafs: [
+      { ...payload.tafs[0], slot: 'POD1', forecast: multiTaf },
+      { ...payload.tafs[0], slot: 'POD4', station: 'YPPH', stationEntered: 'YPPH', forecast: multiTaf }
+    ]
+  };
+  const legRequest = new Request('http://localhost/api/rpc', { method: 'POST', headers, body: JSON.stringify({ method: 'generateBriefingXlsx', args: [legPayload] }) });
+  const legResponse = await onRequestPost({ request: legRequest, env: { DB, ASSETS } });
+  assert(legResponse.status === 200, 'generateBriefingXlsx with left+right leg forecasts returns 200');
+  const legBytes = new Uint8Array(await legResponse.arrayBuffer());
+  // Manual QA hook for the per-leg Forecasts columns.
+  if (process.env.AWQ_XLSX_DUMP_LEGS) await writeFile(process.env.AWQ_XLSX_DUMP_LEGS, Buffer.from(legBytes));
+  const legParts = zipPartMap(legBytes);
+  const legSheet = new TextDecoder().decode(legParts.get('xl/worksheets/sheet5.xml'));
+  const legStyles = new TextDecoder().decode(legParts.get('xl/styles.xml'));
+
+  assert(cellText(legSheet, 'G30').length > 0, 'left leg forecast is written to the merged G:J anchor');
+  assert(cellText(legSheet, 'P30').length > 0, 'right leg forecast is written to the merged P:S anchor');
+  assert(cellText(legSheet, 'Q30') === '', 'the covered cell Q30 stays empty (writing there is invisible in Excel)');
+  assert(htOf(legSheet, 30) > 42.75, 'forecast row grows past the template 42.75pt (' + htOf(legSheet, 30) + 'pt)');
+  assert(/customHeight="1"/.test(rowTag(legSheet, 30)), 'the grown forecast row keeps an explicit height');
+  assert(cellText(legSheet, 'G31') === '' && htOf(legSheet, 31) === 42.75, 'an untouched leg row keeps the template height (' + htOf(legSheet, 31) + 'pt)');
+  assert(!/hidden="1"/.test(rowTag(legSheet, 31)), 'leg rows are never hidden (left and right legs share a row)');
+  // The right Forecasts cells had no wrapText in the template; long text would clip.
+  const rightForecastStyles = [...legSheet.matchAll(/<c r="P3[0-5]"[^>]*s="(\d+)"/g)].map(m => Number(m[1]));
+  const legXfs = [...(legStyles.match(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/) || [''])[0].matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(m => m[0]);
+  assert(new Set(rightForecastStyles).size === 1 && /wrapText="1"/.test(legXfs[rightForecastStyles[0]] || ''), 'right Forecasts cells share one cloned style with wrapText ("' + legXfs[rightForecastStyles[0]] + '")');
+  const leftForecastStyle = Number((legSheet.match(/<c r="G30"[^>]*s="(\d+)"/) || [])[1]);
+  assert(/wrapText="1"/.test(legXfs[leftForecastStyle] || ''), 'left Forecasts cell keeps its template wrap style');
+  // The clone must keep the template's font/border/number format and only add wrap.
+  const templateSheet = rawOf('xl/worksheets/sheet5.xml');
+  const templateP30Style = Number((templateSheet.match(/<c r="P30"[^>]*s="(\d+)"/) || [])[1]);
+  const templateP30Xf = xfsOf(rawOf('xl/styles.xml'))[templateP30Style] || '';
+  const cloneXf = legXfs[rightForecastStyles[0]] || '';
+  const styleAttrs = (xf) => (xf.match(/numFmtId="\d+"|fontId="\d+"|borderId="\d+"/g) || []).join(',');
+  assert(styleAttrs(cloneXf) === styleAttrs(templateP30Xf) && /wrapText="1"/.test(cloneXf) && !/wrapText="1"/.test(templateP30Xf),
+    'cloned right-Forecasts style keeps font/border/number format and only adds wrapText (' + styleAttrs(cloneXf) + ')');
+
   console.log('PASS: report XLSX (report page) carries no QR image part or anchor; DATE row defaults to today (UTC) with DD-MMM-YYYY + date validation.');
   database.close();
 }

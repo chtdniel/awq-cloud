@@ -264,6 +264,10 @@ const TAF_BLOCK = { firstRow: 20, rows: 7, stationColumn: 'C', textColumn: 'E' }
 // left in the merged E:K, right in the merged L:S.
 const NOTAM_BLOCK = { firstRow: 39, rows: 7, stationColumn: 'C', leftColumn: 'E', rightColumn: 'L' };
 
+// Per-leg forecast table: legs 1-3 write the merged G:J "Forecasts" cell and legs
+// 4-6 the merged P:S one, so both halves share the same physical row.
+const LEG_FORECAST_BLOCK = { firstRow: 30, rows: 6, leftTextColumn: 'G', rightTextColumn: 'P' };
+
 // Dispatcher name printed under the DXR signature block, taken from the login
 // account (profile full name, else the account email).
 const DISPATCHER_CELL = 'F50';
@@ -297,8 +301,13 @@ function columnWidthUnits(sheetXml, firstCol, lastCol) {
 }
 
 // Font size + wrap setting of a cell's style (the height depends on both).
+function readCellStyleId(sheetXml, ref) {
+    const m = sheetXml.match(new RegExp('<c r="' + ref + '"[^>]*\\ss="(\\d+)"'));
+    return m ? Number(m[1]) : null;
+}
+
 function readCellTextStyle(stylesXml, sheetXml, ref) {
-    const styleId = Number((sheetXml.match(new RegExp('<c r="' + ref + '"[^>]*\\ss="(\\d+)"')) || [])[1]);
+    const styleId = readCellStyleId(sheetXml, ref);
     const xfs = [...(stylesXml.match(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/) || [''])[0]
         .matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(m => m[0]);
     const xf = xfs[styleId] || '';
@@ -307,6 +316,55 @@ function readCellTextStyle(stylesXml, sheetXml, ref) {
         .matchAll(/<font>[\s\S]*?<\/font>|<font\/>/g)].map(m => m[0]);
     const size = Number(((fonts[fontId] || '').match(/<sz val="([\d.]+)"/) || [])[1]) || 11;
     return { size, wrap: /wrapText="1"/.test(xf) };
+}
+
+// Replaces a cell's style index without touching its value.
+function setCellStyle(sheetXml, ref, styleId) {
+    return sheetXml.replace(new RegExp('(<c r="' + ref + '"[^>]*?)\\ss="\\d+"'), (match, head) => head + ' s="' + styleId + '"');
+}
+
+function cellStyleWraps(stylesXml, styleId) {
+    const xfs = [...(stylesXml.match(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/) || [''])[0]
+        .matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(m => m[0]);
+    return /wrapText="1"/.test(xfs[styleId] || '');
+}
+
+// Clones a cell style with wrapText added. The template's right-hand Forecasts
+// column is merged but not set to wrap, so long text would clip horizontally —
+// no row height could fix that. Mutates styles.xml; returns the new style index.
+function cloneStyleWithWrap(stylesFile, templateStyleId) {
+    const cellXfs = stylesFile.text.match(/<cellXfs([^>]*)>([\s\S]*?)<\/cellXfs>/);
+    if (!cellXfs) throw new Error('Template cellXfs missing');
+    const xfs = [...cellXfs[2].matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(m => m[0]);
+    const source = xfs[templateStyleId];
+    if (!source) throw new Error('Template style missing: ' + templateStyleId);
+    const styleId = xfs.length;
+    const wrapped = /<alignment/.test(source)
+        ? source.replace(/<alignment([^>]*?)(\/?)>/, (m, attrs, selfClose) =>
+            '<alignment' + attrs.replace(/\s*wrapText="[^"]*"/, '') + ' wrapText="1"' + (selfClose || '') + '>')
+        : source.replace(/^(<xf\b[^>]*?)(\/?)>/, (m, head) =>
+            head.replace(/\s*applyAlignment="[^"]*"/, '') + ' applyAlignment="1"><alignment wrapText="1"/></xf>');
+    const declared = Number((cellXfs[1].match(/count="(\d+)"/) || [])[1] || xfs.length);
+    stylesFile.text = stylesFile.text.replace(cellXfs[0],
+        '<cellXfs' + cellXfs[1].replace(/count="\d+"/, 'count="' + (declared + 1) + '"') + '>' + cellXfs[2] + wrapped + '</cellXfs>');
+    return styleId;
+}
+
+// Ensures a merged text cell wraps (no-op when its style already does).
+function ensureWrappedCell(sheetXml, get, cache, ref) {
+    const styleId = readCellStyleId(sheetXml, ref);
+    if (styleId === null) return sheetXml;
+    const stylesFile = get('xl/styles.xml');
+    if (!stylesFile || stylesFile.text === null) return sheetXml;
+    if (cellStyleWraps(stylesFile.text, styleId)) return sheetXml;
+    if (!cache.has(styleId)) cache.set(styleId, cloneStyleWithWrap(stylesFile, styleId));
+    return setCellStyle(sheetXml, ref, cache.get(styleId));
+}
+
+// Template row height (used as a floor for hand-fillable rows).
+function rowHeightOf(sheetXml, row) {
+    const tag = (sheetXml.match(new RegExp('<row r="' + row + '"[^>]*>')) || [''])[0];
+    return Number((tag.match(/ht="([\d.]+)"/) || [])[1]) || 0;
 }
 
 function countWrappedLines(text, style, widthUnits) {
@@ -661,8 +719,17 @@ async function buildXlsxResponse(context, form, options = {}) {
         // STD dan OFP Ref No tidak perlu diisi sesuai permintaan
         xml = setInlineCell(xml, 'K' + row, leg.poa || '');
         xml = setInlineCell(xml, 'O' + row, leg.alt || '');
-        for (const column of ['E', 'F', 'G', 'M', 'O', 'Q']) xml = setInlineCell(xml, column + (30 + index), '');
+        for (const column of ['E', 'F', 'G', 'M', 'O', 'P']) xml = setInlineCell(xml, column + (30 + index), '');
     }
+    const wrappedStyleCache = new Map();
+    let stylesXml = (get('xl/styles.xml') || {}).text || '';
+    // The right-hand Forecasts column is merged P:S but the template style does
+    // not wrap, so switch those cells to a wrapping clone before filling them.
+    for (let index = 0; index < LEG_FORECAST_BLOCK.rows; index++) {
+        xml = ensureWrappedCell(xml, get, wrappedStyleCache, LEG_FORECAST_BLOCK.rightTextColumn + (LEG_FORECAST_BLOCK.firstRow + index));
+    }
+    stylesXml = (get('xl/styles.xml') || {}).text || '';
+    const legForecastText = {};
     (form.tafs || []).forEach((t) => {
         const match = String(t.slot || '').match(/^(POD|POA)\s*([1-6])$/i);
         if (!match) return;
@@ -671,13 +738,27 @@ async function buildXlsxResponse(context, form, options = {}) {
         const right = legIndex >= 3;
         const stCol = right ? 'M' : 'E';
         const tmCol = right ? 'O' : 'F';
-        const txCol = right ? 'Q' : 'G';
+        // Merge anchors: left Forecasts is G:J, right is P:S (Q is a covered cell,
+        // so writing there would never show up in Excel).
+        const txCol = right ? LEG_FORECAST_BLOCK.rightTextColumn : LEG_FORECAST_BLOCK.leftTextColumn;
+        const forecastText = t.forecast || '';
         xml = setInlineCell(xml, stCol + r, t.stationEntered || t.station || '');
         xml = setInlineCell(xml, tmCol + r, t.time || '');
-        xml = setInlineCell(xml, txCol + r, t.forecast || '');
+        xml = setInlineCell(xml, txCol + r, forecastText);
+        const slot = legForecastText[r] || (legForecastText[r] = { left: '', right: '' });
+        if (right) slot.right = forecastText; else slot.left = forecastText;
     });
+    // Auto-fit a leg row to the taller of its two Forecasts cells. The height only
+    // grows: legs 1-3 and 4-6 share the row, and the table stays fillable by hand.
+    for (const [rowKey, texts] of Object.entries(legForecastText)) {
+        const row = Number(rowKey);
+        const computed = rowHeightForCells(xml, stylesXml, [
+            { ref: LEG_FORECAST_BLOCK.leftTextColumn + row, text: texts.left },
+            { ref: LEG_FORECAST_BLOCK.rightTextColumn + row, text: texts.right }
+        ]);
+        xml = setRowLayout(xml, row, { height: Math.max(rowHeightOf(xml, row) || 15, computed) });
+    }
     const weatherStations = [...new Map((form.tafs || []).filter(taf => taf.stationEntered || taf.station).map(taf => [taf.stationEntered || taf.station, taf])).values()];
-    const stylesXml = (get('xl/styles.xml') || {}).text || '';
     for (let index = 0; index < TAF_BLOCK.rows; index++) {
         const taf = weatherStations[index];
         const continuation = index === TAF_BLOCK.rows - 1 && weatherStations.length > TAF_BLOCK.rows;
