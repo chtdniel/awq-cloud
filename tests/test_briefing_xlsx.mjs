@@ -335,19 +335,21 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   assert(printOrder.every((v, i) => v > 0 && (i === 0 || v > printOrder[i - 1])), 'print elements keep the CT_Worksheet order');
   assert(/paperSize="9"/.test(formSheet) && /<headerFooter\/>/.test(formSheet), 'editable-form XLSX gets the same print defaults');
 
-  // --- TAF source: registry (TAF Manager) first, board column as fallback ----
-  // Production flights carry empty taf_dep/taf_arr (54/54 in the dev DB) while the
-  // registry holds fresh TAFs, so DEP/ARR stations used to print the misleading
-  // "NIL TAF DATA IN FLIGHT BOARD" even though a TAF existed.
+  // --- TAF sources: leg Forecasts = FLIGHT BOARD (TAF DEP/ARR), station list = registry
+  // Production flights carry TAF DEP/ARR slices on the board (e.g. "2012/2118 20006KT
+  // 9999 FEW040") while the registry holds the full TAF. Leg cells follow the board,
+  // the station list follows the registry, each falling back to the other.
   database.exec('CREATE TABLE flights (id INTEGER PRIMARY KEY, callsign TEXT, dep TEXT, dest TEXT, alt TEXT, ac_type TEXT, etd TEXT, eta TEXT, taf_dep TEXT, taf_arr TEXT, enr1 TEXT, enr2 TEXT, enr3 TEXT, dof TEXT)');
   database.exec('CREATE TABLE tafs (id INTEGER PRIMARY KEY AUTOINCREMENT, station TEXT, raw_text TEXT, issue_time TEXT, created_at TEXT)');
   const addFlight = database.prepare('INSERT INTO flights (id, callsign, dep, dest, alt, ac_type, etd, eta, taf_dep, taf_arr, dof) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-  addFlight.run(1, '544', 'WADD', 'YPPH', 'YPKG', 'PK-AZF', '0300', '0600', null, null, '20260920');
-  addFlight.run(2, '546', 'WATO', 'WIII', null, 'PK-AZG', '0700', '1000', 'TAF WATO 210100Z BOARD COPY=', null, '20260920');
+  addFlight.run(1, '544', 'WADD', 'YPPH', 'YPKG', 'PK-AZF', '0300', '0600', '2012/2118 20006KT 9999 FEW040', null, '20260920');
+  addFlight.run(2, '546', 'WATO', 'WIII', null, 'PK-AZG', '0700', '1000', 'FM202100 08004KT CAVOK', null, '20260920');
   const addTaf = database.prepare('INSERT INTO tafs (station, raw_text, issue_time) VALUES (?,?,?)');
-  addTaf.run('WADD', 'TAF WADD 210100Z 2012/2118 12010KT 9999 SCT016=', '2026-09-20T12:00:00Z');
-  addTaf.run('YPPH', 'TAF YPPH 210100Z 2012/2118 03005KT 9999 SCT035=', '2026-09-20T12:00:00Z');
-  addTaf.run('YPKG', 'TAF YPKG 210100Z 2012/2118 22005KT CAVOK=', '2026-09-20T12:00:00Z');
+  const WADD_REGISTRY = 'TAF WADD 201100Z 2012/2118 12010KT 9999 SCT016=';
+  const YPPH_REGISTRY = 'TAF YPPH 201122Z 2012/2118 20006KT 9999 FEW040';
+  addTaf.run('WADD', WADD_REGISTRY, '2026-09-20T11:00:00Z');
+  addTaf.run('YPPH', YPPH_REGISTRY, '2026-09-20T11:22:00Z');
+  addTaf.run('YPKG', 'TAF YPKG 201115Z 2012/2118 22005KT CAVOK=', '2026-09-20T11:15:00Z');
   const registryRequest = new Request('http://localhost/api/rpc', { method: 'POST', headers, body: JSON.stringify({ method: 'generateReportXlsx', args: [{ flights: ['544', '546'], notamAnalysis: {}, noSigMap: {} }] }) });
   const registryResponse = await onRequestPost({ request: registryRequest, env: { DB, ASSETS } });
   assert(registryResponse.status === 200, 'generateReportXlsx from selected flights returns 200');
@@ -355,14 +357,23 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   // Manual QA hook for the TAF source fix.
   if (process.env.AWQ_XLSX_DUMP_TAF) await writeFile(process.env.AWQ_XLSX_DUMP_TAF, Buffer.from(registryBytes));
   const registrySheet = new TextDecoder().decode(zipPartMap(registryBytes).get('xl/worksheets/sheet5.xml'));
+
+  // Per-leg Forecasts cells (row 30/31 = leg 1 POD/POA, 32/33 = leg 2 POD/POA).
+  assert(cellText(registrySheet, 'G30') === '2012/2118 20006KT 9999 FEW040', 'leg 1 POD (WADD) takes the board TAF DEP slice, not the registry text');
+  assert(cellText(registrySheet, 'G31') === YPPH_REGISTRY, 'leg 1 POA (YPPH) falls back to the registry when TAF ARR is empty');
+  assert(cellText(registrySheet, 'G32') === 'FM202100 08004KT CAVOK', 'leg 2 POD (WATO) takes the board slice (station absent from the registry)');
+  assert(cellText(registrySheet, 'G33') === 'NIL TAF DATA IN DATABASE', 'a leg whose station has neither source gets the NIL sentinel');
+  assert(cellText(registrySheet, 'F30') === '03:00' && cellText(registrySheet, 'F31') === '06:00', 'leg TIME still comes from the flight schedule (STD/STA)');
+
+  // Terminal Aerodrome Forecasts list keeps the full registry TAF per station.
   const tafBlockTexts = [20, 21, 22, 23, 24].map(r => cellText(registrySheet, 'E' + r));
-  assert(tafBlockTexts.includes('TAF WADD 210100Z 2012/2118 12010KT 9999 SCT016='), 'DEP station WADD takes the registry TAF (was NIL)');
-  assert(tafBlockTexts.includes('TAF YPPH 210100Z 2012/2118 03005KT 9999 SCT035='), 'ARR station YPPH takes the registry TAF (was NIL)');
-  assert(tafBlockTexts.includes('TAF YPKG 210100Z 2012/2118 22005KT CAVOK='), 'ALT station YPKG keeps taking the registry TAF');
-  assert(tafBlockTexts.includes('TAF WATO 210100Z BOARD COPY='), 'a station missing from the registry falls back to the flight-board column');
-  assert(tafBlockTexts.includes('NIL TAF DATA IN DATABASE'), 'a station with neither source gets the database NIL sentinel');
+  assert(tafBlockTexts.includes(WADD_REGISTRY), 'station list keeps the full registry TAF for WADD');
+  assert(tafBlockTexts.includes(YPPH_REGISTRY), 'station list keeps the full registry TAF for YPPH');
+  assert(tafBlockTexts.includes('TAF YPKG 201115Z 2012/2118 22005KT CAVOK='), 'station list keeps the registry TAF for the ALT station');
+  assert(tafBlockTexts.includes('FM202100 08004KT CAVOK'), 'station list falls back to the board slice when the station is not in the registry');
+  assert(tafBlockTexts.includes('NIL TAF DATA IN DATABASE'), 'station list sentinel when neither source has the station');
+  assert(!tafBlockTexts.includes('2012/2118 20006KT 9999 FEW040'), 'station list does not degrade to the board slice when the registry has the station');
   assert(!/NIL TAF DATA IN FLIGHT BOARD/.test(registrySheet), 'the misleading flight-board sentinel is gone from the report');
-  assert(cellText(registrySheet, 'G30') === 'TAF WADD 210100Z 2012/2118 12010KT 9999 SCT016=', 'the per-leg Forecasts cell uses the same registry-first source');
 
   console.log('PASS: report XLSX (report page) carries no QR image part or anchor; DATE row defaults to today (UTC) with DD-MMM-YYYY + date validation.');
   database.close();

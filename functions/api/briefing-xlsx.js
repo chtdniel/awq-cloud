@@ -653,14 +653,18 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         const poaTime = f ? compactTime(f.eta) : '';
         const podBoardTaf = f ? String(f.taf_dep || '').trim() : '';
         const poaBoardTaf = f ? String(f.taf_arr || '').trim() : '';
-        // The TAF registry (TAF Manager) is the authoritative full forecast; the
-        // flight-board column taf_dep/taf_arr is only a fallback — it is empty on
-        // most flights, and trusting it first made DEP/ARR stations print
-        // "NIL TAF DATA IN FLIGHT BOARD" while a fresh TAF existed in the registry.
-        const podForecast = podStn ? (String(tafMap[podStn]?.raw || '').trim() || podBoardTaf || NIL_TAF) : '';
-        const poaForecast = poaStn ? (String(tafMap[poaStn]?.raw || '').trim() || poaBoardTaf || NIL_TAF) : '';
-        tafs.push({ slot: 'POD' + (i + 1), station: podStn, stationEntered: podStn, time: podTime || (podStn && tafMap[podStn]?.issue_time ? compactTime(tafMap[podStn].issue_time) : ''), forecast: podForecast, flight: callsign });
-        tafs.push({ slot: 'POA' + (i + 1), station: poaStn, stationEntered: poaStn, time: poaTime || (poaStn && tafMap[poaStn]?.issue_time ? compactTime(tafMap[poaStn].issue_time) : ''), forecast: poaForecast, flight: callsign });
+        const podRegistryTaf = podStn ? String(tafMap[podStn]?.raw || '').trim() : '';
+        const poaRegistryTaf = poaStn ? String(tafMap[poaStn]?.raw || '').trim() : '';
+        // Per-leg "Forecasts" cells follow what the dispatcher maintains on the
+        // FLIGHT BOARD (columns TAF DEP / TAF ARR — usually the slice of the TAF
+        // that applies to that leg). The station list further down keeps the full
+        // registry TAF. Each source falls back to the other, then to the sentinel.
+        const podLegForecast = podStn ? (podBoardTaf || podRegistryTaf || NIL_TAF) : '';
+        const poaLegForecast = poaStn ? (poaBoardTaf || poaRegistryTaf || NIL_TAF) : '';
+        const podStationForecast = podStn ? (podRegistryTaf || podBoardTaf || NIL_TAF) : '';
+        const poaStationForecast = poaStn ? (poaRegistryTaf || poaBoardTaf || NIL_TAF) : '';
+        tafs.push({ slot: 'POD' + (i + 1), station: podStn, stationEntered: podStn, time: podTime || (podStn && tafMap[podStn]?.issue_time ? compactTime(tafMap[podStn].issue_time) : ''), forecast: podLegForecast, stationForecast: podStationForecast, flight: callsign });
+        tafs.push({ slot: 'POA' + (i + 1), station: poaStn, stationEntered: poaStn, time: poaTime || (poaStn && tafMap[poaStn]?.issue_time ? compactTime(tafMap[poaStn].issue_time) : ''), forecast: poaLegForecast, stationForecast: poaStationForecast, flight: callsign });
     }
     additionalTafStations.forEach(e => {
         if (tafs.some(taf => taf.station === e.station)) return;
@@ -825,7 +829,8 @@ async function buildXlsxResponse(context, form, options = {}) {
         const taf = weatherStations[index];
         const continuation = index === TAF_BLOCK.rows - 1 && weatherStations.length > TAF_BLOCK.rows;
         const stationText = continuation ? 'CONT.' : taf?.stationEntered || taf?.station || '';
-        const forecastText = continuation ? 'See WX sheet for all station forecasts.' : taf?.forecast || '';
+        // Station list = full registry TAF (the leg cells above carry the board slice).
+        const forecastText = continuation ? 'See WX sheet for all station forecasts.' : (taf?.stationForecast || taf?.forecast || '');
         const row = TAF_BLOCK.firstRow + index;
         xml = setInlineCell(xml, TAF_BLOCK.stationColumn + row, stationText);
         xml = setInlineCell(xml, TAF_BLOCK.textColumn + row, forecastText);
