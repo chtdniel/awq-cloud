@@ -23,7 +23,7 @@ Consequences worth knowing:
 - No admin approval, no new OAuth scope, no service-account key, no public deployment.
 - The sheet is never shared with anyone or anything.
 - The board's sync is instant and keeps working even if Google is unreachable at that moment.
-- The weights are as fresh as the last push (every 15 minutes by default). Run `pushCgoPlan()` by hand whenever you need it sooner.
+- **Pushing is manual by default** — the cargo desk clicks a menu item in the sheet right after updating the plan, which is the moment the data actually changes. A 15-minute schedule is available for anyone who would rather not think about it, but it is not required.
 
 ## Sheet layout
 
@@ -59,21 +59,38 @@ Sync requires the **registered** tier (it writes) and a valid CSRF token. A `rea
 
 ### 1. Configure the Apps Script
 
-1. Open the Apps Script project that belongs to **christiandaniel@airasia.com** (the account that can open the CGO PLAN sheet).
-2. Replace the contents of `Code.gs` with [`integrations/cgo-bridge/Code.gs`](../integrations/cgo-bridge/Code.gs).
-3. **Project Settings → Script properties**:
+Create the script **inside the CGO PLAN spreadsheet** — **Extensions → Apps Script** — so it can add a menu to the sheet. (That requires edit access to the sheet; see *Standalone* below if you only have view access.)
+
+1. Replace the contents of `Code.gs` with [`integrations/cgo-bridge/Code.gs`](../integrations/cgo-bridge/Code.gs).
+2. **Project Settings → Script properties**:
 
    | Property | Value |
    |---|---|
    | `CGO_BRIDGE_TOKEN` | the shared token — the same value as the Cloudflare secret |
    | `WORKER_INGEST_URL` | optional; defaults to `https://awq.christiandaniel.my.id/api/cgo-ingest` |
-   | `CGO_SHEET_ID` | optional; defaults to the AWQ CGO PLAN sheet |
+   | `CGO_SHEET_ID` | optional; only for a standalone project on another sheet |
    | `CGO_SHEET_NAME` | optional; defaults to the first tab |
 
-4. Run **`diagnose`** once and read the log. It must end with `Spreadsheet : OK`. If it says `FAILED`, the account signed in to this Apps Script project cannot open the sheet — the trigger would fail the same way; sign in with the right account or share the sheet with the one shown on the `Account signed in` line.
-5. Run **`installCgoTrigger`** once. Authorise when Google prompts, then read the log — it installs the 15-minute schedule *and* pushes immediately, so the log shows the Worker's answer straight away. A healthy answer is `HTTP 200 {"ok":true,...}`.
+3. Reload the spreadsheet. An **AWQ Cloud** menu appears in the menu bar.
+4. Click **AWQ Cloud → Check setup**. Authorise when Google prompts, then read the result — it must say `Spreadsheet : OK`. If it says `FAILED`, this account cannot open the sheet and every push will fail the same way.
+5. Click **AWQ Cloud → Push CGO plan now**. A healthy answer is `HTTP 200 {"ok":true,…}` with the row and entry counts.
 
-> A web app **deployment is not needed at all** for the push to work. The trigger calls the function directly. Any existing web-app deployment can be left alone or deleted.
+**That is the whole loop.** Push whenever the plan changes; the board syncs from the last push.
+
+### Optional: automatic pushing
+
+If nobody wants to remember the menu, add the schedule:
+
+- **AWQ Cloud → Turn 15-minute schedule ON** — pushes every 15 minutes, runs as the account that enabled it.
+- **AWQ Cloud → Turn schedule OFF** — back to manual.
+
+Change the interval with `TRIGGER_MINUTES` at the top of `Code.gs` (Apps Script's minimum is 1 minute).
+
+### Standalone project instead
+
+If you do not have edit access to the sheet, the same file also works from a project created at [script.google.com](https://script.google.com) — there is simply no menu, so run `pushCgoPlan` from the editor. Set `CGO_SHEET_ID` unless you are reading the AWQ default sheet.
+
+> A web app **deployment is not needed at all** for the push to work — neither bound nor standalone. Any existing web-app deployment can be left alone or deleted.
 
 ### 2. Configure Cloudflare Pages
 
@@ -89,8 +106,8 @@ Then **redeploy** — Pages reads environment variables at deployment time. `CGO
 
 ### 3. Verify
 
-- In the Apps Script log, `installCgoTrigger` ends with `HTTP 200 {"ok":true,"rowCount":…,"entryCount":…}`.
-- On the board, **Sync CGO Data** shows `[ CGO SYNC ]` with the weights.
+- The sheet menu's **Push CGO plan now** reports `CGO plan pushed` with the counts.
+- On the board, **Sync CGO Data** shows `[ CGO SYNC ]` with the weights and the snapshot's age.
 
 ---
 
@@ -105,13 +122,14 @@ Then **redeploy** — Pages reads environment variables at deployment time. `CGO
 
 | Message | Cause |
 |---|---|
-| Apps Script log: `STOP: set the CGO_BRIDGE_TOKEN script property` | property missing in the Apps Script project |
-| Apps Script log: `Worker answered HTTP 401 unauthorized` | the Apps Script property and the Cloudflare secret differ |
-| Apps Script log: `Worker answered HTTP 503` | the Cloudflare secret is missing, or the deployment predates it — redeploy |
-| Apps Script log: `Worker answered HTTP 422 CGO PLAN header not found` | the sheet lost its `FLIGHT NO` or `Confirmed Wt.`/`REVISE` column, or it moved past row 10 |
-| Apps Script log: `Spreadsheet : FAILED` (from `diagnose`) | the script's account cannot open the sheet |
-| Board: `No CGO PLAN data has been received yet…` | no push has succeeded — run `installCgoTrigger` or `pushCgoPlan` |
-| Board: `WARNING: that snapshot is over 2 hours old` | the trigger is not firing — re-run `installCgoTrigger` |
+| Menu: `CGO push FAILED — Set the CGO_BRIDGE_TOKEN script property first.` | property missing in the Apps Script project |
+| `HTTP 401 unauthorized` | the Apps Script property and the Cloudflare secret differ |
+| `HTTP 503` | the Cloudflare secret is missing, or the deployment predates it — redeploy |
+| `HTTP 422 CGO PLAN header not found` | the sheet lost its `FLIGHT NO` or `Confirmed Wt.`/`REVISE` column, or it moved past row 10 |
+| `Check setup` reports `Spreadsheet : FAILED` | this account cannot open the sheet |
+| No **AWQ Cloud** menu on the sheet | the script is not bound to the spreadsheet, or you have view-only access — see *Standalone project instead* |
+| Board: `No CGO PLAN data has been received yet…` | nothing has been pushed — click **Push CGO plan now** |
+| Board: `WARNING: that snapshot is over 2 hours old` | nobody has pushed for a while; the schedule is off |
 
 ## Code map
 
