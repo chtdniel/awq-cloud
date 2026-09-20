@@ -419,6 +419,58 @@ function setRowLayout(sheetXml, row, layout) {
     });
 }
 
+// --- Default print setup ----------------------------------------------------
+// Written into the CBR sheet so both the downloaded XLSX and the Google Sheet
+// created from it open with these defaults (Google Sheets imports the page
+// setup on conversion):
+//   A4 (8.27" x 11.69") · portrait · fit to width · margins 0.25/0.25/0.4/0.3
+//   alignment horizontal center + vertical top · no header/footer page numbers
+
+const PRINT_SETUP = {
+    paperSize: '9',          // 9 = A4
+    orientation: 'portrait',
+    fitToWidth: '1',
+    fitToHeight: '0',        // 1 page wide, as many pages tall as needed
+    marginLeft: '0.25',
+    marginRight: '0.25',
+    marginTop: '0.4',
+    marginBottom: '0.3',
+    marginHeader: '0',
+    marginFooter: '0',
+    horizontalCentered: '1',
+    verticalCentered: '0'    // vertical top (not centered)
+};
+
+function replaceOrInsertPrintElement(sheetXml, matcher, element, beforePatterns) {
+    if (matcher.test(sheetXml)) return sheetXml.replace(matcher, element);
+    for (const pattern of beforePatterns) {
+        if (pattern.test(sheetXml)) return sheetXml.replace(pattern, (match) => element + match);
+    }
+    return sheetXml.replace('</worksheet>', element + '</worksheet>');
+}
+
+function applyPrintSetup(sheetXml) {
+    const s = PRINT_SETUP;
+    let xml = sheetXml;
+    // Fit-to-page must be enabled on the sheet, otherwise Excel ignores fitToWidth/Height.
+    if (/<pageSetUpPr[^>]*\/>/.test(xml)) xml = xml.replace(/<pageSetUpPr[^>]*\/>/, '<pageSetUpPr fitToPage="1"/>');
+    else if (/<sheetPr[^>]*\/>/.test(xml)) xml = xml.replace(/<sheetPr([^>]*)\/>/, '<sheetPr$1><pageSetUpPr fitToPage="1"/></sheetPr>');
+    else if (/<sheetPr[^>]*>/.test(xml)) xml = xml.replace(/(<sheetPr[^>]*>)/, '$1<pageSetUpPr fitToPage="1"/>');
+
+    xml = replaceOrInsertPrintElement(xml, /<printOptions[^>]*\/>/,
+        '<printOptions horizontalCentered="' + s.horizontalCentered + '" verticalCentered="' + s.verticalCentered + '"/>',
+        [/<pageMargins[^>]*\/>/, /<pageSetup[^>]*\/>/, /<headerFooter[\s\S]*?<\/headerFooter>/, /<drawing[^>]*\/>/]);
+    xml = replaceOrInsertPrintElement(xml, /<pageMargins[^>]*\/>/,
+        '<pageMargins left="' + s.marginLeft + '" right="' + s.marginRight + '" top="' + s.marginTop + '" bottom="' + s.marginBottom + '" header="' + s.marginHeader + '" footer="' + s.marginFooter + '"/>',
+        [/<pageSetup[^>]*\/>/, /<headerFooter[\s\S]*?<\/headerFooter>/, /<drawing[^>]*\/>/]);
+    xml = replaceOrInsertPrintElement(xml, /<pageSetup[^>]*\/>/,
+        '<pageSetup paperSize="' + s.paperSize + '" orientation="' + s.orientation + '" fitToWidth="' + s.fitToWidth + '" fitToHeight="' + s.fitToHeight + '"/>',
+        [/<headerFooter[\s\S]*?<\/headerFooter>/, /<drawing[^>]*\/>/]);
+    // "Headers & footers: page numbers off" → drop the template's &C Page &P footer.
+    xml = replaceOrInsertPrintElement(xml, /<headerFooter[\s\S]*?<\/headerFooter>|<headerFooter[^>]*\/>/, '<headerFooter/>', [/<drawing[^>]*\/>/]);
+    return xml;
+}
+
 function findSheetFile(workbookXml, workbookRelsXml, sheetName) {
     const tagRe = new RegExp('<sheet[^>]*name="' + sheetName + '"[^>]*/?>');
     const tag = workbookXml.match(tagRe);
@@ -814,6 +866,8 @@ async function buildXlsxResponse(context, form, options = {}) {
     // Dispatcher on duty = the logged-in account that generated this workbook.
     const dispatcherName = String(options.dispatcherName || '').trim();
     if (dispatcherName) xml = setInlineCell(xml, DISPATCHER_CELL, dispatcherName);
+    // Print defaults (A4 portrait, fit to width, margins, top alignment, no footer).
+    xml = applyPrintSetup(xml);
     cbrSheet.text = xml;
     const wxFile = findSheetFile(workbookXml, workbookRels, 'WX');
     if (wxFile) {

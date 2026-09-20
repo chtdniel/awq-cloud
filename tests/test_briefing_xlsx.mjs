@@ -321,6 +321,20 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   assert(styleAttrs(cloneXf) === styleAttrs(templateP30Xf) && /wrapText="1"/.test(cloneXf) && !/wrapText="1"/.test(templateP30Xf),
     'cloned right-Forecasts style keeps font/border/number format and only adds wrapText (' + styleAttrs(cloneXf) + ')');
 
+  // --- Default print setup (imported by Google Sheets) -----------------------
+  const pageSetupTag = (reportSheet.match(/<pageSetup[^>]*\/>/) || [''])[0];
+  assert(/paperSize="9"/.test(pageSetupTag) && /orientation="portrait"/.test(pageSetupTag), 'default print: A4 portrait (' + pageSetupTag + ')');
+  assert(/fitToWidth="1"/.test(pageSetupTag) && /fitToHeight="0"/.test(pageSetupTag), 'default print: fit to width (height auto)');
+  const marginsTag = (reportSheet.match(/<pageMargins[^>]*\/>/) || [''])[0];
+  assert(/left="0.25"/.test(marginsTag) && /right="0.25"/.test(marginsTag) && /top="0.4"/.test(marginsTag) && /bottom="0.3"/.test(marginsTag), 'default print: margins left/right 0.25, top 0.4, bottom 0.3 (' + marginsTag + ')');
+  const printOptionsTag = (reportSheet.match(/<printOptions[^>]*\/>/) || [''])[0];
+  assert(/horizontalCentered="1"/.test(printOptionsTag) && /verticalCentered="0"/.test(printOptionsTag), 'default print: horizontal center, vertical top (' + printOptionsTag + ')');
+  assert(/<pageSetUpPr fitToPage="1"\/>/.test(reportSheet), 'default print: fitToPage enabled on the sheet');
+  assert(/<headerFooter\/>/.test(reportSheet) && !/&amp;P/.test(reportSheet), 'default print: page numbers (footer) off');
+  const printOrder = ['<printOptions', '<pageMargins', '<pageSetup', '<headerFooter', '<drawing'].map(t => reportSheet.indexOf(t));
+  assert(printOrder.every((v, i) => v > 0 && (i === 0 || v > printOrder[i - 1])), 'print elements keep the CT_Worksheet order');
+  assert(/paperSize="9"/.test(formSheet) && /<headerFooter\/>/.test(formSheet), 'editable-form XLSX gets the same print defaults');
+
   console.log('PASS: report XLSX (report page) carries no QR image part or anchor; DATE row defaults to today (UTC) with DD-MMM-YYYY + date validation.');
   database.close();
 }
