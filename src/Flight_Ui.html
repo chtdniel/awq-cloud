@@ -3443,29 +3443,45 @@
   // =========================================================
   // CGO SYNC ACTION
   // =========================================================
+  // Reads the CGO PLAN Google Sheet through the backend and writes the cargo
+  // weight onto the flights currently on the board. The board rows travel with
+  // the request so the backend only touches flights the operator can see.
   window.syncCgoData = function() {
     const loader = document.getElementById('flight-loading');
+    const boardIds = Array.isArray(window.activeBoardRowIds) ? window.activeBoardRowIds.slice() : [];
+    if (boardIds.length === 0) {
+      alert('No flights are on the board. Add the flights to sync, then run Sync CGO Data again.');
+      return;
+    }
     if (loader) {
       loader.innerText = '[ SYSTEM : SYNCING CARGO MANIFEST... ]';
       loader.style.display = 'block';
     }
-    
-    if (typeof google !== 'undefined' && google.script && google.script.run) {
-      google.script.run
-        .withFailureHandler(err => {
-          if (loader) loader.style.display = 'none';
-          alert('CGO Sync Failed: ' + (err.message || err));
-        })
-        .withSuccessHandler(data => {
-          if (loader) loader.style.display = 'none';
-          if (data) {
-            window.allDbFlights = Array.isArray(data.flights) ? data.flights : [];
-            window.acList = normalizeAcList(data.acList);
-            window.renderBoard();
-          }
-        })
-        .syncCgoData();
+
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      if (loader) loader.style.display = 'none';
+      alert('CGO Sync Failed: backend bridge is unavailable in this environment.');
+      return;
     }
+
+    google.script.run
+      .withFailureHandler(err => {
+        if (loader) loader.style.display = 'none';
+        alert('CGO Sync Failed: ' + (err && err.message ? err.message : err));
+      })
+      .withSuccessHandler(data => {
+        if (loader) loader.style.display = 'none';
+        if (!data) return;
+        window.allDbFlights = Array.isArray(data.flights) ? data.flights : [];
+        window.acList = normalizeAcList(data.acList);
+        window.renderBoard();
+        const sync = data.cgoSync;
+        if (sync) {
+          console.log('[CGO] sync result', sync);
+          alert('[ CGO SYNC ]\n\n' + (sync.summary || []).join('\n'));
+        }
+      })
+      .syncCgoData(boardIds);
   };
 
   // Final Initialization Trigger

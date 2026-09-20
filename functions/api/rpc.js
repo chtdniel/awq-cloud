@@ -4,6 +4,8 @@ import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, taf
 import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam, parseNotamGeometry } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
+import { matchCgoEntries, parseCgoSheet, summarizeCgoSync } from '../../shared/cgo.mjs';
+import { readBridgeValues } from './cgo-bridge.js';
 
 const REGISTERED_WRITE_METHODS = new Set([
   'saveFlightEdit', 'saveFlightRoute', 'deleteRoute', 'setActiveFlightRoute',
@@ -11,7 +13,11 @@ const REGISTERED_WRITE_METHODS = new Set([
   'saveNotamData', 'saveTafData', 'generateBriefingPackage', 'saveBriefingForm',
   'saveAirportNotes', 'saveFlightData', 'addNewFlightToDb', 'bulkUpdateFlightDof',
   'bulkClearTafColumns', 'bulkClearCgoColumns', 'saveFlightEnr',
-  'persistAnalysisResults'
+  'persistAnalysisResults',
+  // Sync CGO Data writes the cargo weight onto the board, so it needs the same
+  // tier and CSRF checks as every other write — not the read tier it used to sit
+  // in while it was a no-op.
+  'syncCgoData'
 ]);
 
 const ADMIN_ONLY_METHODS = new Set([
@@ -35,7 +41,7 @@ const AUTHENTICATED_READ_METHODS = new Set([
   'getActiveFlightDataForWarning', 'analyzeWxWithManual', 'getFirData', 'getFirGeometry', 'getActiveNotams', 'getSelectedFlightsData',
   'getActiveFlightList', 'getFlightSummary', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
   'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
-  'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'syncCgoData', 'getSettingsAccessInfo',
+  'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'getSettingsAccessInfo',
   'getBoardState'
 ]);
 
@@ -301,7 +307,7 @@ export async function onRequestPost(context) {
       case 'persistAnalysisResults':
         return await handlePersistAnalysisResults(context, args);
       case 'syncCgoData':
-        return await handleSyncCgoData(context, args);
+        return await handleSyncCgoData(context, access.requestUser, args);
 
       
       default:
@@ -2760,10 +2766,116 @@ async function handlePersistAnalysisResults(context, args) {
     }
 }
 
-async function handleSyncCgoData(context, args) {
+// Sync CGO Data: read the CGO PLAN Google Sheet and write the weight onto the
+// flights currently on the board.
+//
+// Only board flights are candidates. The board is the operator's working set, so
+// a plan line that matches nothing on it is reported back instead of being
+// written — otherwise a stale or mistyped row could silently change a flight the
+// operator never looked at. A REVISE value supersedes Confirmed Wt.
+async function handleSyncCgoData(context, user, args) {
     try {
-        return await handleGetFlightDashboardData(context);
+        const [rowIds] = Array.isArray(args) ? args : [];
+        const ids = Array.isArray(rowIds)
+            ? [...new Set(rowIds.map(Number).filter(id => Number.isInteger(id) && id > 0))]
+            : [];
+        if (ids.length === 0) {
+            return Response.json({
+                error: 'No flights are on the board. Add the flights to sync, then run Sync CGO Data again.',
+                code: 'BOARD_EMPTY'
+            }, { status: 400 });
+        }
+        if (ids.length > BOARD_MAX_ROWS) {
+            return Response.json({ error: `Board cannot hold more than ${BOARD_MAX_ROWS} flights.` }, { status: 400 });
+        }
+
+        const placeholders = ids.map(() => '?').join(',');
+        const { results } = await context.env.DB
+            .prepare(`SELECT id, callsign, dof, cgo FROM flights WHERE id IN (${placeholders})`)
+            .bind(...ids)
+            .all();
+        if (!results.length) {
+            return Response.json({
+                error: 'The flights on the board are no longer in the database. Reload the board and try again.',
+                code: 'BOARD_STALE'
+            }, { status: 409 });
+        }
+
+        // The sheet is read through the Apps Script bridge: this organization
+        // blocks service-account key creation, so the Worker holds no Google
+        // credential of its own.
+        const sheet = await readBridgeValues(context.env);
+        const plan = parseCgoSheet(sheet.values);
+        if (plan.error) return Response.json({ error: plan.error, code: 'SHEET_LAYOUT' }, { status: 422 });
+
+        const match = matchCgoEntries(plan.entries, results.map(row => ({
+            rowIdx: row.id,
+            FLIGHT: row.callsign,
+            DOF: row.dof,
+            CGO: row.cgo
+        })));
+
+        const changedUpdates = match.updates.filter(update => update.changed);
+        if (changedUpdates.length) {
+            await context.env.DB.batch(changedUpdates.map(update => context.env.DB
+                .prepare('UPDATE flights SET cgo = ? WHERE id = ?')
+                .bind(update.value, update.rowIdx)));
+        }
+
+        await audit(
+            context,
+            (user && user.id) || null,
+            'cgo_sync',
+            null,
+            'success',
+            JSON.stringify({
+                boardRows: results.length,
+                planRows: plan.entries.length,
+                matched: match.updates.length,
+                updated: changedUpdates.length,
+                unmatched: match.unmatched.length,
+                ambiguous: match.ambiguous.length,
+                dateMismatches: match.dateMismatches.length
+            })
+        );
+
+        // Same shape the flight board already consumes, plus the sync result so
+        // the operator learns what was matched and what was not.
+        const dashboard = await handleGetFlightDashboardData(context);
+        const payload = await dashboard.json();
+        if (!payload || !payload.data) {
+            // The weights are already written, so say so plainly instead of
+            // reporting a failed sync the operator would run again.
+            return Response.json({
+                error: `Cargo weights were saved (${changedUpdates.length} flight(s)) but the board could not be refreshed. Reload the page.`,
+                code: 'BOARD_REFRESH_FAILED'
+            }, { status: 502 });
+        }
+        payload.data.cgoSync = {
+            boardRows: results.length,
+            planRows: plan.entries.length,
+            sheetName: sheet.sheetName,
+            sheetReadAt: sheet.readAt,
+            sheetHeaderRow: plan.headerRow,
+            matched: match.updates.length,
+            updated: changedUpdates.length,
+            unchanged: match.updates.length - changedUpdates.length,
+            unmatched: match.unmatched.map(row => ({ flightNo: row.flightNo, date: row.date, value: row.value, sheetRow: row.sheetRow })).slice(0, 25),
+            unmatchedCount: match.unmatched.length,
+            ambiguous: match.ambiguous.map(row => ({ flightNo: row.flightNo, date: row.date, sheetRow: row.sheetRow })).slice(0, 25),
+            ambiguousCount: match.ambiguous.length,
+            dateMismatches: match.dateMismatches.map(row => ({ flightNo: row.flightNo, date: row.date, boardDof: row.boardDof, sheetRow: row.sheetRow })).slice(0, 25),
+            dateMismatchCount: match.dateMismatches.length,
+            duplicates: match.duplicates,
+            rowsWithoutWeight: plan.rowsWithoutWeight,
+            rowsWithoutDate: plan.rowsWithoutDate,
+            updatedFlights: changedUpdates.map(update => ({ rowIdx: update.rowIdx, flight: update.boardFlight, from: update.previous, to: update.value, source: update.source })),
+            summary: summarizeCgoSync(plan, match)
+        };
+        return Response.json(payload);
     } catch (e) {
+        console.error('[CGO] sync failed:', e.message);
+        await audit(context, (user && user.id) || null, 'cgo_sync', null, 'failure', e.message);
         return Response.json({ error: e.message }, { status: 500 });
     }
 }
