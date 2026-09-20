@@ -668,13 +668,10 @@
 
     /* DATA parent tab dropdown (submenu) — lives inside .nav-btn-group */
     .nav-data-container { position: relative; display: inline-flex; flex-shrink: 0; }
-    /* WX uses the same container: the tab itself still opens WX MONITORING, the
-       caret next to it opens the WX pages list (WX MONITORING / WX WARNING), so
-       the existing one-click route to the monitoring page is not taken away. */
-    .nav-data-container .nav-caret-btn { padding: 7px 9px; color: var(--text-muted); font-size: 8px; }
-    .nav-data-container .nav-caret-btn .chevron { font-size: 8px; opacity: 0.7; transition: 0.3s; }
-    .nav-data-container .nav-caret-btn[aria-expanded="true"] { color: var(--text-primary); background: var(--nav-item-hover); }
-    .nav-data-container .nav-caret-btn[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+    /* WX uses the same container, but unlike DATA both of its pages live in the
+       list: clicking WX opens the dropdown (WX MONITORING / WX WARNING) and the
+       page is chosen from there. The parent keeps the active state, so the bar
+       still shows which module the operator is on. */
     .nav-data-container .nav-tab .chevron { font-size: 8px; opacity: 0.5; transition: 0.3s; }
     .nav-data-container .nav-tab[aria-expanded="true"] .chevron { transform: rotate(180deg); }
     .nav-data-container .data-submenu {
@@ -1502,8 +1499,7 @@
       <button id="nav-notam" class="nav-tab" onclick="window.switchTab('notam')" title="NOTAM Analysis"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-alert"/></svg>NOTAM<span id="nav-notam-badge" style="display:none; background:var(--status-critical); color:#fff; font-size:9px; font-weight:900; min-width:16px; height:16px; line-height:16px; border-radius:8px; padding:0 4px; text-align:center; margin-left:6px;">0</span></button>
       <button id="nav-report" class="nav-tab" onclick="window.switchTab('report')" title="Release Compiler"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-files"/></svg>REPORT</button>
       <div class="nav-data-container">
-        <button id="nav-weather" class="nav-tab" onclick="window.switchTab('weather')" title="Weather Monitoring (WX)"><svg class="ic ic-sm" style="margin-right:6px; color:var(--status-warning);"><use href="#i-warn"/></svg>WX</button>
-        <button id="nav-weather-toggle" class="nav-tab nav-caret-btn" type="button" aria-expanded="false" aria-controls="wx-submenu" aria-haspopup="true" onclick="window.toggleWxSubmenu()" title="WX pages"><svg class="ic chevron"><use href="#i-caret-dn"/></svg></button>
+        <button id="nav-weather" class="nav-tab" type="button" aria-expanded="false" aria-controls="wx-submenu" aria-haspopup="true" onclick="window.toggleWxSubmenu()" title="WX menu (WX MONITORING / WX WARNING)"><svg class="ic ic-sm" style="margin-right:6px; color:var(--status-warning);"><use href="#i-warn"/></svg>WX <svg class="ic chevron" style="margin-left:4px;"><use href="#i-caret-dn"/></svg></button>
         <div id="wx-submenu" class="dropdown-menu data-submenu" role="menu" aria-label="WX pages">
           <button type="button" class="dropdown-item" role="menuitem" data-tab="weather" onclick="window.switchTab('weather')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-eye"/></svg>WX MONITORING</button>
           <button type="button" class="dropdown-item" role="menuitem" data-tab="wx-warning" onclick="window.switchTab('wx-warning')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-alert"/></svg>WX WARNING</button>
@@ -17189,11 +17185,11 @@ VTK N 01 24.9 E 104 01.3"></textarea>
 
       const targetView = document.getElementById('view-' + tabName);
       const targetNav = document.getElementById('nav-' + tabName);
-      // Submenu entries live under a parent tab. DATA parent: NOTAM UPDATE / FIR
-      // UPDATE / WAYPOINT / ROUTE. WX parent: WX WARNING (WX MONITORING keeps its
-      // own nav button, so it is listed against the WX parent only for the menu
-      // highlight). Submenu views have no dedicated top-level button of their own,
-      // so active state + aria-current fall back to the parent.
+      // Submenu entries live under a parent nav control. DATA parent: NOTAM
+      // UPDATE / FIR UPDATE / WAYPOINT / ROUTE. WX parent: WX MONITORING / WX
+      // WARNING. Both WX pages are reached from the list, and neither has a
+      // top-level button of its own, so active state + aria-current fall back to
+      // the parent (the WX control that opens the menu).
       var OCC_SUBMENUS = [
         { menuId: 'data-submenu', parentId: 'nav-data', tabs: ['update-notam', 'fir-update', 'waypoint', 'route'] },
         { menuId: 'wx-submenu', parentId: 'nav-weather', tabs: ['weather', 'wx-warning'] }
@@ -17222,8 +17218,8 @@ VTK N 01 24.9 E 104 01.3"></textarea>
             if (on) { b.setAttribute('aria-current', 'true'); } else { b.removeAttribute('aria-current'); }
           });
         });
-        // The WX parent is only highlighted by its child page; the tab itself
-        // still owns WX MONITORING.
+        // The WX parent is highlighted by whichever WX page is open; it is the
+        // only nav control for the module now that its pages live in the list.
         var parentHighlighted = false;
         if (submenuOwner) {
           var parentTab = document.getElementById(submenuOwner.parentId);
@@ -17473,10 +17469,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     // anchored to the viewport (position:fixed from the trigger rect) so it
     // escapes every overflow clipping ancestor — including the horizontal tab
     // scroller at 390px — and stays inside the viewport horizontally.
-    // The WX tab itself still opens WX MONITORING; only the caret opens the list.
+    // The WX control opens the list; WX MONITORING / WX WARNING are chosen there.
     window.OCC_NAV_SUBMENUS = [
       { menuId: 'data-submenu', triggerIds: ['nav-data'] },
-      { menuId: 'wx-submenu', triggerIds: ['nav-weather-toggle', 'nav-weather'] }
+      { menuId: 'wx-submenu', triggerIds: ['nav-weather'] }
     ];
     function occSubmenuConfig(menuId) {
       return (window.OCC_NAV_SUBMENUS || []).filter(function (entry) { return entry.menuId === menuId; })[0] || null;

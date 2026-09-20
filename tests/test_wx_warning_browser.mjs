@@ -3,8 +3,8 @@
 // Runs the shipped page (public/app/index.html) in Chromium against the real
 // functions/api/rpc.js over HTTP with a real SQLite database, so what is asserted
 // here is the code that actually ships — not a copy:
-//   * the WX submenu appears under the WX tab and WX MONITORING still opens from
-//     the tab itself,
+//   * clicking the WX nav control opens the WX pages list (WX MONITORING /
+//     WX WARNING) and each entry opens its page,
 //   * an empty feed renders the empty state instead of a blank map,
 //   * pasting a JTWC warning + a VAAC advisory (the operator's real example)
 //     previews, saves, and then draws on the map,
@@ -192,23 +192,29 @@ async function check(label, fn) {
 await page.goto(baseUrl + '/app', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => window.isAdmin !== null, null, { timeout: 20000 });
 
-await check('the WX submenu exists under the WX tab and lists both WX pages', async () => {
-  await page.click('#nav-weather-toggle');
+await check('the WX nav control opens a submenu listing both WX pages', async () => {
+  await page.click('#nav-weather');
   await page.waitForFunction(() => document.getElementById('wx-submenu').classList.contains('show'), null, { timeout: 5000 });
   const items = await page.$$eval('#wx-submenu .dropdown-item', nodes => nodes.map(node => node.textContent.trim()));
   assert.deepEqual(items, ['WX MONITORING', 'WX WARNING']);
-  assert.equal(await page.getAttribute('#nav-weather-toggle', 'aria-expanded'), 'true');
+  assert.equal(await page.getAttribute('#nav-weather', 'aria-expanded'), 'true');
 });
 
-await check('the WX tab itself still opens WX MONITORING', async () => {
-  await page.click('#nav-weather');
+await check('the WX MONITORING entry opens the monitoring page', async () => {
+  await page.click('#wx-submenu .dropdown-item[data-tab="weather"]');
   await page.waitForFunction(() => document.getElementById('view-weather').classList.contains('active'), null, { timeout: 10000 });
-  const expanded = await page.getAttribute('#nav-weather-toggle', 'aria-expanded');
+  const expanded = await page.getAttribute('#nav-weather', 'aria-expanded');
   assert.equal(expanded, 'false', 'selecting a submenu entry must close the menu');
+  const parentActive = await page.$eval('#nav-weather', node => node.classList.contains('active'));
+  assert.equal(parentActive, true, 'the WX control carries the active state for WX MONITORING');
+  const stillActive = await page.$$eval('.nav-tab.active', nodes => nodes.map(node => node.id));
+  assert.deepEqual(stillActive, ['nav-weather'], 'only the WX control may stay active after leaving FLIGHT');
+  const currentView = await page.$$eval('.view-section.active', nodes => nodes.map(node => node.id));
+  assert.deepEqual(currentView, ['view-weather'], 'exactly one view may be active');
 });
 
 await check('the WX WARNING entry opens the new page and loads Leaflet', async () => {
-  await page.click('#nav-weather-toggle');
+  await page.click('#nav-weather');
   await page.click('#wx-submenu .dropdown-item[data-tab="wx-warning"]');
   await page.waitForFunction(() => document.getElementById('view-wx-warning').classList.contains('active'), null, { timeout: 10000 });
   await page.waitForFunction(() => document.querySelector('#wxw-map.leaflet-container'), null, { timeout: 30000 });
@@ -419,7 +425,7 @@ async function openWithTileFailure({ failEvery }) {
   await failingPage.addInitScript(() => { window.activeBoardRowIds = [1]; });
   await failingPage.goto(baseUrl + '/app', { waitUntil: 'domcontentloaded' });
   await failingPage.waitForFunction(() => window.isAdmin !== null, null, { timeout: 20000 });
-  await failingPage.click('#nav-weather-toggle');
+  await failingPage.click('#nav-weather');
   await failingPage.click('#wx-submenu .dropdown-item[data-tab="wx-warning"]');
   await failingPage.waitForFunction(() => document.querySelector('#wxw-map.leaflet-container'), null, { timeout: 30000 });
   await failingPage.waitForFunction(() => document.querySelectorAll('#wxw-map img.leaflet-tile').length > 0, null, { timeout: 20000 });
