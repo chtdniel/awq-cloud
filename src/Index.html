@@ -1512,19 +1512,12 @@
           LINKS <svg class="ic chevron"><use href="#i-caret-dn"/></svg>
         </button>
         <div id="ext-links-menu" class="dropdown-menu">
-          <a class="dropdown-item" href="https://docs.google.com/spreadsheets/d/1PAV7ajnwv6CpYoGzsMKzAjlmdhLsrOd1Tsz0UDOfdj8/edit?gid=1555717677#gid=1555717677" target="_blank">A/C STATUS</a>
-          <a class="dropdown-item" href="https://docs.google.com/spreadsheets/d/1jHGaWQB5PtzkmVKwb7k_a1nPTZoUhcJjn7NnKWaw-Qg/edit?gid=0#gid=0" target="_blank">CGO PLAN</a>
+          <!-- Filled from the D1-backed list (Settings -> LINKS). The PUSH entry
+               stays a fixed button: it is an action carrying a server-issued
+               token, not a URL an editor may point anywhere. -->
+          <div id="ext-links-items"></div>
+          <div class="dropdown-divider"></div>
           <button type="button" class="dropdown-item" onclick="window.pushCgoPlan()">PUSH CGO PLAN</button>
-          <a class="dropdown-item" href="https://drive.google.com/drive/folders/1_TqB_9wV9Bqz6bEh-Ip0s_adFqf3bZcJ" target="_blank">DISPATCH BULETIN</a>
-          <div class="dropdown-divider"></div>
-          <a class="dropdown-item" href="https://aviationweather.gov/data/taf/" target="_blank">ADDS (TAF)</a>
-          <a class="dropdown-item" href="https://web-aviation.bmkg.go.id/web/taf.php" target="_blank">BMKG TAF</a>
-          <a class="dropdown-item" href="https://redwatch.airasia.com/eops" target="_blank">REDWATCH</a>
-          <a class="dropdown-item" href="https://www.flightradar24.com/" target="_blank">FR24</a>
-          <div class="dropdown-divider"></div>
-          <a class="dropdown-item" href="https://www.bom.gov.au/aviation/volcanic-ash/darwin-va-advisory.shtml" target="_blank">VAAC DARWIN</a>
-          <a class="dropdown-item" href="https://www.metoc.navy.mil/jtwc/jtwc.html?tropical" target="_blank">JTWC</a>
-          <a class="dropdown-item" href="https://notams.aim.faa.gov/notamSearch/nsapp.html#/" target="_blank">DINS NOTAM</a>
         </div>
       </div>
       <button id="theme-toggle" class="theme-toggle-btn" onclick="window.toggleTheme()" aria-label="Toggle dark mode" title="Toggle Theme"><svg class="ic ic-moon"><use href="#i-moon"/></svg><svg class="ic ic-sun"><use href="#i-sun"/></svg></button>
@@ -1818,7 +1811,58 @@
       btn.classList.toggle('open', !isOpen);
       btn.setAttribute('aria-expanded', String(!isOpen));
       nav.classList.toggle('dropdown-open', !isOpen);
+      // Re-read on open so an admin's change shows up without a reload. A failed
+      // call leaves the previous list in place rather than emptying the menu.
+      if (!isOpen) window.loadExternalLinks();
     };
+
+    // The LINKS list lives in D1 so operations can add a link without a deploy.
+    // Built with DOM nodes and textContent, never innerHTML: labels are typed by
+    // an admin, and the server only guarantees the scheme is https.
+    window.renderExternalLinks = function(items) {
+      const box = document.getElementById('ext-links-items');
+      if (!box) return;
+      box.textContent = '';
+      if (!Array.isArray(items) || items.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'dropdown-item';
+        empty.style.opacity = '0.6';
+        empty.style.cursor = 'default';
+        empty.textContent = 'No links configured';
+        box.appendChild(empty);
+        return;
+      }
+      items.forEach(function(item) {
+        if (!item || item.type === 'divider') {
+          const divider = document.createElement('div');
+          divider.className = 'dropdown-divider';
+          box.appendChild(divider);
+          return;
+        }
+        const link = document.createElement('a');
+        link.className = 'dropdown-item';
+        link.href = item.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = item.label;
+        box.appendChild(link);
+      });
+    };
+
+    window.loadExternalLinks = function() {
+      if (typeof google === 'undefined' || !google.script || !google.script.run) return;
+      google.script.run
+        .withFailureHandler(function() { /* the menu keeps whatever it last showed */ })
+        .withSuccessHandler(function(res) {
+          if (res && Array.isArray(res.items)) window.renderExternalLinks(res.items);
+        })
+        .getExtLinks();
+    };
+
+    // Loaded once a session exists, and again after every later sign-in, so the
+    // menu is never rendered from an anonymous (401) response.
+    if (typeof window.awqWhenAuthenticated === 'function') window.awqWhenAuthenticated(function() { window.loadExternalLinks(); });
+    else window.loadExternalLinks();
 
     // Close dropdown on click outside
     document.addEventListener('click', function(event) {

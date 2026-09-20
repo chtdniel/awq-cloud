@@ -25,6 +25,7 @@ const ADMIN_ONLY_METHODS = new Set([
   'adminListUsers', 'adminCreateUser', 'adminUpdateUserRole', 'adminSetUserActive', 'adminResetPassword',
   'adminSaveProfile', 'adminListAudit',
   'wxAiSetCatalog',
+  'setExtLinks',
   'latlongGetEditorData', 'latlongGetPreview',
   'latlongSaveBulk', 'latlongDeleteWaypoint', 'latlongClearAll'
 ]);
@@ -39,6 +40,7 @@ const AUTHENTICATED_READ_METHODS = new Set([
   'firGetNotamEditorData', 'firGetNotamResults', 'firBulkPreviewNotams', 'getTafData', 'fetchLatestTafFromApi',
   'getActiveFlightDataForWarning', 'analyzeWxWithManual', 'getFirData', 'getFirGeometry', 'getActiveNotams', 'getSelectedFlightsData',
   'getActiveFlightList', 'getFlightSummary', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
+  'getExtLinks',
   'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
   'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'getSettingsAccessInfo',
   'getBoardState', 'getCgoPushUrl'
@@ -232,6 +234,12 @@ export async function onRequestPost(context) {
 
       case 'wxAiSetCatalog':
         return await handleWxAiSetCatalog(context, access.requestUser, args);
+
+      case 'getExtLinks':
+        return await handleGetExtLinks(context);
+
+      case 'setExtLinks':
+        return await handleSetExtLinks(context, access.requestUser, args);
 
       case 'generateBriefingPackage':
         return await handleGenerateBriefingPackage(context, args);
@@ -3002,7 +3010,9 @@ const SETTINGS_KEYS = {
   occAllowedEmails: 'OCC_ALLOWED_EMAILS',
   settingsAdminEmails: 'SETTINGS_ADMIN_EMAILS',
   wxAiCatalog: 'WX_AI_CATALOG',
-  wxAiCatalogUpdatedAt: 'WX_AI_CATALOG_UPDATED_AT'
+  wxAiCatalogUpdatedAt: 'WX_AI_CATALOG_UPDATED_AT',
+  extLinks: 'EXT_LINKS',
+  extLinksUpdatedAt: 'EXT_LINKS_UPDATED_AT'
 };
 
 // Non-cryptographic (FNV-1a) stamp: it only has to detect "someone saved after
@@ -3618,6 +3628,126 @@ async function handleWxAiSetCatalog(context, user, args) {
   return Response.json({ data: { ok: true, ...payload, source: 'property', revision: nextRevision, updatedAt: savedAt } });
 }
 
+// ---- LINKS menu (admin-editable) ----
+// The dropdown used to be hardcoded in src/Index.html, so every new operations
+// link needed a deploy. It is now stored in the D1 `meta` table and edited from
+// Settings, seeded with exactly the list that used to be hardcoded so nothing
+// changes until an admin saves.
+//
+// Only `link` and `divider` rows exist. The PUSH CGO PLAN entry stays a fixed
+// button in the markup: it is an action carrying a server-issued token, not a
+// URL an editor may point anywhere.
+
+const EXT_LINKS_DEFAULT = [
+  { type: 'link', label: 'A/C STATUS', url: 'https://docs.google.com/spreadsheets/d/1PAV7ajnwv6CpYoGzsMKzAjlmdhLsrOd1Tsz0UDOfdj8/edit?gid=1555717677#gid=1555717677' },
+  { type: 'link', label: 'CGO PLAN', url: 'https://docs.google.com/spreadsheets/d/1jHGaWQB5PtzkmVKwb7k_a1nPTZoUhcJjn7NnKWaw-Qg/edit?gid=0#gid=0' },
+  { type: 'link', label: 'DISPATCH BULETIN', url: 'https://drive.google.com/drive/folders/1_TqB_9wV9Bqz6bEh-Ip0s_adFqf3bZcJ' },
+  { type: 'divider' },
+  { type: 'link', label: 'ADDS (TAF)', url: 'https://aviationweather.gov/data/taf/' },
+  { type: 'link', label: 'BMKG TAF', url: 'https://web-aviation.bmkg.go.id/web/taf.php' },
+  { type: 'link', label: 'REDWATCH', url: 'https://redwatch.airasia.com/eops' },
+  { type: 'link', label: 'FR24', url: 'https://www.flightradar24.com/' },
+  { type: 'divider' },
+  { type: 'link', label: 'VAAC DARWIN', url: 'https://www.bom.gov.au/aviation/volcanic-ash/darwin-va-advisory.shtml' },
+  { type: 'link', label: 'JTWC', url: 'https://www.metoc.navy.mil/jtwc/jtwc.html?tropical' },
+  { type: 'link', label: 'DINS NOTAM', url: 'https://notams.aim.faa.gov/notamSearch/nsapp.html#/' }
+];
+
+const EXT_LINKS_MAX = 40;
+const EXT_LINKS_LABEL_MAX = 60;
+
+function validateExtLinks(value) {
+  const source = value && Array.isArray(value.items) ? value.items : null;
+  const fields = {};
+  if (!source) {
+    const error = new Error('The LINKS list must be an array of entries.');
+    error.status = 400;
+    error.code = 'EXT_LINKS_INVALID';
+    throw error;
+  }
+  if (source.length > EXT_LINKS_MAX) fields.items = `Maximum ${EXT_LINKS_MAX} entries.`;
+
+  const items = [];
+  source.forEach((raw, index) => {
+    const row = raw && typeof raw === 'object' ? raw : {};
+    if (row.type === 'divider') {
+      items.push({ type: 'divider' });
+      return;
+    }
+    const label = String(row.label === null || row.label === undefined ? '' : row.label).trim();
+    const url = String(row.url === null || row.url === undefined ? '' : row.url).trim();
+    if (!label || label.length > EXT_LINKS_LABEL_MAX || /[<>\u0000-\u001F\u007F]/.test(label)) {
+      fields[`items.${index}.label`] = `Label must be 1-${EXT_LINKS_LABEL_MAX} characters without <, > or control characters.`;
+    }
+    // The value becomes an href in the menu, so the scheme is checked rather
+    // than trusted: "javascript:" parses as a URL and would run on click.
+    let parsed = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || parsed.protocol !== 'https:') {
+      fields[`items.${index}.url`] = 'URL must be a full https:// address.';
+    }
+    items.push({ type: 'link', label, url });
+  });
+
+  if (Object.keys(fields).length) {
+    const error = new Error('Some LINKS entries are not valid.');
+    error.status = 400;
+    error.code = 'EXT_LINKS_INVALID';
+    error.fields = fields;
+    throw error;
+  }
+
+  // Edge and doubled dividers are dropped, so a stray separator cannot render
+  // as an empty gap at the top or bottom of the menu.
+  const cleaned = items.filter((item, index) => {
+    if (item.type !== 'divider') return true;
+    const next = items[index + 1];
+    return index > 0 && next && next.type !== 'divider';
+  });
+  return { items: cleaned };
+}
+
+async function handleGetExtLinks(context) {
+  const stored = await metaGetWithRevision(context, SETTINGS_KEYS.extLinks);
+  const updatedAt = (await metaGet(context, SETTINGS_KEYS.extLinksUpdatedAt)) || null;
+  if (!stored.present) {
+    return Response.json({ data: { ok: true, items: EXT_LINKS_DEFAULT, source: 'default', revision: stored.revision, updatedAt } });
+  }
+  try {
+    const parsed = validateExtLinks(JSON.parse(stored.value));
+    return Response.json({ data: { ok: true, items: parsed.items, source: 'property', revision: stored.revision, updatedAt } });
+  } catch {
+    // A stored list that stopped validating must not empty the menu, so the
+    // shipped default is served and the editor is told to save again.
+    return Response.json({
+      data: {
+        ok: true, items: EXT_LINKS_DEFAULT, source: 'fail-safe',
+        revision: stored.revision,
+        updatedAt,
+        warning: 'The saved LINKS list is not valid; the built-in default is shown until an admin saves it again.'
+      }
+    });
+  }
+}
+
+async function handleSetExtLinks(context, user, args) {
+  if (!adminOnly(user)) return Response.json({ error: 'Forbidden' }, { status: 403 });
+  const input = Array.isArray(args) ? args[0] : null;
+  const current = await metaGetWithRevision(context, SETTINGS_KEYS.extLinks);
+  const expectedRevision = input && input.expectedRevision !== undefined ? input.expectedRevision : undefined;
+  if (revisionMismatch(expectedRevision, current.revision)) return staleRevisionResponse('LINKS menu', current.revision);
+  const payload = validateExtLinks(input);
+  const savedAt = new Date().toISOString();
+  const nextRevision = await metaSet(context, SETTINGS_KEYS.extLinks, JSON.stringify(payload));
+  await metaSet(context, SETTINGS_KEYS.extLinksUpdatedAt, savedAt);
+  await audit(context, user.id, 'ext_links_updated', null, 'success', `entries:${payload.items.length}`);
+  return Response.json({ data: { ok: true, items: payload.items, source: 'property', revision: nextRevision, updatedAt: savedAt } });
+}
+
 function getOpenSystemSettings() {
     return {
       ok: true,
@@ -3640,6 +3770,7 @@ async function handleGetSettingsBundle(context) {
   const settings = (await handleGetOccSettings(context).then(r => r.json())).data;
   const adminsRes = (await handleGetSettingsAdminList(context).then(r => r.json())).data;
   const wx = (await handleWxAiGetCatalog(context).then(r => r.json())).data;
+  const links = (await handleGetExtLinks(context).then(r => r.json())).data;
   return Response.json({
     data: {
       ok: true,
@@ -3648,6 +3779,7 @@ async function handleGetSettingsBundle(context) {
       admins: adminsRes,
       system: getOpenSystemSettings(),
       wx,
+      links,
       legacySettings: {
         occAllowedEmails: { key: SETTINGS_KEYS.occAllowedEmails, readOnly: true },
         settingsAdminEmails: { key: SETTINGS_KEYS.settingsAdminEmails, readOnly: true }

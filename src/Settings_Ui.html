@@ -68,6 +68,7 @@
   <button type="button" class="btn settings-tab" role="tab" aria-selected="true" data-settings-tab="access">Access Control</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="users">Internal Users</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="wx">WX AI</button>
+  <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="links">LINKS</button>
   <button type="button" class="btn settings-tab" role="tab" aria-selected="false" data-settings-tab="system">System</button>
 </div>
 
@@ -228,6 +229,29 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button type="button" id="settings-wxai-save" class="btn primary" onclick="wxAiSave()" aria-label="Save WX AI catalog">💾 Save</button>
       <button type="button" class="btn" onclick="wxAiCancel()" aria-label="Revert WX AI catalog edits">↩ Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="settings-panel settings-tab-panel" data-settings-panel="links" id="settings-links-panel" style="margin-bottom:14px">
+  <div class="settings-head">
+    <span class="settings-title">LINKS Menu</span>
+    <span id="settings-links-badge" class="badge badge-warn">—</span>
+  </div>
+  <div style="padding:14px;display:grid;gap:10px">
+    <div class="settings-note">Entries in the navbar <strong>LINKS</strong> dropdown. Stored in the D1 <code>meta</code> table as <code>EXT_LINKS</code>. Only <code>https://</code> addresses are accepted. <strong>PUSH CGO PLAN</strong> is not listed here: it is an action carrying a server-issued token, so it stays a fixed button.</div>
+    <span class="settings-hint" id="settings-links-saved">Last changed: —</span>
+    <div id="settings-links-rows" style="display:grid;gap:8px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn" onclick="extLinksAddRow()" aria-label="Add link">+ Add link</button>
+      <button type="button" class="btn" onclick="extLinksAddDivider()" aria-label="Add divider">+ Add divider</button>
+      <button type="button" class="btn" onclick="extLinksReset()" aria-label="Load default LINKS list into editor">Reset to default</button>
+      <span id="settings-links-status" class="settings-hint" style="align-self:center" role="status" aria-live="polite"></span>
+      <button type="button" class="btn" onclick="extLinksRefresh()" style="margin-left:auto" aria-label="Refresh LINKS list">⟳ Refresh</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" id="settings-links-save" class="btn primary" onclick="extLinksSave()" aria-label="Save LINKS list">💾 Save</button>
+      <button type="button" class="btn" onclick="extLinksCancel()" aria-label="Revert LINKS edits">↩ Cancel</button>
     </div>
   </div>
 </div>
@@ -1196,6 +1220,7 @@
         }
         if(bundle.system) applySystem(bundle.system);
         if(window.wxAiApplyBundle) { try { window.wxAiApplyBundle(bundle); } catch (e) { /* WX panel renders on standalone refresh */ } }
+        if(window.extLinksApplyBundle) { try { window.extLinksApplyBundle(bundle); } catch (e) { /* LINKS panel renders on standalone refresh */ } }
         document.getElementById('settings-edit-status').textContent = '';
         document.getElementById('settings-system-status').textContent = '';
       } catch (e) { settingsRefresh(true); settingsAdminRefresh(); settingsSystemRefresh(); }
@@ -1491,5 +1516,284 @@
   document.getElementById('settings-wxai-enabled').addEventListener('change', updateSaveState);
   document.getElementById('settings-wxai-rows').addEventListener('input', updateSaveState);
   document.getElementById('settings-wxai-rows').addEventListener('change', updateSaveState);
+})();
+
+// =========================================================
+// LINKS MENU EDITOR
+// =========================================================
+// The navbar LINKS dropdown is stored in the D1 `meta` table under EXT_LINKS.
+// This mirrors the WX AI editor: local validation before the request, a revision
+// check so two admins cannot silently overwrite each other, and audit on save.
+(function () {
+  var state = null; // last applied {items, revision, updatedAt}
+  var canEdit = false;
+
+  // The shipped default, kept in step with EXT_LINKS_DEFAULT in
+  // functions/api/rpc.js so "Reset to default" shows what a fresh install has.
+  var DEFAULTS = [
+    { type: 'link', label: 'A/C STATUS', url: 'https://docs.google.com/spreadsheets/d/1PAV7ajnwv6CpYoGzsMKzAjlmdhLsrOd1Tsz0UDOfdj8/edit?gid=1555717677#gid=1555717677' },
+    { type: 'link', label: 'CGO PLAN', url: 'https://docs.google.com/spreadsheets/d/1jHGaWQB5PtzkmVKwb7k_a1nPTZoUhcJjn7NnKWaw-Qg/edit?gid=0#gid=0' },
+    { type: 'link', label: 'DISPATCH BULETIN', url: 'https://drive.google.com/drive/folders/1_TqB_9wV9Bqz6bEh-Ip0s_adFqf3bZcJ' },
+    { type: 'divider' },
+    { type: 'link', label: 'ADDS (TAF)', url: 'https://aviationweather.gov/data/taf/' },
+    { type: 'link', label: 'BMKG TAF', url: 'https://web-aviation.bmkg.go.id/web/taf.php' },
+    { type: 'link', label: 'REDWATCH', url: 'https://redwatch.airasia.com/eops' },
+    { type: 'link', label: 'FR24', url: 'https://www.flightradar24.com/' },
+    { type: 'divider' },
+    { type: 'link', label: 'VAAC DARWIN', url: 'https://www.bom.gov.au/aviation/volcanic-ash/darwin-va-advisory.shtml' },
+    { type: 'link', label: 'JTWC', url: 'https://www.metoc.navy.mil/jtwc/jtwc.html?tropical' },
+    { type: 'link', label: 'DINS NOTAM', url: 'https://notams.aim.faa.gov/notamSearch/nsapp.html#/' }
+  ];
+  var MAX_ITEMS = 40;
+  var MAX_LABEL = 60;
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function status(t) { var el = document.getElementById('settings-links-status'); if (el) el.textContent = t; }
+  function toast(m) { if (window.settingsToast) window.settingsToast(m); }
+
+  function rowHtml(item, i) {
+    var isDivider = item.type === 'divider';
+    return '<div data-linkrow="' + i + '" style="display:grid;gap:6px;background:var(--bg-panel-alt);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;">'
+      + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+      + '<select class="in" data-f="type" style="max-width:130px" aria-label="Entry type">'
+      + '<option value="link"' + (isDivider ? '' : ' selected') + '>link</option>'
+      + '<option value="divider"' + (isDivider ? ' selected' : '') + '>divider</option>'
+      + '</select>'
+      + '<input class="in" data-f="label" value="' + esc(item.label) + '" placeholder="Display name" maxlength="' + MAX_LABEL + '" style="flex:1;min-width:150px" aria-label="Display name"' + (isDivider ? ' disabled' : '') + '>'
+      + '<button type="button" class="btn" onclick="extLinksMoveRow(' + i + ',-1)" aria-label="Move up">↑</button>'
+      + '<button type="button" class="btn" onclick="extLinksMoveRow(' + i + ',1)" aria-label="Move down">↓</button>'
+      + '<button type="button" class="btn" onclick="extLinksDelRow(' + i + ')" aria-label="Delete entry">✕</button>'
+      + '</div>'
+      + '<input class="in" data-f="url" value="' + esc(item.url) + '" placeholder="https://…" style="' + (isDivider ? 'display:none' : '') + '" aria-label="Address">'
+      + '<p class="settings-hint" data-linkerror="' + i + '" role="alert" style="color:var(--status-critical);min-height:14px;margin:0"></p>'
+      + '</div>';
+  }
+
+  function render(items) {
+    var box = document.getElementById('settings-links-rows');
+    if (!box) return;
+    if (!items.length) {
+      box.innerHTML = '<div class="settings-note">The dropdown is empty. Add a link, or use "Reset to default".</div>';
+      return;
+    }
+    box.innerHTML = items.map(rowHtml).join('');
+  }
+
+  function collect() {
+    var out = [];
+    document.querySelectorAll('#settings-links-rows [data-linkrow]').forEach(function (row) {
+      var g = function (f) { var el = row.querySelector('[data-f="' + f + '"]'); return el ? el.value : ''; };
+      if (g('type') === 'divider') { out.push({ type: 'divider' }); return; }
+      out.push({ type: 'link', label: g('label').trim(), url: g('url').trim() });
+    });
+    return out;
+  }
+
+  // Same rules as validateExtLinks() on the server. The browser copy exists so a
+  // bad row is flagged before the request rather than after a rejected save.
+  function rowErrors(item) {
+    if (item.type === 'divider') return [];
+    var errors = [];
+    var label = String(item.label || '');
+    var url = String(item.url || '');
+    if (!label) errors.push('A display name is required.');
+    else if (label.length > MAX_LABEL) errors.push('The display name is limited to ' + MAX_LABEL + ' characters.');
+    else if (/[<>\u0000-\u001F\u007F]/.test(label)) errors.push('The display name cannot contain <, > or control characters.');
+    var ok = false;
+    try { ok = new URL(url).protocol === 'https:'; } catch (e) { ok = false; }
+    if (!ok) errors.push('The address must be a full https:// URL.');
+    return errors;
+  }
+
+  function validateBrowserRows() {
+    var rows = collect();
+    var problems = [];
+    var total = 0;
+    document.querySelectorAll('#settings-links-rows [data-linkrow]').forEach(function (rowEl, index) {
+      var errors = rowErrors(rows[index] || {});
+      var errorEl = rowEl.querySelector('[data-linkerror="' + index + '"]');
+      if (errorEl) errorEl.textContent = errors.join(' ');
+      rowEl.classList.toggle('settings-invalid', errors.length > 0);
+      rowEl.setAttribute('aria-invalid', errors.length ? 'true' : 'false');
+      if (errors.length) { total += errors.length; problems.push('entry ' + (index + 1) + ': ' + errors[0]); }
+    });
+    if (rows.length > MAX_ITEMS) { problems.unshift('Maximum ' + MAX_ITEMS + ' entries.'); total += 1; }
+    return { ok: total === 0, messages: problems, count: total };
+  }
+
+  function renderSavedAt(value) {
+    var el = document.getElementById('settings-links-saved');
+    if (!el) return;
+    if (!value) { el.textContent = 'Last changed: never saved since the default'; el.title = ''; return; }
+    var parsed = new Date(value);
+    el.textContent = 'Last changed: ' + (isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString());
+    el.title = String(value);
+  }
+
+  function updateSaveState() {
+    if (!state) return;
+    var save = document.getElementById('settings-links-save');
+    var dirty = JSON.stringify(collect()) !== JSON.stringify(state.items);
+    var problems = validateBrowserRows();
+    if (save) save.disabled = !canEdit || !dirty || !problems.ok;
+  }
+
+  function applyAccess(access) {
+    canEdit = !!access && (access.tier === 'admin' || access.role === 'admin');
+    var save = document.getElementById('settings-links-save');
+    if (save) save.disabled = !canEdit;
+  }
+
+  function apply(res) {
+    state = {
+      items: clone(res.items || []),
+      revision: res.revision === undefined ? null : res.revision,
+      updatedAt: res.updatedAt || null
+    };
+    render(state.items);
+    renderSavedAt(state.updatedAt);
+    var badge = document.getElementById('settings-links-badge');
+    var links = state.items.filter(function (i) { return i.type !== 'divider'; }).length;
+    var dividers = state.items.length - links;
+    if (badge) {
+      badge.textContent = links + ' LINK' + (links === 1 ? '' : 'S') + (dividers ? ' + ' + dividers + ' DIVIDER' + (dividers === 1 ? '' : 'S') : '')
+        + (res.source && res.source !== 'property' ? ' (' + res.source + ')' : '');
+      badge.className = 'badge ' + (res.source === 'fail-safe' ? 'badge-crit' : 'badge-safe');
+    }
+    if (res.warning) status(res.warning);
+    updateSaveState();
+    // The navbar renders from the same list, so it is refreshed immediately
+    // instead of waiting for the next sign-in.
+    if (window.renderExternalLinks && res.source === 'property') window.renderExternalLinks(state.items);
+  }
+
+  window.extLinksApplyBundle = function (bundle) {
+    applyAccess(bundle && bundle.access);
+    if (bundle && bundle.links && bundle.links.ok) { apply(bundle.links); status(''); }
+    else status('The server does not expose the LINKS list.');
+  };
+
+  window.extLinksRefresh = function () {
+    status('Loading…');
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      canEdit = true;
+      apply({ ok: true, items: clone(DEFAULTS), source: 'mock' });
+      status('Loaded (mock)');
+      return;
+    }
+    google.script.run.withSuccessHandler(function (access) {
+      try { applyAccess(access); } catch (e) { /* keep the last known edit rights */ }
+      google.script.run.withSuccessHandler(function (res) {
+        if (!res || !res.ok) { status(res && res.error ? res.error : 'Failed to load'); return; }
+        try { apply(res); } catch (e) { status('Render error: ' + (e && e.message || e)); return; }
+        status('');
+      }).withFailureHandler(function (err) {
+        status((err && err.message) ? err.message : String(err));
+      }).getExtLinks();
+    }).withFailureHandler(function (err) {
+      status((err && err.message) ? err.message : String(err));
+    }).getSettingsAccessInfo();
+  };
+
+  window.extLinksAddRow = function () {
+    var list = collect();
+    list.push({ type: 'link', label: '', url: '' });
+    render(list);
+    updateSaveState();
+    status('');
+  };
+
+  window.extLinksAddDivider = function () {
+    var list = collect();
+    list.push({ type: 'divider' });
+    render(list);
+    updateSaveState();
+    status('');
+  };
+
+  window.extLinksDelRow = function (i) {
+    var list = collect();
+    list.splice(i, 1);
+    render(list);
+    updateSaveState();
+  };
+
+  window.extLinksMoveRow = function (i, delta) {
+    var list = collect();
+    var target = i + delta;
+    if (target < 0 || target >= list.length) return;
+    var moved = list.splice(i, 1)[0];
+    list.splice(target, 0, moved);
+    render(list);
+    updateSaveState();
+  };
+
+  window.extLinksReset = function () {
+    render(clone(DEFAULTS));
+    updateSaveState();
+    status('Defaults loaded — press Save to apply.');
+  };
+
+  window.extLinksCancel = function () {
+    if (!state) return;
+    render(clone(state.items));
+    status('Reverted');
+    toast('Reverted');
+    updateSaveState();
+  };
+
+  window.extLinksSave = function () {
+    if (!canEdit) { status('Not authorized'); toast('Not authorized'); return; }
+    var problems = validateBrowserRows();
+    if (!problems.ok) {
+      status('Fix these first: ' + problems.messages.slice(0, 2).join('; '));
+      toast('The LINKS list is not valid yet');
+      return;
+    }
+    var payload = { items: collect(), expectedRevision: state ? state.revision : null };
+    var links = payload.items.filter(function (i) { return i.type !== 'divider'; }).length;
+    window.settingsModal('Save LINKS menu?', 'Replace the dropdown with ' + links + ' link' + (links === 1 ? '' : 's') + '.', 'Save LINKS', function () { commit(payload); });
+  };
+
+  function commit(payload) {
+    var saveButton = document.getElementById('settings-links-save');
+    if (saveButton) { saveButton.disabled = true; saveButton.setAttribute('aria-busy', 'true'); saveButton.textContent = 'Saving…'; }
+    status('Saving…');
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      state = clone(payload);
+      apply({ ok: true, items: payload.items, source: 'mock' });
+      status('Saved successfully (preview).');
+      if (saveButton) { saveButton.textContent = '💾 Save'; saveButton.removeAttribute('aria-busy'); }
+      return;
+    }
+    google.script.run.withSuccessHandler(function (res) {
+      if (saveButton) { saveButton.textContent = '💾 Save'; saveButton.removeAttribute('aria-busy'); }
+      if (!res || !res.ok) { status(res && res.error ? res.error : 'Save failed'); toast(res && res.error ? res.error : 'Save failed'); updateSaveState(); return; }
+      apply(res);
+      status('Saved successfully.');
+      toast('LINKS saved');
+      setTimeout(function () { status(''); }, 1500);
+    }).withFailureHandler(function (err) {
+      if (saveButton) { saveButton.textContent = '💾 Save'; saveButton.removeAttribute('aria-busy'); }
+      if (err && err.code === 'STALE_REVISION') {
+        status('Conflict: the LINKS list changed somewhere else.');
+        if (window.settingsStaleRevisionModal) window.settingsStaleRevisionModal('the LINKS menu', function () { window.extLinksRefresh(); });
+        return;
+      }
+      status((err && err.message) ? err.message : String(err));
+      updateSaveState();
+    }).setExtLinks(payload);
+  }
+
+  document.getElementById('settings-links-rows').addEventListener('input', updateSaveState);
+  document.getElementById('settings-links-rows').addEventListener('change', function (event) {
+    // Switching a row to "divider" greys out the fields that no longer apply.
+    if (event.target && event.target.getAttribute('data-f') === 'type') {
+      var list = collect();
+      render(list);
+    }
+    updateSaveState();
+  });
 })();
 </script>
