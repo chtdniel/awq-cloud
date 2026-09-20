@@ -11777,11 +11777,14 @@
       if (!text || typeof text !== 'string') return null;
       const toDec = (digits, hemi, isLat) => {
         let deg=0,min=0,sec=0; const n=digits.length;
-        if (isLat) { if(n===6){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseInt(digits.slice(4,6),10);} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else {deg=parseInt(digits,10);} }
-        else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else {deg=parseInt(digits,10);} }
+        // Detik desimal ("024101.40N") didukung; tanpa ini batas area E) tidak terbaca
+        // dan peta hanya menggambar lingkaran radius Q).
+        const dmsLat=/^\d{6}(?:\.\d+)?$/, dmsLon=/^\d{7}(?:\.\d+)?$/;
+        if (isLat) { if(dmsLat.test(digits)){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseFloat(digits.slice(4));} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else {deg=parseInt(digits,10);} }
+        else { if(dmsLon.test(digits)){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseFloat(digits.slice(5));} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else {deg=parseInt(digits,10);} }
         let dec = deg + min/60 + sec/3600; if (/S|W/i.test(hemi)) dec = -dec; return Math.round(dec*10000)/10000;
       };
-      const m1 = text.match(/(\d{6})\s*([NS])\s*(\d{7})\s*([EW])/i); if (m1) return { lat:toDec(m1[1],m1[2],true), lon:toDec(m1[3],m1[4],false) };
+      const m1 = text.match(/(\d{6}(?:\.\d+)?)\s*([NS])\s*(\d{7}(?:\.\d+)?)\s*([EW])/i); if (m1) return { lat:toDec(m1[1],m1[2],true), lon:toDec(m1[3],m1[4],false) };
       const m2 = text.match(/(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/i); if (m2) return { lat:toDec(m2[1],m2[2],true), lon:toDec(m2[3],m2[4],false) };
       const m3 = text.match(/(\d{3})\s*([NS])\s*(\d{3})\s*([EW])/i); if (m3) return { lat:toDec(m3[1],m3[2],true), lon:toDec(m3[3],m3[4],false) };
       return null;
@@ -11806,8 +11809,9 @@
       if (!text || typeof text !== 'string') return empty;
       const toDec = (digits, hemi, isLat) => {
         let deg=0,min=0,sec=0; const n=digits.length;
-        if (isLat) { if(n===6){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseInt(digits.slice(4,6),10);} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else {deg=parseInt(digits,10);} }
-        else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else {deg=parseInt(digits,10);} }
+        const dmsLat=/^\d{6}(?:\.\d+)?$/, dmsLon=/^\d{7}(?:\.\d+)?$/;
+        if (isLat) { if(dmsLat.test(digits)){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseFloat(digits.slice(4));} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else {deg=parseInt(digits,10);} }
+        else { if(dmsLon.test(digits)){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseFloat(digits.slice(5));} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else {deg=parseInt(digits,10);} }
         let dec = deg + min/60 + sec/3600; if (/S|W/i.test(hemi)) dec = -dec; return Math.round(dec*10000)/10000;
       };
       const collect = (src, joinWrapped) => {
@@ -11817,7 +11821,8 @@
         // menyambung digit lintas baris bisa mengarang koordinat (baris "2630" + "42S
         // 07500E" menjadi 30°42'S 075°00'E) — hazard tergambar di tempat yang salah.
         const joined = joinWrapped ? String(src || '').replace(/(\d)[ \t]*\r?\n[ \t]*(\d)/g, '$1$2') : String(src || '');
-        const re = /(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
+        // Detik desimal ("024101.40N") harus diterima, kalau tidak batas area E) hilang.
+        const re = /(\d{6}(?:\.\d+)?)\s*([NS])\s*(\d{7}(?:\.\d+)?)\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
         let m;
         while ((m = re.exec(joined)) !== null) {
           const latDigits = m[1] || m[5], latHemi = m[2] || m[6];
@@ -13316,13 +13321,16 @@
       if(!text||typeof text!=='string') return {center:null, radiusNm:null, polygon:[]};
       var toDec=function(digits,hemi,isLat){
         var deg=0,min=0,sec=0; var n=digits.length;
-        if(isLat){ if(n===6){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseInt(digits.slice(4,6),10);} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else deg=parseInt(digits,10); }
-        else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else deg=parseInt(digits,10); }
+        // Detik desimal ("024101.40N") didukung; tanpa ini batas area E) tidak terbaca
+        // dan peta hanya menggambar lingkaran radius Q).
+        var dmsLat=/^\d{6}(?:\.\d+)?$/, dmsLon=/^\d{7}(?:\.\d+)?$/;
+        if(isLat){ if(dmsLat.test(digits)){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseFloat(digits.slice(4));} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else deg=parseInt(digits,10); }
+        else { if(dmsLon.test(digits)){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseFloat(digits.slice(5));} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else deg=parseInt(digits,10); }
         var dec=deg+min/60+sec/3600; if(/S|W/i.test(hemi)) dec=-dec; return Math.round(dec*10000)/10000;
       };
       var qLine=(text.match(/^Q\)[^\n]*/m)||[''])[0];
       var center=null, radiusNm=null;
-      var qDMS=qLine.match(/(\d{6})([NS])(\d{7})([EW])(\d{3})?/i);
+      var qDMS=qLine.match(/(\d{6}(?:\.\d+)?)([NS])(\d{7}(?:\.\d+)?)([EW])(\d{3})?/i);
       var qDM=qLine.match(/(\d{4})([NS])(\d{5})([EW])(\d{3})?/i);
       var qm=qDMS||qDM;
       if(qm){
@@ -13335,7 +13343,7 @@
       // sambung dulu supaya tidak ada koordinat yang hilang tanpa jejak.
       eText=eText.replace(/(\d)[ \t]*\r?\n[ \t]*(\d)/g,'$1$2');
       var polygon=[];
-      var re=/(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
+      var re=/(\d{6}(?:\.\d+)?)\s*([NS])\s*(\d{7}(?:\.\d+)?)\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
       var m;
       while((m=re.exec(eText))!==null){
         var latD=m[1]||m[5], latH=m[2]||m[6];

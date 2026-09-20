@@ -31,7 +31,7 @@ import { seedAuthUser } from './rpc_auth_fixture.mjs';
 
 /* ------------------------------------------------------------------ produksi */
 const utilsSource = await readFile(new URL('../functions/api/notamUtils.js', import.meta.url), 'utf8');
-const { parseNotamRow, checkScheduleDOverlap, isAerodromeOnlyNotam, duParseIcaoDateCode } = await import(
+const { parseNotamRow, checkScheduleDOverlap, isAerodromeOnlyNotam, duParseIcaoDateCode, parseNotamGeometry } = await import(
   'data:text/javascript;base64,' + Buffer.from(utilsSource).toString('base64')
 );
 
@@ -129,9 +129,33 @@ function extractFunction(src, marker) {
   throw new Error('kurung tidak seimbang setelah: ' + marker);
 }
 const clientParse = new Function(
-  ['yyMMddHHmm', 'parseNotam'].map(name => extractFunction(firNotamSource, 'function ' + name + '(')).join('\n') +
-  '\nreturn { parseNotam, yyMMddHHmm };'
+  ['yyMMddHHmm', 'parseNotam', 'firnParseNotamGeometry']
+    .map(name => extractFunction(firNotamSource, 'function ' + name + '(')).join('\n') +
+  '\nreturn { parseNotam, yyMMddHHmm, firnParseNotamGeometry };'
 )();
+
+// Parser geometri halaman FIR (klien) — dipakai untuk mengunci dukungan detik desimal.
+const firSource = await readFile(new URL('../src/FIR_Ui.html', import.meta.url), 'utf8');
+const firMapClient = new Function(
+  ['nfield', 'normalizePolygon', 'parseRadiusPhraseFromText', 'parseNotamGeometryFromText',
+    'notamShapeProps', 'buildNotamGeom', 'notamRingContains', 'notamIsLive']
+    .map(name => extractFunction(firSource, 'function ' + name + '(')).join('\n') +
+  '\nconst esc = (v) => String(v == null ? "" : v);\n' +
+  'return { parseNotamGeometryFromText };'
+)();
+
+// NOTAM nyata (WMFC A2989/26) yang memicu dua temuan sekaligus: token "DH" di dalam
+// "SPDH" (HIGH palsu) dan koordinat E) berdetik desimal (batas area tidak terbaca).
+const RAW_A2989 = `A2989/26 NOTAMN
+Q) WMFC/QWULW/IV/BO /W /000/009/0235N10153E005
+A) WMFC B) 2608052300 C) 2611041100 
+D) DLY 2300-1100
+E)   UA ACT WILL TAKE PLACE ALONG THE PLUS HIGHWAY FM 
+   
+   024101.40N 1015544.78E - 022950.20N 1015157.01E 
+   (SEREMBAN-PORT DICKSON HIGHWAY (SPDH))
+      
+F) SFC                             G) 900FT AGL`;
 
 // Geometri matahari (algoritma NOAA/SunCalc) HANYA untuk mengaudit FIXTURE_4:
 // pembanding independen untuk cek apakah SR-SS benar-benar diresolusi ke posisi
@@ -469,7 +493,7 @@ E) SCOPE A — bukan milik halaman FIR`;
 });
 
 /* ==================== FIXTURE 9 (klien FIR): fail-closed risk & status (H9/H4) */
-const firSource = await readFile(new URL('../src/FIR_Ui.html', import.meta.url), 'utf8');
+// firSource sudah dibaca di blok ekstraksi klien di atas.
 const firClient = new Function(
   ['getRiskClass', 'riskBadge', 'notamIsLive', 'notamStatusKey', 'hazardStatusBucket']
     .map(name => extractFunction(firSource, 'function ' + name + '(')).join('\n') +
@@ -547,6 +571,52 @@ test('FIXTURE_8 scope FIR flight diambil dari tabel airport_firs', async () => {
 // dan kembalikan `{ todo: d.id }` di loop bawah — suite tetap hijau sampai cacatnya
 // diperbaiki, dan ledger test menjaga daftarnya tidak basi.
 const DEFECTS = [
+  {
+    id: 'H14', fixture: 'AUDIT',
+    title: 'token HIGH di-word-boundary: DH di dalam SPDH/YGDH/DH8 bukan Decision Height',
+    run: () => {
+      const withE = (e) => `X0001/26 NOTAMN\nQ) YMMM/QRDCA/IV/BO/W/000/999/2054S08637E744\nA) YMMM B) 2609100000 C) 2610041447\nE) ${e}`;
+      const prio = (e) => parseNotamRow({ id: 'X0001/26', message: withE(e) }).priority;
+
+      // NOTAM nyata A2989/26: pemicu lama adalah "DH" di dalam "SPDH".
+      const real = parseNotamRow({ id: 'A2989/26', message: RAW_A2989 });
+      assert.notEqual(real.priority, 'HIGH', 'DH di dalam SPDH tidak boleh menaikkan ke HIGH');
+      assert.equal(real.priority, 'LOW', 'teks ini tidak memuat kata kunci hazard lain');
+
+      // Kebetulan huruf lain yang dulu juga kena.
+      for (const t of ['SPDH', 'YGDH', 'DH8 ACFT ONLY', 'DHC-6 TWIN OTTER']) {
+        assert.notEqual(prio(t), 'HIGH', `${t} tidak boleh HIGH`);
+      }
+      // Token yang MEMANG berarti tetap HIGH.
+      for (const t of ['RVR 550M DH 200FT', 'MINIMA 200FT', 'CAT II APPROACH', 'MDA 500FT', 'VISIBILITY 800M', 'DA/H 200FT']) {
+        assert.equal(prio(t), 'HIGH', `${t} harus tetap HIGH`);
+      }
+    }
+  },
+  {
+    id: 'H15', fixture: 'AUDIT',
+    title: 'koordinat detik desimal (024101.40N) terbaca sebagai batas area E)',
+    run: async () => {
+      const geom = parseNotamGeometry(RAW_A2989);
+      assert.equal(geom.polygon.length, 2, 'dua titik sudut koridor harus terbaca');
+      assert.ok(Math.abs(geom.polygon[0][0] - 101.9291) < 0.001, `lon titik 1 = ${geom.polygon[0][0]}`);
+      assert.ok(Math.abs(geom.polygon[0][1] - 2.6837) < 0.001, `lat titik 1 = ${geom.polygon[0][1]}`);
+      assert.ok(Math.abs(geom.polygon[1][0] - 101.8658) < 0.001, `lon titik 2 = ${geom.polygon[1][0]}`);
+      assert.ok(Math.abs(geom.polygon[1][1] - 2.4973) < 0.001, `lat titik 2 = ${geom.polygon[1][1]}`);
+      // Detik bulat tetap sama seperti sebelumnya (tidak ada regresi).
+      const whole = parseNotamGeometry(`Q) RPHI/QWELW/IV/BO /W /000/010/1418N12050E008
+E) 142305N 1205257E - 141804N 1205714E - 141104N 1204729E
+F) SFC G) 1000FT AMSL`);
+      assert.deepEqual(whole.polygon[0], [120.8825, 14.3847], 'DMS detik bulat tidak berubah');
+      // Kedua parser klien memakai aturan yang sama.
+      const firNotam = clientParse.firnParseNotamGeometry(RAW_A2989);
+      assert.equal(firNotam.polygon.length, 2, 'klien FIR NOTAM harus membaca detik desimal juga');
+      const firMap = firMapClient.parseNotamGeometryFromText(RAW_A2989);
+      assert.equal(firMap.polygon.length, 2, 'klien halaman FIR harus membaca detik desimal juga');
+      const viaRpc = await rpc('getActiveNotams');
+      assert.ok(viaRpc, 'RPC tetap sehat setelah perubahan geo-math');
+    }
+  },
   {
     id: 'H8', fixture: 'AUDIT',
     title: 'tanggal AFTN imajiner ditolak tanpa syarat jam (2602311200 bukan 3 Mar)',
@@ -667,7 +737,7 @@ F) SFC G) UNL H) NE 20KT)`]);
 // Jumlah temuan audit yang sudah ditutup dan dikunci sebagai regression test di atas.
 // Kalau sebuah temuan baru ditambahkan ke DEFECTS, naikkan angka ini; ledger test gagal
 // kalau keduanya tidak sinkron, supaya daftarnya tidak pernah diam-diam basi.
-const FIXED_DEFECTS = 7;
+const FIXED_DEFECTS = 9;
 
 for (const defect of DEFECTS) {
   // Semua temuan di DEFECTS sudah diperbaiki (lihat docs/notam-analyst-audit-fir.md),

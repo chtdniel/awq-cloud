@@ -6,7 +6,8 @@
 - **Metode**: baca kode penuh + eksekusi kode produksi (bundle esbuild + D1 `node:sqlite`) + self-test matrix 7 fixture wajib skill
 - **Mode**: read-only review. Satu perubahan kode sebelumnya (`determinePriority` MEDIUM false-positive) sudah terpisah dan tidak dihitung di sini.
 - **Verdict awal**: **FAIL** — 🔴 13 HIGH · 🟡 11 MEDIUM · 🔵 3 LOW
-- **Status perbaikan (revisi 3)**: **13 temuan sudah DIPERBAIKI dan dikunci regression test** (H1, H2, H4, H5, H6, H7, H8, H9, H10, H11, M1, M2, M3). Sisa terbuka: **3 HIGH** (H3, H12, H13) + **8 MEDIUM** (M4–M11) + **3 LOW** (L1–L3). Gate skill sekarang **36/36 PASS, 0 todo**.
+- **Status perbaikan (revisi 4)**: **15 temuan sudah DIPERBAIKI dan dikunci regression test** (H1, H2, H4–H11, H14, H15, M1, M2, M3). Sisa terbuka: **3 HIGH** (H3, H12, H13) + **8 MEDIUM** (M4–M11) + **3 LOW** (L1–L3). Gate skill sekarang **39/39 PASS, 0 todo**.
+- **H14/H15** ditemukan setelah deploy pertama (laporan operator: WMFC A2989/26 tampil HIGH padahal isinya aktivitas UA di koridor highway) — keduanya kelas berbeda dari 13 temuan awal, jadi ditambahkan sebagai temuan baru.
 
 > ⚠️ Setiap perbaikan yang menyentuh logika waktu B/C/D, altitud, atau geo-math **wajib peer review** sebelum deploy (skill step 5). Perbaikan H2 (resolusi matahari) dan H5/H6 (pre-join AFTN) masuk kategori itu.
 
@@ -28,7 +29,8 @@ Harness: **`tests/test_notam_analyst_fixtures.mjs`** (sudah wired ke `npm test`)
 | FIXTURE_8 | Scope FIR dari tabel `airport_firs` | belum ada | 1/1 PASS |
 | FIXTURE_9 | Lifecycle NOTAMR/NOTAMC, paritas risiko, banner fail-closed | belum ada | 6/6 PASS |
 | AUDIT [H7]/[H8] | Validasi tanggal AFTN (imajiner ditolak di klien + server) | belum ada | 2/2 PASS |
-| | **TOTAL** | **16/27 — GATE FAIL** | **36/36 — GATE PASS (0 todo)** |
+| AUDIT [H14]/[H15] | Word-boundary token HIGH + koordinat detik desimal | belum ada | 2/2 PASS |
+| | **TOTAL** | **16/27 — GATE FAIL** | **39/39 — GATE PASS (0 todo)** |
 
 Assertion yang dulu gagal dan sekarang tertutup:
 
@@ -93,6 +95,17 @@ Sudah diperbaiki dan dikunci regression test — rincian teknis di bawah tetap s
 | ✅ M3 | `valid_to` NULL dilabeli `PERM` di editor (sama dengan `firGetNotamResults`) | `rpc.js` | FIXTURE_3 |
 
 **Masih terbuka**: H3 (batas vertikal Q `000/999` + F)/G) tidak dievaluasi), H12 (teks dipotong 400 char tanpa penanda), H13 (`geometryChecked: true` palsu), M4–M11, L1–L3.
+
+### Temuan tambahan setelah deploy pertama (revisi 4)
+
+| ID | Masalah | Perbaikan | Test |
+|---|---|---|---|
+| ✅ H14 | **[🔴 LOGIC-ERROR]** Token HIGH tanpa word boundary: `DH` (Decision Height) cocok di dalam `SPDH`, `YGDH` (ICAO Gunnedah), `DH8`, `DHC-6` → NOTAM biasa naik HIGH karena kebetulan huruf. Kelas bug yang sama dengan `MEN` di dalam `GOVERNMENT` pada blok MEDIUM. Dampak terukur: 2 dari 21 baris HIGH di D1 lokal (A2989/26 via SPDH, N2871/26 via YGDH); 1 dari 687 baris FIR di produksi | `\b` pada semua token HIGH (`MINIMA`, `CAT I/II/III`, `APPROACH`, `DA/H`, `MDA`, `OCA/H`, `CEILING`, `VISIBILITY`, `DH`) | AUDIT [H14] |
+| ✅ H15 | **[🔴 LOGIC-ERROR]** Koordinat E) ber**detik desimal** (`024101.40N 1015544.78E`) tidak terbaca regex → batas area hilang, peta hanya menggambar lingkaran radius Q). Dampak: **221 dari 829 baris (27%)** memakai format ini dan semuanya `polygon=0`; 145 di antaranya kini tergambar. Untuk A2989/26: lingkaran 5 NM di titik Q) menggantikan koridor highway ~12 NM, sehingga kedua ujung area tidak tercakup | Dukungan detik desimal (`(\d{6}(?:\.\d+)?)`) + `parseFloat` untuk komponen detik, di server dan di kedua parser geometri klien | AUDIT [H15] |
+
+Catatan operator: badge **"Class A"** pada A2989/26 adalah huruf seri nomor NOTAM (`A2989/26` → A), bukan kelas Q-code — bagian itu sudah benar.
+
+**Keputusan kebijakan yang belum diambil** (bukan bug): setelah H14, A2989/26 turun ke **LOW**. Blok hazard HIGH yang ditambahkan di H2 mencakup `DANGER AREA ACT`, `ROCKET LAUNCH`, `FIRING`, `MILITARY EXER` — belum mencakup aktivitas UA/unmanned. Apakah koridor UA aktif SFC–900FT AGL layak minimal MEDIUM adalah keputusan operasional, bukan perbaikan bug.
 
 **Catatan dampak H8** (diukur pada 829 NOTAM di D1 lokal): 0 baris punya B)/C) bertanggal imajiner, jadi perbaikan ini menutup lubang laten **tanpa** mengubah klasifikasi data yang ada; tahun kabisat tetap benar (`2802291200` → 2028-02-29).
 
@@ -208,8 +221,8 @@ Halaman FIR: `loadActiveNotams` mengabaikan `data.error` (`FIR_Ui.html:1606-1611
 
 Harness dipromosikan menjadi **`tests/test_notam_analyst_fixtures.mjs`** dan sudah masuk `npm test`.
 
-- **36 test hijau, 0 todo** (revisi 3): fixture 1–7 + FIXTURE_8 (scope `airport_firs`) + FIXTURE_9 (lifecycle/paritas risiko/banner fail-closed) + AUDIT [H7]/[H8] (validasi tanggal AFTN) + pengunci helper klien.
-- Tiga belas temuan audit yang dulu `{ todo }` sekarang dijalankan sebagai **regression test per ID temuan** (H2, H5, H6, H7, H8, M1×3, M2, M3). Mekanisme `DEFECTS` + ledger test tetap ada: temuan baru yang belum diperbaiki cukup ditambahkan ke array itu dengan opsi `{ todo }`, dan ledger menjaga jumlahnya sinkron dengan `FIXED_DEFECTS`.
+- **39 test hijau, 0 todo** (revisi 4): fixture 1–7 + FIXTURE_8 (scope `airport_firs`) + FIXTURE_9 (lifecycle/paritas risiko/banner fail-closed) + AUDIT [H7]/[H8] (validasi tanggal AFTN) + AUDIT [H14]/[H15] (word-boundary token HIGH + detik desimal) + pengunci helper klien.
+- Lima belas temuan audit dijalankan sebagai **regression test per ID temuan**. Mekanisme `DEFECTS` + ledger test tetap ada: temuan baru yang belum diperbaiki cukup ditambahkan ke array itu dengan opsi `{ todo }`, dan ledger menjaga jumlahnya sinkron dengan `FIXED_DEFECTS`.
 - Test tidak bisa "lulus sendiri": `functions/api/notamUtils.js` diimpor sebagai modul dan handler RPC dijalankan lewat bundle esbuild + D1 in-memory, jadi tidak ada salinan logika di dalam test.
 - Parser klien (`parseNotam`) dan helper fail-closed (`riskBadge`, `notamIsLive`, `hazardStatusBucket`) diuji dengan mengekstrak fungsinya dari HTML — jadi yang diuji benar-benar kode halaman yang dikirim ke browser.
 - Tanggal B) dihitung relatif terhadap jam sistem (`icaoDateDaysAgo`), jadi test tidak basi seiring waktu.
@@ -243,8 +256,8 @@ Fixture tambahan yang belum ada:
 
 | Gate | Hasil |
 |---|---|
-| `npm test` | **139/139 pass, 0 fail** |
-| Fixture skill `notam-analyst` | **37/37 PASS, 0 todo** |
+| `npm test` | **141/141 pass, 0 fail** |
+| Fixture skill `notam-analyst` | **39/39 PASS, 0 todo** |
 | `npm run check:client-syntax` | semua blok `<script>` inline terkompilasi |
 | `npm run test:browser` (Chromium, klien asli `public/app/index.html`) | **semua PASS** — termasuk FIR map area geometry, FIR overlap click, FIR flight list mengikuti Flight Board, stale report rejection |
 | `npm run test:report` | exit 0 (termasuk batas payload 64 KiB) |
@@ -260,6 +273,8 @@ Blast radius perubahan, diukur pada 829 NOTAM D1 lokal:
 | H8 tanggal imajiner | **0** | tidak ada churn klasifikasi; kabisat tetap benar |
 | H1 `airport_firs` | semua flight | literal 13 bandara hanya fallback bila tabel kosong |
 | M2 `skipped` | baris Q-scope A | kini terhitung, sebelumnya dilaporkan 0 |
+| H14 word-boundary HIGH | 2 dari 21 baris HIGH (lokal) | tepat 2 false positive hilang; HIGH 21 → 19, tanpa kolateral |
+| H15 detik desimal | 221 dari 829 baris (27%) | 145 kini tergambar polygon-nya; 76 sisanya memang hanya 1 pasang koordinat (bukan polygon) |
 
 ### Belum terverifikasi — prasyarat deploy
 

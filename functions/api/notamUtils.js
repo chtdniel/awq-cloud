@@ -159,7 +159,10 @@ function determinePriority(category, text) {
         return 'HIGH';
         }
     }
-    if (/MINIMA|CAT\s+I|CAT\s+II|CAT\s+III|APPROACH|DA\/H|MDA|OCA\/H|CEILING|VISIBILITY|DH/i.test(upper)) {
+    // Semua token di-word-boundary. Tanpa \b, "DH" (Decision Height) cocok di dalam
+    // SPDH / YGDH / DH8 / DHC, sehingga NOTAM biasa naik ke HIGH hanya karena kebetulan
+    // huruf — kelas bug yang sama dengan "MEN" di dalam GOVERNMENT pada blok MEDIUM.
+    if (/\bMINIMA\b|\bCAT\s+(?:I|II|III)\b|\bAPPROACH\b|\bDA\/H\b|\bMDA\b|\bOCA\/H\b|\bCEILING\b|\bVISIBILITY\b|\bDH\b/i.test(upper)) {
         return 'HIGH';
     }
 
@@ -191,12 +194,17 @@ function determinePriority(category, text) {
 function duToDecimal(digits, hemi, isLat) {
     const n = digits.length;
     let deg = 0, min = 0, sec = 0;
+    // Detik boleh desimal (mis. "024101.40N"): sebagian negara mengirim DMS dengan
+    // pecahan detik, dan regex yang menuntut digit bulat membuat batas area E) hilang
+    // sama sekali (peta hanya menggambar lingkaran radius Q)).
+    const dmsLat = /^\d{6}(?:\.\d+)?$/;
+    const dmsLon = /^\d{7}(?:\.\d+)?$/;
     if (isLat) {
-        if (n === 6) { deg = parseInt(digits.slice(0, 2), 10); min = parseInt(digits.slice(2, 4), 10); sec = parseInt(digits.slice(4, 6), 10); }
+        if (dmsLat.test(digits)) { deg = parseInt(digits.slice(0, 2), 10); min = parseInt(digits.slice(2, 4), 10); sec = parseFloat(digits.slice(4)); }
         else if (n === 4) { deg = parseInt(digits.slice(0, 2), 10); min = parseInt(digits.slice(2, 4), 10); }
         else deg = parseInt(digits, 10);
     } else {
-        if (n === 7) { deg = parseInt(digits.slice(0, 3), 10); min = parseInt(digits.slice(3, 5), 10); sec = parseInt(digits.slice(5, 7), 10); }
+        if (dmsLon.test(digits)) { deg = parseInt(digits.slice(0, 3), 10); min = parseInt(digits.slice(3, 5), 10); sec = parseFloat(digits.slice(5)); }
         else if (n === 5) { deg = parseInt(digits.slice(0, 3), 10); min = parseInt(digits.slice(3, 5), 10); }
         else deg = parseInt(digits, 10);
     }
@@ -218,7 +226,7 @@ function duCollectCoordinates(text, joinWrapped = false) {
     const source = joinWrapped
         ? String(text).replace(/(\d)[ \t]*\r?\n[ \t]*(\d)/g, '$1$2')
         : String(text);
-    const re = /(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
+    const re = /(\d{6}(?:\.\d+)?)\s*([NS])\s*(\d{7}(?:\.\d+)?)\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
     let m;
     while ((m = re.exec(source)) !== null) {
         const latDigits = m[1] || m[5], latHemi = m[2] || m[6];
@@ -255,7 +263,7 @@ export function parseNotamGeometry(text) {
         if (!text || typeof text !== 'string') return empty;
 
         const qLine = (text.match(/(?:^|\n)[ \t]*Q\)[^\n]*/i) || [''])[0];
-        const qMatch = qLine.match(/(\d{6})([NS])(\d{7})([EW])(\d{3})?/i) || qLine.match(/(\d{4})([NS])(\d{5})([EW])(\d{3})?/i);
+        const qMatch = qLine.match(/(\d{6}(?:\.\d+)?)([NS])(\d{7}(?:\.\d+)?)([EW])(\d{3})?/i) || qLine.match(/(\d{4})([NS])(\d{5})([EW])(\d{3})?/i);
         let center = qMatch ? [duToDecimal(qMatch[3], qMatch[4], false), duToDecimal(qMatch[1], qMatch[2], true)] : null;
         let qRadius = qMatch && qMatch[5] ? parseInt(qMatch[5], 10) : NaN;
         // 000/999 = radius of influence tidak didefinisikan (ICAO) — jangan digambar.
