@@ -1,7 +1,7 @@
 import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
 import { fetchLatestTafs } from '../../shared/taf.mjs';
 import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, tafValidityLabel, validityCoversWindow } from '../../shared/wxtime.mjs';
-import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
+import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam, parseNotamGeometry } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
 
@@ -1598,23 +1598,13 @@ async function handleGetActiveNotams(context) {
                 ? 'UNVERIFIED'
                 : (now.getTime() < effTime ? 'FUTURE' : (now.getTime() > expTime ? 'EXPIRED' : 'ACTIVE'));
             
-            // Basic coordinate extraction for mapping
-            let lat = null, lon = null;
-            const qLine = (row.message.match(/^Q\)[^\n]*/m) || [''])[0];
-            if (qLine) {
-                const m1 = qLine.match(/(\d{4})([NS])(\d{5})([EW])/i);
-                if (m1) {
-                    const latDeg = parseInt(m1[1].slice(0, 2), 10);
-                    const latMin = parseInt(m1[1].slice(2, 4), 10);
-                    lat = latDeg + latMin / 60;
-                    if (/S/i.test(m1[2])) lat = -lat;
-                    
-                    const lonDeg = parseInt(m1[3].slice(0, 3), 10);
-                    const lonMin = parseInt(m1[3].slice(3, 5), 10);
-                    lon = lonDeg + lonMin / 60;
-                    if (/W/i.test(m1[4])) lon = -lon;
-                }
-            }
+            // Geometry for the FIR map layer: Q) centre/radius + E) area boundary.
+            // Both used to be hardcoded null/[] so the FIR page drew point markers
+            // only — polygons and radius circles never reached Leaflet.
+            const decodedMessage = decodeNotamText(row.message);
+            const geometry = parseNotamGeometry(decodedMessage);
+            const lat = geometry.center ? geometry.center[1] : null;
+            const lon = geometry.center ? geometry.center[0] : null;
 
             activeNotams.push({
                 location: row.location,
@@ -1622,14 +1612,14 @@ async function handleGetActiveNotams(context) {
                 cls: firResolveNotamClass(row),
                 effectiveDate: parsed ? (parsed.effFrom ? parsed.effFrom.toISOString() : null) : (row.valid_from || null),
                 expirationDate: parsed ? (parsed.isContinuous ? 'PERM' : (parsed.effTo ? parsed.effTo.toISOString() : null)) : (row.valid_to || null),
-                text: decodeNotamText(row.message).slice(0, 400), // Trucate for map marker performance
+                text: decodedMessage.slice(0, 400), // Trucate for map marker performance
                 qCode: '',
                 risk: isUnverified ? unverifiedRisk : parsed.priority,
                 lat: lat,
                 lon: lon,
-                center: lat !== null ? [lon, lat] : null,
-                radiusNm: null,
-                polygon: [],
+                center: geometry.center,
+                radiusNm: geometry.radiusNm,
+                polygon: geometry.polygon,
                 active: active,
                 status: status
             });

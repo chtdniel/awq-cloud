@@ -162,6 +162,97 @@ function determinePriority(category, text) {
     return 'LOW';
 }
 
+/* ---------- Geometri area NOTAM (layer peta halaman FIR) ---------- */
+// Q) memberi titik pusat + radius of influence (3 digit terakhir, NM; 000/999 =
+// tidak didefinisikan). E) memberi batas area sebagai daftar koordinat
+// ("... WI: 142305N 1205257E - 141804N 1205714E - ...") atau frasa radius
+// ("5NM RADIUS CENTERED ON 144357N 1210842E").
+function duToDecimal(digits, hemi, isLat) {
+    const n = digits.length;
+    let deg = 0, min = 0, sec = 0;
+    if (isLat) {
+        if (n === 6) { deg = parseInt(digits.slice(0, 2), 10); min = parseInt(digits.slice(2, 4), 10); sec = parseInt(digits.slice(4, 6), 10); }
+        else if (n === 4) { deg = parseInt(digits.slice(0, 2), 10); min = parseInt(digits.slice(2, 4), 10); }
+        else deg = parseInt(digits, 10);
+    } else {
+        if (n === 7) { deg = parseInt(digits.slice(0, 3), 10); min = parseInt(digits.slice(3, 5), 10); sec = parseInt(digits.slice(5, 7), 10); }
+        else if (n === 5) { deg = parseInt(digits.slice(0, 3), 10); min = parseInt(digits.slice(3, 5), 10); }
+        else deg = parseInt(digits, 10);
+    }
+    let dec = deg + min / 60 + sec / 3600;
+    if (/S|W/i.test(hemi)) dec = -dec;
+    return Math.round(dec * 10000) / 10000;
+}
+
+// Daftar koordinat [lon, lat] dari sebuah potongan teks NOTAM. Alternasi DMS
+// (6/7 digit) didahulukan supaya pasangan DM (4/5 digit) tidak terbelah.
+function duCollectCoordinates(text) {
+    const out = [];
+    if (!text) return out;
+    const re = /(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const latDigits = m[1] || m[5], latHemi = m[2] || m[6];
+        const lonDigits = m[3] || m[7], lonHemi = m[4] || m[8];
+        if (!latDigits || !lonDigits) continue;
+        const pair = [duToDecimal(lonDigits, lonHemi, false), duToDecimal(latDigits, latHemi, true)];
+        const last = out[out.length - 1];
+        if (last && last[0] === pair[0] && last[1] === pair[1]) continue; // titik penutup dobel
+        out.push(pair);
+    }
+    return out;
+}
+
+// Radius eksplisit di E) lebih tepat daripada radius of influence Q).
+function duParseRadiusPhrase(text) {
+    if (!text) return null;
+    const patterns = [
+        /(\d+(?:\.\d+)?)\s*NM\s*RADIUS\b/i,
+        /RADIUS\s*(?:OF\s*)?(\d+(?:\.\d+)?)\s*NM\b/i,
+        /WITHIN\s*(\d+(?:\.\d+)?)\s*NM\b/i
+    ];
+    for (const re of patterns) {
+        const m = re.exec(text);
+        if (!m) continue;
+        const value = parseFloat(m[1]);
+        if (value > 0 && value < 1000) return value;
+    }
+    return null;
+}
+
+export function parseNotamGeometry(text) {
+    const empty = { center: null, radiusNm: null, polygon: [] };
+    try {
+        if (!text || typeof text !== 'string') return empty;
+
+        const qLine = (text.match(/(?:^|\n)[ \t]*Q\)[^\n]*/i) || [''])[0];
+        const qMatch = qLine.match(/(\d{6})([NS])(\d{7})([EW])(\d{3})?/i) || qLine.match(/(\d{4})([NS])(\d{5})([EW])(\d{3})?/i);
+        let center = qMatch ? [duToDecimal(qMatch[3], qMatch[4], false), duToDecimal(qMatch[1], qMatch[2], true)] : null;
+        let qRadius = qMatch && qMatch[5] ? parseInt(qMatch[5], 10) : NaN;
+        // 000/999 = radius of influence tidak didefinisikan (ICAO) — jangan digambar.
+        if (!(qRadius > 0) || qRadius === 999) qRadius = NaN;
+
+        const eMatch = /(?:^|\n)[ \t]*E\)[ \t]*([\s\S]*?)(?=(?:\n[ \t]*[FG]\))|$)/i.exec(text);
+        const eIdx = text.indexOf('E)');
+        const eText = eMatch ? eMatch[1] : (eIdx >= 0 ? text.slice(eIdx + 2) : '');
+        const polygon = duCollectCoordinates(eText);
+        const textRadius = duParseRadiusPhrase(eText);
+
+        if (!center) {
+            const fallbackPoint = polygon.length ? polygon : duCollectCoordinates(text);
+            if (fallbackPoint.length) center = [fallbackPoint[0][0], fallbackPoint[0][1]];
+        }
+
+        return {
+            center,
+            radiusNm: textRadius !== null ? textRadius : (qRadius > 0 ? qRadius : null),
+            polygon: polygon.length >= 2 ? polygon : []
+        };
+    } catch (e) {
+        return empty;
+    }
+}
+
 export function checkScheduleDOverlap(scheduleText, winStart, winEnd) {
     if (!scheduleText || scheduleText.trim() === "") return true; 
     const cleanSched = scheduleText.toUpperCase().trim();

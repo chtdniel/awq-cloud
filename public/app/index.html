@@ -10251,6 +10251,8 @@
     notamGeomLayers: [],
     notamShapeLayer: null,
     notamPopup: null,
+    notamPickList: null,
+    notamPickAnchor: null,
     latLongCache: null,
     mapFirFilter: null,
     hazards: [],
@@ -10550,6 +10552,59 @@
       return null;
     } catch (e) { return null; }
   }
+  // Geometri area NOTAM untuk peta FIR: Q) pusat + radius of influence, E) batas
+  // area (daftar koordinat) atau frasa radius ("5NM RADIUS CENTERED ON ...").
+  function parseRadiusPhraseFromText(text) {
+    if (!text) return null;
+    const patterns = [/(\d+(?:\.\d+)?)\s*NM\s*RADIUS\b/i, /RADIUS\s*(?:OF\s*)?(\d+(?:\.\d+)?)\s*NM\b/i, /WITHIN\s*(\d+(?:\.\d+)?)\s*NM\b/i];
+    for (let i = 0; i < patterns.length; i++) {
+      const m = patterns[i].exec(text);
+      if (!m) continue;
+      const value = parseFloat(m[1]);
+      if (value > 0 && value < 1000) return value;
+    }
+    return null;
+  }
+  function parseNotamGeometryFromText(text) {
+    const empty = { center:null, radiusNm:null, polygon:[] };
+    try {
+      if (!text || typeof text !== 'string') return empty;
+      const toDec = (digits, hemi, isLat) => {
+        let deg=0,min=0,sec=0; const n=digits.length;
+        if (isLat) { if(n===6){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);sec=parseInt(digits.slice(4,6),10);} else if(n===4){deg=parseInt(digits.slice(0,2),10);min=parseInt(digits.slice(2,4),10);} else {deg=parseInt(digits,10);} }
+        else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else {deg=parseInt(digits,10);} }
+        let dec = deg + min/60 + sec/3600; if (/S|W/i.test(hemi)) dec = -dec; return Math.round(dec*10000)/10000;
+      };
+      const collect = (src) => {
+        const out = [];
+        const re = /(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
+        let m;
+        while ((m = re.exec(src)) !== null) {
+          const latDigits = m[1] || m[5], latHemi = m[2] || m[6];
+          const lonDigits = m[3] || m[7], lonHemi = m[4] || m[8];
+          if (!latDigits || !lonDigits) continue;
+          const pair = [toDec(lonDigits, lonHemi, false), toDec(latDigits, latHemi, true)];
+          const last = out[out.length-1];
+          if (last && last[0] === pair[0] && last[1] === pair[1]) continue;
+          out.push(pair);
+        }
+        return out;
+      };
+      const qLine = (text.match(/(?:^|\n)[ \t]*Q\)[^\n]*/i) || [''])[0];
+      const qm = qLine.match(/(\d{6})([NS])(\d{7})([EW])(\d{3})?/i) || qLine.match(/(\d{4})([NS])(\d{5})([EW])(\d{3})?/i);
+      let center = qm ? [toDec(qm[3], qm[4], false), toDec(qm[1], qm[2], true)] : null;
+      let qRadius = qm && qm[5] ? parseInt(qm[5], 10) : NaN;
+      // 000/999 = radius of influence tidak didefinisikan (ICAO) — jangan digambar.
+      if (!(qRadius > 0) || qRadius === 999) qRadius = NaN;
+      const eMatch = /(?:^|\n)[ \t]*E\)[ \t]*([\s\S]*?)(?=(?:\n[ \t]*[FG]\))|$)/i.exec(text);
+      const eIdx = text.indexOf('E)');
+      const eText = eMatch ? eMatch[1] : (eIdx >= 0 ? text.slice(eIdx + 2) : '');
+      const polygon = collect(eText);
+      const textRadius = parseRadiusPhraseFromText(eText);
+      if (!center) { const fallbackPoint = polygon.length ? polygon : collect(text); if (fallbackPoint.length) center = [fallbackPoint[0][0], fallbackPoint[0][1]]; }
+      return { center, radiusNm: textRadius !== null ? textRadius : (qRadius > 0 ? qRadius : null), polygon: polygon.length >= 2 ? polygon : [] };
+    } catch (e) { return empty; }
+  }
   function getNotamLatLon(n) {
     const location = nfield(n,'location','Location','LOCATION','FIR','FIR ID','ICAO');
     let lon = nfield(n,'lon','Lon','LONG','Longitude','LONGITUDE');
@@ -10597,6 +10652,39 @@
     }
     return coords;
   }
+  // Props geometri satu NOTAM. Payload getActiveNotams sudah membawa
+  // polygon/radius/center; kalau kosong (payload lama/cache) geometri di-parse
+  // ulang dari teks NOTAM supaya area tetap tergambar di peta FIR.
+  function notamShapeProps(n, lat, lon) {
+    const location = nfield(n,'location','Location','LOCATION','FIR','FIR ID','ICAO');
+    const number = nfield(n,'number','Number','NOTAM #','NOTAM NUMBER','ID');
+    const center = nfield(n,'center','Center','CENTRE');
+    const text = nfield(n,'text','Text','NOTAM Text','NOTAM_TEXT','NOTAMTEXT');
+    const props = {
+      location: location !== undefined ? location : n.location,
+      number: number !== undefined ? number : n.number,
+      cls: nfield(n,'cls','Class','CLASS') || null,
+      active: n.active !== false && String(n.status || '').toUpperCase() !== 'EXPIRED',
+      risk: nfield(n,'risk','Risk','RISK LEVEL') || 'LOW',
+      text: text,
+      effectiveDate: n.effectiveDate || null,
+      expirationDate: n.expirationDate || null,
+      center: (Array.isArray(center) && center.length === 2) ? center : [lon, lat],
+      radiusNm: nfield(n,'radiusNm','Radius NM','RADIUS') || null,
+      polygon: normalizePolygon(nfield(n,'polygon','Polygon','POLYGON'))
+    };
+    if (!props.polygon.length && !props.radiusNm) {
+      const parsed = parseNotamGeometryFromText(text);
+      // Teks payload dipotong 400 char (lihat getActiveNotams), jadi polygon hasil
+      // parse teks terpotong bisa tidak lengkap — untuk teks terpotong pakai radius
+      // of influence Q) saja, bukan polygon setengah jadi.
+      const textComplete = String(text || '').length < 400;
+      if (parsed.polygon.length && textComplete) props.polygon = parsed.polygon;
+      if (parsed.radiusNm) props.radiusNm = parsed.radiusNm;
+      if (parsed.center && !(Array.isArray(center) && center.length === 2)) props.center = parsed.center;
+    }
+    return props;
+  }
   function buildNotamPopupHtml(p) {
     const pPolygon = normalizePolygon(p.polygon);
     let h = '<div style="min-width:200px;font-family:var(--font-mono);">';
@@ -10614,7 +10702,7 @@
     if (!state.map) return;
     try { if (state.notamShapeLayer) { state.map.removeLayer(state.notamShapeLayer); state.notamShapeLayer = null; } } catch(e){}
   }
-  function drawNotamShape(p) {
+  function drawNotamShape(p, lat, lon) {
     clearNotamShape();
     if (!state.map) return;
     const riskColor = p.risk === 'HIGH' ? '#ef5350' : p.risk === 'MEDIUM' ? '#fb923c' : '#34d399';
@@ -10623,17 +10711,95 @@
     try {
       const latlngs = geom.map(c => [c[1],c[0]]);
       state.notamShapeLayer = L.layerGroup().addTo(state.map);
+      let shape;
       if (latlngs.length >= 3) {
-        L.polygon(latlngs, { color:riskColor, weight:2, dashArray:'3 2', fillColor:riskColor, fillOpacity:0.15 }).addTo(state.notamShapeLayer);
+        shape = L.polygon(latlngs, { color:riskColor, weight:2, dashArray:'3 2', fillColor:riskColor, fillOpacity:0.15 });
       } else {
-        L.polyline(latlngs, { color:riskColor, weight:2, dashArray:'3 2' }).addTo(state.notamShapeLayer);
+        shape = L.polyline(latlngs, { color:riskColor, weight:2, dashArray:'3 2' });
       }
+      // Bentuk sorotan digambar di atas layer NOTAM, jadi dia harus ikut menangani
+      // klik — kalau tidak, dia menelan klik ke polygon NOTAM di bawahnya.
+      if (typeof lat === 'number' && typeof lon === 'number') shape.on('click', (e) => onNotamGeomClick(p, lat, lon, e));
+      shape.addTo(state.notamShapeLayer);
     } catch (e) {}
   }
   function openNotamPopup(props, lat, lon) {
     if (!state.map) return;
     if (state.notamPopup) state.map.closePopup(state.notamPopup);
     state.notamPopup = L.popup({ className:'fir-notam-popup', maxWidth:320 }).setLatLng([lat,lon]).setContent(buildNotamPopupHtml(props)).openOn(state.map);
+  }
+  /* ---------- Polygon NOTAM yang saling tumpang tindih ---------- */
+  // Leaflet hanya mengirim klik ke path paling atas, jadi NOTAM yang tertutup tidak
+  // bisa dipilih dari areanya. Setiap klik di bentuk area di-hit-test ke semua ring
+  // yang tergambar: kalau lebih dari satu NOTAM menutupi titik itu, tampilkan daftar
+  // pilihan; kalau hanya satu, langsung popup detail seperti sebelumnya.
+  function notamRingContains(latlngs, lat, lon) {
+    let inside = false;
+    for (let i = 0, j = latlngs.length - 1; i < latlngs.length; j = i++) {
+      const yi = latlngs[i][0], xi = latlngs[i][1];
+      const yj = latlngs[j][0], xj = latlngs[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+  function notamsAtPoint(lat, lon) {
+    const layers = state.notamGeomLayers || [];
+    const found = [];
+    // Dari yang digambar terakhir (paling atas) supaya urutan daftar = urutan tumpukan.
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const layer = layers[i];
+      if (!layer._notamProps || !layer._notamRing) continue;
+      if (layer._notamBounds && !layer._notamBounds.contains([lat, lon])) continue;
+      if (notamRingContains(layer._notamRing, lat, lon)) found.push(layer._notamProps);
+    }
+    return found;
+  }
+  function buildNotamListHtml(candidates, latlng) {
+    let h = '<div style="min-width:230px;font-family:var(--font-mono);">';
+    h += '<div style="font-weight:800;color:var(--text-primary);">' + esc(candidates.length) + ' NOTAM di titik ini</div>';
+    h += '<div style="color:var(--text-muted);font-size:10px;margin:2px 0 6px;">' + esc(Number(latlng.lat).toFixed(4)) + ', ' + esc(Number(latlng.lng).toFixed(4)) + ' — pilih satu untuk detail</div>';
+    candidates.forEach((p, i) => {
+      const color = p.risk === 'HIGH' ? 'var(--status-critical)' : p.risk === 'MEDIUM' ? 'var(--status-warning)' : 'var(--status-safe)';
+      let meta = esc(p.active ? 'ACTIVE' : 'EXPIRED');
+      if (p.radiusNm) meta += ' · ◯ ' + esc(p.radiusNm) + ' NM';
+      if (p.polygon && p.polygon.length >= 3) meta += ' · △ ' + esc(p.polygon.length) + ' pts';
+      h += '<button type="button" class="fir-notam-pick" data-index="' + i + '" style="display:block;width:100%;text-align:left;margin:3px 0;padding:4px 6px;border:1px solid var(--border-medium);border-radius:4px;background:transparent;cursor:pointer;font:inherit;color:var(--text-primary);">'
+        + '<span style="color:' + color + ';">●</span> ' + esc(p.location) + ' - ' + esc(p.number)
+        + '<br><span style="color:var(--text-muted);font-size:10px;">' + meta + '</span></button>';
+    });
+    h += '</div>';
+    return h;
+  }
+  function openNotamListPopup(candidates, latlng) {
+    if (!state.map) return;
+    if (state.notamPopup) state.map.closePopup(state.notamPopup);
+    state.notamPickList = candidates;
+    state.notamPickAnchor = { lat: latlng.lat, lng: latlng.lng };
+    state.notamPopup = L.popup({ className:'fir-notam-popup', maxWidth:340 })
+      .setLatLng([latlng.lat, latlng.lng]).setContent(buildNotamListHtml(candidates, latlng)).openOn(state.map);
+    // Leaflet memanggil stopPropagation() pada kontainer popup (klik di dalam popup
+    // tidak sampai ke peta/document), jadi listener dipasang di elemen popup itu sendiri.
+    const el = state.notamPopup.getElement();
+    if (el) el.addEventListener('click', onNotamPickClick);
+  }
+  function onNotamPickClick(e) {
+    const btn = (e.target && e.target.closest) ? e.target.closest('.fir-notam-pick') : null;
+    if (!btn) return;
+    const props = (state.notamPickList || [])[Number(btn.getAttribute('data-index'))];
+    if (!props || !state.notamPickAnchor) return;
+    clearNotamShape();
+    drawNotamShape(props, state.notamPickAnchor.lat, state.notamPickAnchor.lng);
+    openNotamPopup(props, state.notamPickAnchor.lat, state.notamPickAnchor.lng);
+  }
+  // Klik bentuk area: satu NOTAM -> popup detail, beberapa -> daftar pilihan.
+  function onNotamGeomClick(props, fallbackLat, fallbackLon, e) {
+    const latlng = (e && e.latlng) ? e.latlng : { lat: fallbackLat, lng: fallbackLon };
+    const candidates = notamsAtPoint(latlng.lat, latlng.lng);
+    if (candidates.indexOf(props) < 0) candidates.unshift(props);
+    if (candidates.length > 1) { openNotamListPopup(candidates, latlng); return; }
+    clearNotamShape();
+    drawNotamShape(props, fallbackLat, fallbackLon);
+    openNotamPopup(props, fallbackLat, fallbackLon);
   }
   function ensureNotamGroup() {
     if (!state.notamLayerGroup) { state.notamLayerGroup = L.layerGroup(); if (state.map) state.notamLayerGroup.addTo(state.map); }
@@ -10648,6 +10814,8 @@
     try { if (state.notamPopup) { state.map.closePopup(state.notamPopup); state.notamPopup = null; } } catch(e){}
     clearNotamGroup();
     state.notamGeomLayers = [];
+    state.notamPickList = null;
+    state.notamPickAnchor = null;
     let rendered = 0, geomCount = 0;
     const firFilter = state.mapFirFilter ? String(state.mapFirFilter).trim().toUpperCase() : null;
     (state.notams || []).forEach(n => {
@@ -10655,36 +10823,25 @@
       const lat = ll[0], lon = ll[1];
       const location = nfield(n,'location','Location','LOCATION','FIR','FIR ID','ICAO');
       if (firFilter && String(location || '').trim().toUpperCase() !== firFilter) return;
-      const number = nfield(n,'number','Number','NOTAM #','NOTAM NUMBER','ID');
       const risk = nfield(n,'risk','Risk','RISK LEVEL') || 'LOW';
-      const text = nfield(n,'text','Text','NOTAM Text','NOTAM_TEXT','NOTAMTEXT');
-      const center = nfield(n,'center','Center','CENTRE');
-      const radiusNm = nfield(n,'radiusNm','Radius NM','RADIUS');
-      const polygon = nfield(n,'polygon','Polygon','POLYGON');
-      const cls = nfield(n,'cls','Class','CLASS');
       const active = n.active !== false && String(n.status || '').toUpperCase() !== 'EXPIRED';
       const radius = !active ? 4 : risk === 'HIGH' ? 9 : risk === 'MEDIUM' ? 7 : 5;
       const color = !active ? '#5a5f66' : risk === 'HIGH' ? '#ef5350' : risk === 'MEDIUM' ? '#fb923c' : '#34d399';
-      const props = {
-        location: location !== undefined ? location : n.location,
-        number: number !== undefined ? number : n.number,
-        cls: cls || null, active, risk, text,
-        effectiveDate: n.effectiveDate || null, expirationDate: n.expirationDate || null,
-        center: (Array.isArray(center) && center.length === 2) ? center : [lon, lat],
-        radiusNm: radiusNm || null,
-        polygon: normalizePolygon(polygon !== undefined ? polygon : n.polygon)
-      };
+      const props = notamShapeProps(n, lat, lon);
       const ring = buildNotamGeom(props);
       if (ring.length >= 3 && state.showNotams) {
         const latlngs = ring.map(c => [c[1],c[0]]);
         const geom = L.polygon(latlngs, { color, weight: active?2:1, dashArray:'4 3', fillColor:color, fillOpacity: active?0.12:0.05 });
+        geom._notamProps = props;
+        geom._notamRing = latlngs;
+        geom._notamBounds = geom.getBounds();
         geom.bindTooltip(String(props.location != null ? props.location : location), { className:'notam-tooltip' });
-        geom.on('click', () => { clearNotamShape(); drawNotamShape(props); openNotamPopup(props, lat, lon); });
+        geom.on('click', (e) => onNotamGeomClick(props, lat, lon, e));
         geom.addTo(ensureNotamGroup()); state.notamGeomLayers.push(geom); geomCount++;
       }
       const marker = L.circleMarker([lat,lon], { pane:'notam-points', radius, color:'#0b0d12', weight: active?1.5:0.5, fillColor:color, fillOpacity: state.showNotams ? 0.9 : 0 });
       marker.bindTooltip(String(props.location != null ? props.location : location), { direction:'top', offset:[0,-radius], className:'notam-tooltip' });
-      marker.on('click', () => { clearNotamShape(); drawNotamShape(props); openNotamPopup(props, lat, lon); });
+      marker.on('click', () => { clearNotamShape(); drawNotamShape(props, lat, lon); openNotamPopup(props, lat, lon); });
       if (state.showNotams) marker.addTo(ensureNotamGroup());
       rendered++;
     });
@@ -11375,21 +11532,9 @@
       const ll = getNotamLatLon(match);
       if (!ll) return;
       const lat = ll[0], lon = ll[1];
-      const props = {
-        location: match.location != null ? match.location : match.Location,
-        number: match.number != null ? match.number : match['NOTAM #'],
-        cls: match.cls || null,
-        active: match.active !== false,
-        risk: match.risk || 'LOW',
-        text: match.text || match['NOTAM Text'] || '',
-        effectiveDate: match.effectiveDate || null,
-        expirationDate: match.expirationDate || null,
-        center: (Array.isArray(match.center) && match.center.length === 2) ? match.center : [lon, lat],
-        radiusNm: match.radiusNm || null,
-        polygon: normalizePolygon(match.polygon)
-      };
+      const props = notamShapeProps(match, lat, lon);
       clearNotamShape();
-      drawNotamShape(props);
+      drawNotamShape(props, lat, lon);
       state.map.setView([lat, lon], 8);
       openNotamPopup(props, lat, lon);
       setTimeout(() => { if (state.map) state.map.invalidateSize(); }, 120);
