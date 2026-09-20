@@ -7,8 +7,20 @@
  * Outbound calls are not restricted, so the direction is reversed: this script
  * reads the sheet as YOU and pushes the grid to the Worker.
  *
- * BOUND TO THE SHEET (normal use)
- * ------------------------------
+ * PUSHING WITHOUT THE EDITOR (the normal way)
+ * -------------------------------------------
+ * Deploy the script once as a web app (Execute as: Me, Who has access: Anyone
+ * within AirAsia — "Anyone" is not offered in this Workspace), then bookmark:
+ *
+ *   https://script.google.com/a/macros/airasia.com/s/<DEPLOYMENT_ID>/exec?token=<TOKEN>&action=push
+ *
+ * Clicking that bookmark pushes immediately and shows whether it worked. The
+ * Worker never calls this URL — the deployment exists so a logged-in operator
+ * can trigger a push with one click. The token in the URL is what keeps it
+ * closed to everyone else.
+ *
+ * BOUND TO THE SHEET (if you have edit access)
+ * -------------------------------------------
  * Create it from inside the spreadsheet: Extensions -> Apps Script. Then an
  * "AWQ Cloud" menu appears on the sheet:
  *
@@ -16,13 +28,11 @@
  *   Check setup                   which account, which sheet, is it reachable
  *   15-minute schedule ON/OFF     optional; use it only if you want it automatic
  *
- * Pushing by hand is the intended default: the cargo desk clicks the menu right
- * after updating the plan, which is the moment the data actually changes.
- *
  * STANDALONE (also supported)
  * ---------------------------
  * The same file works from a standalone project created at script.google.com —
- * the menu simply does not exist there, so run pushCgoPlan from the editor.
+ * the menu simply does not exist there, so run pushCgoPlan from the editor, or
+ * use the bookmark above.
  *
  * SETUP (full instructions in docs/cgo-plan-sync.md)
  * --------------------------------------------------
@@ -229,8 +239,16 @@ function readPlanSheet_() {
 }
 
 /**
- * Manual check from a browser inside the domain only, if a web app deployment
- * exists. The Worker does not call this — the push above is the working path.
+ * Browser entry point. Two uses:
+ *
+ *   ?token=...&action=push   push now and show a readable confirmation.
+ *                            This is what the bookmark points at, so the
+ *                            operator never has to open the script editor.
+ *   ?token=...&ping=1        prove the deployment and token work
+ *   ?token=...               show the sheet grid as JSON (diagnostic)
+ *
+ * Only the token holder can reach any of it, and the deployment is limited to
+ * the AirAsia domain, so this is not a public endpoint.
  */
 function doGet(event) {
   try {
@@ -239,6 +257,7 @@ function doGet(event) {
     if (!expected) return respond({ ok: false, error: TOKEN_PROPERTY + ' is not set in this script\'s properties' });
     if (!constantTimeEquals(String(parameters.token || ''), expected)) return respond({ ok: false, error: 'unauthorized' });
     if (String(parameters.ping || '') === '1') return respond({ ok: true, pong: true });
+    if (String(parameters.action || '') === 'push') return pushResultPage_();
 
     var read = readPlanSheet_();
     if (read.error) return respond({ ok: false, error: read.error });
@@ -252,6 +271,54 @@ function doGet(event) {
   } catch (error) {
     return respond({ ok: false, error: String((error && error.message) || error) });
   }
+}
+
+/** Runs the push and renders the outcome for whoever clicked the bookmark. */
+function pushResultPage_() {
+  var result = pushCgoPlan();
+  if (result.ok) {
+    return htmlPage_(
+      'CGO plan pushed',
+      result.rows + ' rows sent from "' + escapeHtml_(result.sheetName || 'the sheet') + '".',
+      'Switch back to the flight board and run Sync CGO Data.',
+      true
+    );
+  }
+  return htmlPage_(
+    'CGO push failed',
+    escapeHtml_(result.detail || 'unknown error'),
+    'Open the Apps Script project and check the Execution log for the full detail.',
+    false
+  );
+}
+
+function htmlPage_(title, message, hint, ok) {
+  var accent = ok ? '#34d399' : '#fb7185';
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    + '<title>' + escapeHtml_(title) + '</title><style>'
+    + 'body{margin:0;min-height:100vh;display:grid;place-items:center;background:#07101d;color:#f8fafc;'
+    + 'font-family:system-ui,-apple-system,Segoe UI,sans-serif}'
+    + 'main{max-width:460px;padding:32px;text-align:center}'
+    + 'h1{margin:0 0 12px;font-size:22px;color:' + accent + '}'
+    + 'p{margin:0 0 10px;line-height:1.6;color:#cbd5e1}'
+    + '.hint{color:#94a3b8;font-size:14px}'
+    + 'button{margin-top:20px;padding:12px 20px;border:0;border-radius:8px;background:#334155;color:#f8fafc;'
+    + 'font:inherit;font-weight:700;cursor:pointer}'
+    + '</style></head><body><main>'
+    + '<h1>' + escapeHtml_(title) + '</h1>'
+    + '<p>' + message + '</p>'
+    + '<p class="hint">' + hint + '</p>'
+    + '<button onclick="window.close()">Close this tab</button>'
+    + '</main></body></html>';
+}
+
+function escapeHtml_(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function activeEmail_(user) {

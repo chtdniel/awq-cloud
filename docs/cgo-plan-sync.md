@@ -59,40 +59,51 @@ Sync requires the **registered** tier (it writes) and a valid CSRF token. A `rea
 
 ### 1. Configure the Apps Script
 
-Create the script **inside the CGO PLAN spreadsheet** — **Extensions → Apps Script** — so it can add a menu to the sheet. (That requires edit access to the sheet; see *Standalone* below if you only have view access.)
+Create the script either **inside the CGO PLAN spreadsheet** (**Extensions → Apps Script**, which needs edit access and adds an on-sheet menu) or as a project at [script.google.com](https://script.google.com). Both run, push, and diagnose identically; only the menu differs.
 
 1. Replace the contents of `Code.gs` with [`integrations/cgo-bridge/Code.gs`](../integrations/cgo-bridge/Code.gs).
-2. **Project Settings → Script properties**:
+2. **Project Settings → Script properties**: add `CGO_BRIDGE_TOKEN` = the shared token, the same value as the Cloudflare secret. The other properties are optional — leave them out rather than creating them empty (Apps Script refuses an empty value).
 
-   | Property | Value |
-   |---|---|
-   | `CGO_BRIDGE_TOKEN` | the shared token — the same value as the Cloudflare secret |
-   | `WORKER_INGEST_URL` | optional; defaults to `https://awq.christiandaniel.my.id/api/cgo-ingest` |
-   | `CGO_SHEET_ID` | optional; only for a standalone project on another sheet |
-   | `CGO_SHEET_NAME` | optional; defaults to the first tab |
+   | Property | Required | Notes |
+   |---|---|---|
+   | `CGO_BRIDGE_TOKEN` | yes | must equal the Cloudflare secret |
+   | `WORKER_INGEST_URL` | no | defaults to `https://awq.christiandaniel.my.id/api/cgo-ingest` |
+   | `CGO_SHEET_ID` | no | only for a standalone project on another sheet |
+   | `CGO_SHEET_NAME` | no | defaults to the first tab |
 
-3. Reload the spreadsheet. An **AWQ Cloud** menu appears in the menu bar.
-4. Click **AWQ Cloud → Check setup**. Authorise when Google prompts, then read the result — it must say `Spreadsheet : OK`. If it says `FAILED`, this account cannot open the sheet and every push will fail the same way.
-5. Click **AWQ Cloud → Push CGO plan now**. A healthy answer is `HTTP 200 {"ok":true,…}` with the row and entry counts.
+3. Run **`diagnose`** once and authorise when prompted. It must say `Spreadsheet : OK`.
+4. Run **`pushCgoPlan`** once. The log must show `Worker answered HTTP 200: {"ok":true,…}`.
 
-**That is the whole loop.** Push whenever the plan changes; the board syncs from the last push.
+### 2. Bookmark the push (so the editor is never needed again)
 
-### Optional: automatic pushing
+If the script is **standalone**, one click from the browser toolbar replaces the editor entirely:
 
-If nobody wants to remember the menu, add the schedule:
+1. **Deploy → New deployment → Web app**
+   - *Execute as:* **Me**
+   - *Who has access:* **Anyone within AirAsia** — this Workspace does not offer *Anyone*, and that is fine: you are the one clicking, not the Worker.
+2. Copy the **`/exec`** URL.
+3. Bookmark this, with the token filled in:
 
-- **AWQ Cloud → Turn 15-minute schedule ON** — pushes every 15 minutes, runs as the account that enabled it.
-- **AWQ Cloud → Turn schedule OFF** — back to manual.
+   ```
+   <URL_EXEC>?token=<TOKEN>&action=push
+   ```
+
+4. Click it once to verify: a page appears saying **CGO plan pushed** with the row count.
+
+From then on: **click the bookmark → close the tab → Sync CGO Data on the board.**
+
+> After any later edit to `Code.gs`, publish it with **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. Editing the existing deployment keeps the same URL, so the bookmark survives.
+
+### 3. Optional: automatic pushing
+
+Nobody has to click anything if the plan is pushed on a schedule:
+
+- **AWQ Cloud → Turn 15-minute schedule ON** (bound script), or run `installCgoTrigger` from the editor.
+- Off again with **Turn schedule OFF** / `removeCgoTrigger`.
 
 Change the interval with `TRIGGER_MINUTES` at the top of `Code.gs` (Apps Script's minimum is 1 minute).
 
-### Standalone project instead
-
-If you do not have edit access to the sheet, the same file also works from a project created at [script.google.com](https://script.google.com) — there is simply no menu, so run `pushCgoPlan` from the editor. Set `CGO_SHEET_ID` unless you are reading the AWQ default sheet.
-
-> A web app **deployment is not needed at all** for the push to work — neither bound nor standalone. Any existing web-app deployment can be left alone or deleted.
-
-### 2. Configure Cloudflare Pages
+### 4. Configure Cloudflare Pages
 
 Pages → the project → **Settings → Environment variables → Production**:
 
@@ -104,7 +115,7 @@ Then **redeploy** — Pages reads environment variables at deployment time. `CGO
 
 > Only **Secrets** can be managed from the dashboard, because this project's plain variables are managed through `wrangler.toml`.
 
-### 3. Verify
+### 5. Verify
 
 - The sheet menu's **Push CGO plan now** reports `CGO plan pushed` with the counts.
 - On the board, **Sync CGO Data** shows `[ CGO SYNC ]` with the weights and the snapshot's age.

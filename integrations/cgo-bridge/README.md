@@ -6,7 +6,19 @@ So this script does the work: it reads the CGO PLAN sheet as **you** and pushes 
 
 Setup steps: [`docs/cgo-plan-sync.md`](../../docs/cgo-plan-sync.md).
 
-## Bound to the sheet (normal use)
+## Pushing without the editor (the normal way)
+
+Deploy the script once as a web app — **Deploy → New deployment → Web app**, *Execute as: Me*, *Who has access: Anyone within AirAsia* ("Anyone" is not offered in this Workspace) — then bookmark:
+
+```
+https://script.google.com/a/macros/airasia.com/s/<DEPLOYMENT_ID>/exec?token=<TOKEN>&action=push
+```
+
+Clicking the bookmark pushes immediately and shows a readable confirmation page. The Worker never calls this URL; the deployment exists so a logged-in operator can trigger a push in one click. The token keeps it closed to everyone else, and the AirAsia-domain restriction keeps it inside the company.
+
+> After editing `Code.gs`, publish the change with **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. Editing the existing deployment (rather than creating a new one) keeps the same URL, so the bookmark keeps working.
+
+## Bound to the sheet (if you have edit access)
 
 Create it from inside the spreadsheet — **Extensions → Apps Script** — so an **AWQ Cloud** menu appears on the sheet:
 
@@ -42,7 +54,7 @@ The same file also works from a project created at [script.google.com](https://s
 | `pushCgoPlan()` | Reads the sheet and pushes it. Returns `{ok, status, detail}`. |
 | `installCgoTrigger()` / `removeCgoTrigger()` | The optional 15-minute schedule. |
 | `diagnose()` | The full setup report. |
-| `doGet(e)` | Manual browser check if a web-app deployment exists. **The Worker does not call this.** |
+| `doGet(e)` | `?action=push` pushes and returns a confirmation page (this is what the bookmark opens); `?ping=1` checks the deployment; otherwise it returns the grid as JSON. **The Worker does not call this.** |
 
 ## What the Worker answers
 
