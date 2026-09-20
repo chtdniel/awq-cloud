@@ -84,6 +84,46 @@ function doGet(event) {
   }
 }
 
+/**
+ * Diagnostic — run this from the Apps Script editor when the bridge answers
+ * "you do not have permission to access the requested document".
+ *
+ * It reports which account the script runs as and whether that account can
+ * actually open the CGO PLAN spreadsheet. Select `diagnose` in the function
+ * dropdown, click Run, then open the Execution log.
+ *
+ * The first run also triggers the authorization prompt — that is expected.
+ */
+function diagnose() {
+  var properties = PropertiesService.getScriptProperties();
+  var configured = properties.getProperty(SHEET_ID_PROPERTY);
+  var sheetId = String(configured || DEFAULT_SHEET_ID).trim();
+  var lines = [];
+  lines.push('Account signed in : ' + activeEmail_(Session.getActiveUser()));
+  lines.push('Effective user    : ' + activeEmail_(Session.getEffectiveUser()));
+  lines.push('Token configured  : ' + (String(properties.getProperty(TOKEN_PROPERTY) || '').trim() ? 'yes' : 'NO (set CGO_BRIDGE_TOKEN)'));
+  lines.push('Sheet id in use   : ' + sheetId + '  [' + (configured ? 'from script property CGO_SHEET_ID' : 'built-in default') + ']');
+  try {
+    var spreadsheet = SpreadsheetApp.openById(sheetId);
+    lines.push('Spreadsheet       : OK - "' + spreadsheet.getName() + '"');
+    var sheet = spreadsheet.getSheets()[0];
+    lines.push('First worksheet   : "' + sheet.getName() + '" (' + sheet.getDataRange().getNumRows() + ' rows)');
+  } catch (error) {
+    lines.push('Spreadsheet       : FAILED - ' + String((error && error.message) || error));
+  }
+  var report = lines.join('\n');
+  Logger.log(report);
+  return report;
+}
+
+function activeEmail_(user) {
+  try {
+    return String(user.getEmail() || '(not available)');
+  } catch (error) {
+    return '(unreadable)';
+  }
+}
+
 function respond(payload) {
   // Apps Script cannot set an HTTP status code, so the caller reads `ok`
   // instead of relying on a 401/500.

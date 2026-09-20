@@ -59,9 +59,24 @@ export async function readBridgeValues(env, { fetchImpl = fetch, now = Date.now(
   try {
     payload = JSON.parse(text);
   } catch {
-    // A deployment whose access is not "Anyone" answers with a Google sign-in
-    // page and HTTP 200, so this message is the one that actually helps.
-    throw new Error('The CGO bridge did not return JSON. Check that the Apps Script deployment has "Who has access: Anyone" and that CGO_BRIDGE_URL is its /exec URL.');
+    // Anything that is not JSON is a Google page, and which page it is decides
+    // the fix. Two very different causes look identical from here otherwise:
+    //   - a sign-in page: the deployment is not "Who has access: Anyone"
+    //   - a permission error: the script runs as an account that cannot open
+    //     the spreadsheet (wrong "Execute as", or the wrong Google account)
+    // So the visible text is passed through instead of guessing one of them.
+    const visible = text
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;|&#160;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const detail = visible ? ` Google answered: "${visible.slice(0, 160)}".` : '';
+    const hint = /izin|permission|forbidden/i.test(visible)
+      ? ' The Apps Script cannot open the CGO PLAN spreadsheet. Open the script editor, run diagnose(), and check which account it runs as — it must be an account that can open that sheet.'
+      : ' Check that the Apps Script deployment has "Who has access: Anyone" and that CGO_BRIDGE_URL is its /exec URL.';
+    throw new Error(`The CGO bridge did not return JSON.${detail}${hint}`);
   }
   if (!payload || payload.ok !== true) {
     const detail = payload && payload.error ? payload.error : 'unknown error';

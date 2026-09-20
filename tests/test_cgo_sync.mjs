@@ -311,6 +311,34 @@ await checkAsync('readBridgeValues explains a deployment that is not public', as
   );
 });
 
+await checkAsync('readBridgeValues names the permission failure and points at diagnose()', async () => {
+  // The Apps Script runs, but as an account that cannot open the spreadsheet.
+  // Google answers with its own error page, so the message must not blame the
+  // deployment's access setting.
+  const permissionPage = '<!DOCTYPE html><html><head><style>body{}</style></head><body>'
+    + '<div class="errorMessage">Sorry, you do not have permission to access the requested document.</div>'
+    + '<script>window.x=1;</script></body></html>';
+  await assert.rejects(
+    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok' }, {
+      fetchImpl: async () => new Response(permissionPage, { status: 200, headers: { 'Content-Type': 'text/html' } })
+    }),
+    error => /did not return JSON/.test(error.message)
+      && /do not have permission/.test(error.message)
+      && /run diagnose\(\)/.test(error.message)
+      && !/Who has access: Anyone/.test(error.message)
+  );
+});
+
+await checkAsync('readBridgeValues recognises the Indonesian permission page', async () => {
+  const indonesian = '<html><body><p>Maaf, Anda tidak memiliki izin untuk mengakses dokumen yang diminta.</p></body></html>';
+  await assert.rejects(
+    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok' }, {
+      fetchImpl: async () => new Response(indonesian, { status: 200, headers: { 'Content-Type': 'text/html' } })
+    }),
+    /run diagnose\(\)/
+  );
+});
+
 await checkAsync('readBridgeValues names the token mismatch', async () => {
   await assert.rejects(
     readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'wrong' }, { fetchImpl: async () => bridgeResponse({ ok: false, error: 'unauthorized' }) }),
