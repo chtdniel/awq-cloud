@@ -64,12 +64,20 @@ window.google.script = window.google.script || {};
     gate.id = 'awq-login-gate';
     gate.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#07101d;display:grid;place-items:center;padding:24px;font-family:system-ui,sans-serif;color:#f8fafc';
     gate.innerHTML = '<form id="awq-login-form" style="width:min(420px,100%);padding:32px;border:1px solid #334155;border-radius:16px;background:#0f172a;box-shadow:0 24px 80px #0008">' +
-      '<div style="font:800 12px/1 monospace;letter-spacing:.16em;color:#fb7185">AWQ OCC / AUTHENTICATION</div>' +
+      '<div style="font:800 12px/1 monospace;letter-spacing:.16em;color:#fb7185">AWQ CLOUD BRIEFING / AUTHENTICATION</div>' +
       '<h1 style="margin:18px 0 8px;font-size:28px">Sign in</h1><p style="color:#94a3b8;margin:0 0 24px">Use your assigned AWQ Cloud account.</p>' +
       '<label style="display:block;font-size:13px;margin:14px 0 6px">Email</label><input id="awq-login-email" type="email" autocomplete="username" required style="width:100%;padding:12px;border-radius:8px;border:1px solid #475569;background:#111827;color:#fff;box-sizing:border-box">' +
       '<label style="display:block;font-size:13px;margin:14px 0 6px">Password</label><input id="awq-login-password" type="password" autocomplete="current-password" required style="width:100%;padding:12px;border-radius:8px;border:1px solid #475569;background:#111827;color:#fff;box-sizing:border-box">' +
       '<button type="submit" style="width:100%;margin-top:22px;padding:12px;border:0;border-radius:8px;background:#fb7185;color:#19040a;font-weight:800;cursor:pointer">Sign in</button>' +
-      '<p id="awq-login-error" role="alert" style="min-height:20px;color:#fda4af;margin:14px 0 0;font-size:13px"></p></form>';
+      '<p id="awq-login-error" role="alert" style="min-height:20px;color:#fda4af;margin:14px 0 0;font-size:13px"></p>' +
+      // Public legal notice. This gate is the ONLY thing an unauthenticated
+      // visitor (and a Google OAuth reviewer) sees, and the consent screen
+      // requires the homepage to identify the app and link its privacy policy.
+      // Links only: adding a <button> here would break tests that click
+      // '#awq-login-form button' under strict mode.
+      '<p style="margin:18px 0 0;padding-top:14px;border-top:1px solid #334155;color:#94a3b8;font-size:12px;line-height:1.65">' +
+      'AWQ Cloud Briefing is a flight dispatch briefing workspace for flight watch, NOTAM, TAF, weather, FIR and crew briefing reports. ' +
+      '<a href="/privacy" style="color:#fb7185">Privacy Policy</a> &middot; <a href="/terms" style="color:#fb7185">Terms of Service</a></p></form>';
     document.body.appendChild(gate);
     document.getElementById('awq-login-form').addEventListener('submit', async function (event) {
       event.preventDefault();

@@ -26,7 +26,7 @@ const publicDirectory = resolve('public');
 const contentTypes = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png' };
 async function asset(request) {
   const pathname = decodeURIComponent(new URL(request.url).pathname);
-  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname));
+  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname === '/app' ? '/app/index.html' : pathname));
   if (!filename.startsWith(publicDirectory + '\\') && !filename.startsWith(publicDirectory + '/')) return new Response('Forbidden', { status: 403 });
   try { return new Response(await readFile(filename), { headers: { 'Content-Type': contentTypes[extname(filename)] || 'application/octet-stream' } }); }
   catch { return new Response('Not found', { status: 404 }); }
@@ -91,7 +91,7 @@ async function checkAsync(label, fn) {
 const resetCalls = () => rpcCalls.filter(call => call.method === 'adminResetPassword').length;
 
 try {
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.goto(baseUrl + '/app', { waitUntil: 'domcontentloaded' });
   // Gate admin menentukan #nav-settings tampil; isSettingsAdmin diset server-side.
   await page.waitForFunction(() => window.isSettingsAdmin === true, null, { timeout: 20000 });
 

@@ -1,4 +1,12 @@
-function doGet() {
+function doGet(e) {
+  var event = e || {};
+  if (event.parameter && event.parameter.page === 'report') {
+    return HtmlService.createTemplateFromFile('Report')
+      .evaluate()
+      .setTitle('AWQ OCC | Report')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
     .setTitle('AWQ OCC | Dispatch Dashboard')
@@ -57,6 +65,32 @@ function requireAuthorized() {
   if (!isAuthorizedUser()) {
     throw new Error('UNAUTHORIZED: You do not have permission to perform this operation.');
   }
+}
+
+/**
+ * Gate B prerequisite diagnostic (read-only).
+ * Reports operator/effective identity, template + REPORT_AUDIT availability, and
+ * whether the session passes OCC_ALLOWED_EMAILS. Used to verify operator identity
+ * and template/audit access in the nonproduction deployment before full implementation.
+ */
+function reportHandoffDiagnostic() {
+  var out = { ok: true, errors: [] };
+  try { out.activeUser = Session.getActiveUser().getEmail() || ''; } catch (e) { out.errors.push('activeUser: ' + e.message); }
+  try { out.effectiveUser = Session.getEffectiveUser().getEmail() || ''; } catch (e) { out.errors.push('effectiveUser: ' + e.message); }
+  try {
+    var props = PropertiesService.getScriptProperties();
+    out.spreadsheetId = props.getProperty('spreadsheetId') || '';
+    out.allowedEmailsConfigured = !!(props.getProperty('OCC_ALLOWED_EMAILS') || '').trim();
+  } catch (e) { out.errors.push('properties: ' + e.message); }
+  try {
+    var ss = getActiveSS();
+    out.spreadsheetName = ss.getName();
+    out.templates = {};
+    ['CBR1', 'CBR2', 'CBR4'].forEach(function (name) { out.templates[name] = !!ss.getSheetByName(name); });
+    out.auditSheetExists = !!ss.getSheetByName('REPORT_AUDIT');
+  } catch (e) { out.errors.push('spreadsheet: ' + e.message); }
+  try { out.isAuthorized = isAuthorizedUser(); } catch (e) { out.errors.push('authz: ' + e.message); }
+  return out;
 }
 
 /**

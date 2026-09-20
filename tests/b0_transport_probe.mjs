@@ -91,7 +91,7 @@ async function run(browserType, name) {
     browser = await browserType.launch();
     const context = await browser.newContext();
     const page = await context.newPage();
-    await page.goto(BASE);
+    await page.goto(BASE + 'app');
     const popupPromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
     await page.click('#btn-download-sheet');
     const popup = await popupPromise;

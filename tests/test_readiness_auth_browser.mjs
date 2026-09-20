@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 const publicRoot = join(process.cwd(), 'public');
 const mimeTypes = { '.css': 'text/css', '.html': 'text/html', '.js': 'application/javascript', '.svg': 'image/svg+xml' };
 const server = createServer(function(request, response) {
-  var relativePath = request.url === '/' ? 'index.html' : request.url.replace(/^\//, '').split('?')[0];
+  var relativePath = request.url === '/' ? 'index.html' : request.url === '/app' ? 'app/index.html' : request.url.replace(/^\//, '').split('?')[0];
   var filePath = normalize(join(publicRoot, relativePath));
   if (!filePath.startsWith(publicRoot) || !statSync(filePath, { throwIfNoEntry: false })) {
     response.writeHead(404); response.end(); return;
@@ -65,7 +65,7 @@ async function verifyScenario(name, initiallyLoggedIn) {
     return route.fulfill({ json: { data: {} } });
   });
 
-  await page.goto(baseUrl, { waitUntil: 'load' });
+  await page.goto(baseUrl + '/app', { waitUntil: 'load' });
   await page.waitForLoadState('networkidle');
   if (!initiallyLoggedIn) {
     await page.locator('#awq-login-gate').waitFor();

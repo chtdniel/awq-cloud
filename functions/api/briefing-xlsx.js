@@ -248,8 +248,8 @@ function addDateCellStyle(get, templateStyleId) {
 function dateCellValidationXml() {
     return '<dataValidations count="1"><dataValidation type="date" operator="between" allowBlank="1"'
         + ' showInputMessage="1" showErrorMessage="1" errorStyle="stop"'
-        + ' errorTitle="Tanggal tidak valid" error="Masukkan tanggal yang valid, contoh 18-SEP-2026."'
-        + ' promptTitle="Tanggal briefing" prompt="Ketik atau pilih tanggal (DD-MMM-YYYY)."'
+        + ' errorTitle="Invalid date" error="Enter a valid date, for example 18-SEP-2026."'
+        + ' promptTitle="Briefing date" prompt="Type or select a date (DD-MMM-YYYY)."'
         + ' sqref="' + DATE_CELL_REF + '">'
         + '<formula1>DATE(2000,1,1)</formula1><formula2>DATE(2100,12,31)</formula2>'
         + '</dataValidation></dataValidations>';

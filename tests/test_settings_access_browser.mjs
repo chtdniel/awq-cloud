@@ -14,6 +14,7 @@ const server = createServer(async (req, res) => {
   try {
     let pathname = decodeURIComponent(new URL(req.url, 'http://local').pathname);
     if (pathname === '/') pathname = '/index.html';
+    if (pathname === '/app') pathname = '/app/index.html';
     const file = path.resolve(root, '.' + pathname);
     if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
     const body = await readFile(file);
@@ -68,7 +69,7 @@ async function scenario(tier, options = {}) {
     return ok({});
   });
 
-  await page.goto(base + '/index.html');
+  await page.goto(base + '/app');
   // The navbar gate resolves asynchronously before the tab is safe to open.
   if (options.waitForGate) await page.waitForFunction(() => window.isSettingsAdmin !== null).catch(() => {});
 
@@ -151,7 +152,7 @@ for (const tier of ['registered', 'readonly']) {
     if (method === 'getSettingsAccessInfo') return route.fulfill({ json: { data: { ok: true, user: 'viewer@example.com', tier: 'registered', role: 'registered', isAuthorized: true, canView: false, canEdit: true } } });
     return route.fulfill({ status: 403, json: { error: 'Forbidden', code: 'ADMIN_REQUIRED' } });
   });
-  await page.goto(base + '/index.html');
+  await page.goto(base + '/app');
   await page.waitForFunction(() => window.isSettingsAdmin === false).catch(() => {});
   // Force the blocked path directly.
   await page.evaluate(() => { if (typeof window.switchTab === 'function') window.switchTab('settings'); });

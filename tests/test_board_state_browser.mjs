@@ -10,7 +10,7 @@ import { build } from 'esbuild';
 // aktif tidak ikut termuat dan mulai dari nol. Sebabnya board hanya hidup di
 // localStorage; sekarang server (user_board_state) yang jadi sumber kebenaran.
 //
-// Test ini menjalankan klien sungguhan (public/index.html) di Chromium dengan
+// Test ini menjalankan klien sungguhan (public/app/index.html) di Chromium dengan
 // tiap skenario memakai profil browser bersih (localStorage kosong). Tiap
 // skenario sengaja punya DUA asersi independen — DOM dan efek samping
 // (cache lokal atau baris DB) — supaya tidak bisa lulus palsu kalau hidrasi
@@ -102,7 +102,7 @@ const publicDirectory = resolve('public');
 const contentTypes = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png' };
 async function asset(request) {
   const pathname = decodeURIComponent(new URL(request.url).pathname);
-  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname));
+  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname === '/app' ? '/app/index.html' : pathname));
   if (!filename.startsWith(publicDirectory + '\\') && !filename.startsWith(publicDirectory + '/')) return new Response('Forbidden', { status: 403 });
   try { return new Response(await readFile(filename), { headers: { 'Content-Type': contentTypes[extname(filename)] || 'application/octet-stream' } }); }
   catch { return new Response('Not found', { status: 404 }); }
@@ -178,7 +178,7 @@ async function scenario(name, { seed, expectStrips, expectRowIds, expectServerRo
   page.on('console', message => { if (message.type() === 'warning' || message.type() === 'error') warnings.push(message.text()); });
 
   try {
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.goto(baseUrl + '/app', { waitUntil: 'domcontentloaded' });
     // Penanda deterministik: render pertama di halaman ini terjadi SETELAH
     // hidrasi (initFlightData menunggu hydrateBoardState sebelum renderBoard).
     await page.waitForFunction(() => window.__boardRenders >= 1, null, { timeout: 20000 });

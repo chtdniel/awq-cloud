@@ -230,6 +230,19 @@
       margin-top: 6px;
       overflow-wrap: anywhere;
     }
+    /* Cakupan TAF: teks tetap ditampilkan, operator hanya diberi tahu bahwa masa
+       berlaku TAF tidak menutupi window leg — bukan badge status, bukan NO_DATA. */
+    .wx-coverage {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: var(--status-warning);
+      border-left: 2px solid var(--status-warning);
+      padding-left: 6px;
+      margin-top: 6px;
+      overflow-wrap: anywhere;
+    }
     .wx-ai-row {
       display: grid;
       grid-template-columns: 118px minmax(0, 1fr) auto;
@@ -416,18 +429,22 @@
     return t ? { hh: t.hh, label: t.label } : { hh: '', label: '' };
   }
 
-  // Instant UTC absolut satu titik flight. ISO sudah membawa tanggal; nilai legacy
-  // HH:MM mengambil tanggalnya dari flights.dof (YYYYMMDD) supaya window tetap
-  // punya tanggal, bukan hanya jam.
+  // Instant UTC absolut satu titik flight.
+  // TANGGAL diambil dari flights.dof (kolom yang dikendalikan operator), JAM dari
+  // nilai etd/eta. Urutan ini penting: tanggal yang menempel di etd/eta bisa basi
+  // berminggu-minggu — data produksi punya dof=20260917 dengan
+  // etd='2026-09-08T03:25:00.000Z' (selisih 9 hari, sampai 17 hari), dan itu
+  // menaruh window analisa di hari yang salah.
+  // Tanpa dof yang terbaca, tanggal di nilai waktu tetap dipakai.
   function wxFlightInstant(raw, dof) {
     const t = wxParseTime(raw);
     if (!t) return null;
-    if (t.utcMs !== null) return t.utcMs;
     const d = String(dof === null || dof === undefined ? '' : dof).replace(/[^0-9]/g, '');
-    if (d.length < 8) return null;
-    const y = +d.slice(0, 4), m = +d.slice(4, 6), day = +d.slice(6, 8);
-    if (!(m >= 1 && m <= 12) || !(day >= 1 && day <= 31)) return null;
-    return Date.UTC(y, m - 1, day, +t.hh, +t.mm);
+    if (d.length >= 8) {
+      const y = +d.slice(0, 4), m = +d.slice(4, 6), day = +d.slice(6, 8);
+      if (m >= 1 && m <= 12 && day >= 1 && day <= 31) return Date.UTC(y, m - 1, day, +t.hh, +t.mm);
+    }
+    return t.utcMs;
   }
 
   // TAF menulis hari+jam tanpa bulan ("1218/1400"). Anchor ke bulan terdekat
@@ -453,11 +470,34 @@
     return { hour: hour, instant: base === null ? null : base + shift * 3600000 };
   }
 
-  // Label window UTC untuk prompt AI: "08SEP 04:00Z → 07:50Z · ALT 08:00–11:00Z".
+  // Ketiga window satu flight sekaligus. Bila jam STA lebih awal dari jam STD,
+  // arrival-nya di hari berikutnya (dof + 1) — aturan yang sama dengan bar
+  // timeline Flight Board (`sta > std ? sta : sta + 1440`). Tanpa ini flight
+  // overnight dapat window ARR yang mendahului keberangkatannya sendiri.
+  function wxFlightWindows(f) {
+    const std = wxLegWindow(f.std, f.dof, 0);
+    const sta = wxLegWindow(f.sta, f.dof, 0);
+    if (std.instant !== null && sta.instant !== null && sta.instant < std.instant) sta.instant += 86400000;
+    const alt = {
+      hour: sta.hour === null ? null : (sta.hour + 1) % 24,
+      instant: sta.instant === null ? null : sta.instant + 3600000
+    };
+    return { std: std, sta: sta, alt: alt };
+  }
+
+  // Catatan cakupan TAF: hanya muncul saat masa berlaku TAF terbaca TAPI tidak
+  // menutupi window leg. Kondisi ini bukan "tidak ada TAF" — teks TAF tetap
+  // ditampilkan dan dianalisa; operator cukup diberi tahu bedanya.
+  function wxCoverageNote(coverage, valid, legLabel) {
+    if (coverage !== 'OUT') return '';
+    const e = window.escapeHtml;
+    const text = 'TAF ' + legLabel + ' VALID ' + (valid || '?') + ' — OUTSIDE FLIGHT WINDOW';
+    return '<div class="wx-coverage">' + (e ? e(text) : text) + '</div>';
+  }
+
+  // Label window UTC untuk prompt AI: "08SEP 04:00Z → 07:50Z · ALT 08:50–10:50Z".
   function wxWindowLabel(f) {
-    const dep = wxLegWindow(f.std, f.dof, 0);
-    const arr = wxLegWindow(f.sta, f.dof, 0);
-    const alt = wxLegWindow(f.sta, f.dof, 1);
+    const w = wxFlightWindows(f);
     const clock = (inst) => {
       if (inst === null) return '--:--';
       const d = new Date(inst);
@@ -469,9 +509,9 @@
       const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
       return wxPad2(d.getUTCDate()) + months[d.getUTCMonth()];
     };
-    return dayTag(dep.instant) + ' DEP ' + clock(dep.instant)
-      + ' · ARR ' + clock(arr.instant)
-      + ' · ALT ' + clock(alt.instant) + '–' + clock(alt.instant === null ? null : alt.instant + 2 * 3600000);
+    return dayTag(w.std.instant) + ' DEP ' + clock(w.std.instant)
+      + ' · ARR ' + clock(w.sta.instant)
+      + ' · ALT ' + clock(w.alt.instant) + '–' + clock(w.alt.instant === null ? null : w.alt.instant + 2 * 3600000);
   }
   // TAF timestamp mentah → label pendek yang bisa dibaca: ISO penuh "2026-09-11T17:00:00.000Z"
   // menjadi "17:00" bila hari ini (UTC), atau "11 17:00" bila beda tanggal.
@@ -775,7 +815,7 @@
         const opts = master ? master.innerHTML : '<option value="">Auto</option>';
         const rid = (rowIdx === undefined || rowIdx === null) ? -1 : rowIdx;
         return '<div class="wx-ai-head"><span class="wxv-cap">AI REVIEW · MODEL</span>'
-          + '<select class="wx-ai-model-sel" aria-label="Pilih model AI" onchange="window.wxAiDrawerModel(this, ' + rid + ')">' + opts + '</select></div>';
+          + '<select class="wx-ai-model-sel" aria-label="Select AI model" onchange="window.wxAiDrawerModel(this, ' + rid + ')">' + opts + '</select></div>';
       };
        window.wxAiCached = function(rowIdx) {
          const r = (window.wxAiResults || {})[rowIdx];
@@ -817,10 +857,11 @@
         const orig = btn ? btn.innerText : '';
         if (btn) { btn.disabled = true; btn.innerText = 'ANALYZING...'; }
         if (box) { box.style.display = 'grid'; box.innerHTML = '<div style="font-size:12px;opacity:.65;">ANALYZING... (you may switch tabs, result will be saved)</div>'; }
-        // Window per leg dari DB (jam + instant absolut hasil wxLegWindow).
-        const stdWindow = wxLegWindow(f.std, f.dof, 0);
-        const staWindow = wxLegWindow(f.sta, f.dof, 0);
-        const altWindow = wxLegWindow(f.sta, f.dof, 1);
+        // Window per leg dari DB (jam + instant absolut hasil wxFlightWindows).
+        const legWindows = wxFlightWindows(f);
+        const stdWindow = legWindows.std;
+        const staWindow = legWindows.sta;
+        const altWindow = legWindows.alt;
         const stdH = stdWindow.hour === null ? '' : wxPad2(stdWindow.hour);
         const staH = staWindow.hour === null ? '' : wxPad2(staWindow.hour);
         const altH = altWindow.hour === null ? '' : wxPad2(altWindow.hour);
@@ -1064,10 +1105,11 @@
         let kpiDanger = 0, kpiWarn = 0, kpiClear = 0, kpiNoData = 0;
 
         container.innerHTML = activeFlights.map((f, idx) => {
-          // Window per leg: jam-of-day + instant absolut (date-aware).
-          const stdWindow = wxLegWindow(f.std, f.dof, 0);
-          const staWindow = wxLegWindow(f.sta, f.dof, 0);
-          const altWindow = wxLegWindow(f.sta, f.dof, 1);
+          // Window per leg: jam-of-day + instant absolut (date-aware, rollover tengah malam).
+          const legWindows = wxFlightWindows(f);
+          const stdWindow = legWindows.std;
+          const staWindow = legWindows.sta;
+          const altWindow = legWindows.alt;
           const altWindowStart = altWindow.hour;
           const altWindowEnd = altWindowStart === null ? null : (altWindowStart + 2) % 24;
 
@@ -1117,6 +1159,7 @@
                   <div class="point-label">DEPARTURE · ${esc(f.depApt)}</div>
                   <div class="point-val">${esc(wxHourParts(f.std).label) || '--:--'}</div>
                   <div class="point-status">${getStatusLabel(depStatus)}</div>
+                  ${wxCoverageNote(f.tafDepCoverage, f.tafDepValid, 'DEP')}
                   ${depTrig ? '<div class="wx-trigger">' + depTrig + '</div>' : ''}
                   ${wxRefChips(depRefs)}
                 </div>
@@ -1125,6 +1168,7 @@
                   <div class="point-label">ARRIVAL · ${esc(f.arrApt)}</div>
                   <div class="point-val">${esc(wxHourParts(f.sta).label) || '--:--'}</div>
                   <div class="point-status">${getStatusLabel(arrStatus)}</div>
+                  ${wxCoverageNote(f.tafArrCoverage, f.tafArrValid, 'ARR')}
                   ${arrTrig ? '<div class="wx-trigger">' + arrTrig + '</div>' : ''}
                   ${wxRefChips(arrRefs)}
                 </div>
@@ -1133,6 +1177,7 @@
                   <div class="point-label">ALT WINDOW · ${esc(f.altApt) || '???'} · ${altWindowLabel}</div>
                   <div class="point-val">${altWindowLabel}</div>
                   <div class="point-status">${getStatusLabel(altStatus)}</div>
+                  ${wxCoverageNote(f.tafAltCoverage, f.tafAltValid, 'ALT')}
                   ${altTrig ? '<div class="wx-trigger">' + altTrig + '</div>' : ''}
                   ${wxRefChips(altRefs)}
                 </div>

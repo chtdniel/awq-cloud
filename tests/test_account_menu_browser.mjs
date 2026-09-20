@@ -24,7 +24,7 @@ try {
    if(method==='getAccessContext') data={user:'tester@example.com',tier:'admin',isAuthorized:true,canView:true,canEdit:true,canManageUsers:true};
    return route.fulfill({json:{data}});
   });
-  await page.goto(base);
+  await page.goto(base + '/app');
   const toggle=page.locator('#awq-account-toggle'), panel=page.locator('#awq-account-panel');
   await toggle.waitFor();
   assert.equal(await panel.isVisible(),false);

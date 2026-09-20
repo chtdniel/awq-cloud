@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>AWQ OCC | Report</title>
+  <style>
+    :root { --bg:#0b0f14; --panel:#111820; --fg:#d7e3f0; --muted:#8aa0b8; --ok:#6fdf8f; --err:#ff6b6b; --warn:#ffc46b; --accent:#5ec8ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; font-size:13.5px; line-height:1.6; padding:24px; }
+    h1 { font-size:13px; letter-spacing:.18em; color:var(--accent); margin:0 0 16px; text-transform:uppercase; }
+    h2 { font-size:12px; letter-spacing:.14em; color:var(--accent); text-transform:uppercase; margin:0 0 12px; }
+    #status { background:var(--panel); border:1px solid #233240; border-radius:8px; padding:16px; white-space:pre-wrap; min-height:150px; }
+    #status .ok { color:var(--ok); } #status .err { color:var(--err); } #status .warn { color:var(--warn); } #status .meta { color:var(--muted); }
+    #preview { margin-top:20px; background:var(--panel); border:1px solid #233240; border-radius:8px; padding:16px; }
+    .kv { display:flex; gap:12px; padding:3px 0; }
+    .kv b { color:var(--muted); font-weight:400; min-width:190px; }
+    .flt { padding:3px 0; }
+    .actions { margin-top:16px; display:flex; gap:12px; flex-wrap:wrap; }
+    button { font-family:inherit; font-weight:700; padding:10px 18px; cursor:pointer; border-radius:6px; border:1px solid #2c4257; background:#16232f; color:var(--fg); }
+    button:disabled { opacity:.5; cursor:default; }
+    #result { margin-top:16px; white-space:pre-wrap; }
+    a { color:var(--accent); }
+    .ok { color:var(--ok); } .err { color:var(--err); } .warn { color:var(--warn); }
+  </style>
+</head>
+<body>
+  <h1>AWQ OCC &mdash; Report Handoff (Web 1)</h1>
+  <div id="status">initializing&hellip;</div>
+
+  <div id="preview" style="display:none">
+    <h2>Report preview &mdash; operator confirmation required</h2>
+    <div id="preview-body"></div>
+    <div class="actions">
+      <button id="btn-confirm" type="button">GENERATE GOOGLE SHEET</button>
+      <button id="btn-check" type="button">CHECK REPORT STATUS</button>
+    </div>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    /*
+     * Gate B build: READY -> CONTEXT -> (recordReportReceived) -> ACCEPTED/REJECTED,
+     * then operator-confirmed generation via confirmReport, with CHECK REPORT STATUS.
+     * Transport contract (implementation plan §3) is unchanged from the B0 proof.
+     */
+
+    var el = document.getElementById('status');
+    var lines = [];
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+    function rec(msg, cls){ lines.push({ t: msg, c: cls||'meta' }); el.innerHTML = lines.map(function(l){ return '<div class="'+l.c+'">'+esc(l.t)+'</div>'; }).join(''); }
+    function ts(){ return new Date().toISOString(); }
+    function hasRunner(){ return !!(window.google && google.script && google.script.run); }
+
+    // Gate B prerequisite: identity/access diagnostic (guarded).
+    if (hasRunner()) {
+      google.script.run
+        .withSuccessHandler(function (r) { rec('DIAGNOSTIC ' + JSON.stringify(r), (r && r.errors && r.errors.length) ? 'warn' : 'ok'); })
+        .withFailureHandler(function (e) { rec('DIAGNOSTIC FAILED: ' + (e && e.message ? e.message : e), 'warn'); })
+        .reportHandoffDiagnostic();
+    } else {
+      rec('DIAGNOSTIC skipped (google.script.run unavailable in this context)', 'meta');
+    }
+
+    // B0 allowlist. Production adds https://awq-cloud.pages.dev (exact origin).
+    var WEB2_ORIGINS = [
+      'https://awq-cloud.pages.dev',
+      'http://localhost:8788', 'http://127.0.0.1:8788',
+      'http://localhost:3000', 'http://127.0.0.1:3000'
+    ];
+
+    var transfer = {
+      nonce: null, expectedOrigin: null, expectedWeb2Window: null,
+      received: false, payload: null, requestId: '', source: null, origin: null, template: ''
+    };
+
+    function parseFragment(hash){
+      var out = {};
+      var h = String(hash||'').replace(/^#/,'');
+      if (!h) return out;
+      h.split('&').forEach(function(pair){
+        var i = pair.indexOf('='); if (i < 0) return;
+        var k = pair.slice(0,i), v = pair.slice(i+1);
+        try { out[k] = decodeURIComponent(v); } catch(e){ out[k] = v; }
+      });
+      return out;
+    }
+
+    function readFragment(cb){
+      if (window.google && google.script && google.script.url && typeof google.script.url.getLocation === 'function') {
+        try {
+          google.script.url.getLocation(function(loc){ cb({ ok:true, hash:(loc && loc.hash)||'' }); });
+        } catch (e) {
+          cb({ ok:false, error:'getLocation threw: ' + e.message });
+        }
+      } else {
+        cb({ ok:true, hash: window.location.hash || '' }); // local mock fallback
+      }
+    }
+
+    function sendReceipt(type, detail){
+      if (!transfer.source || !transfer.origin) return;
+      var msg = { type: type, nonce: transfer.nonce, reportRequestId: transfer.requestId || '' };
+      if (type === 'AWQ_REPORT_REJECTED') msg.reason = String(detail || 'rejected');
+      else {
+        msg.status = String(detail || '');
+        if (arguments.length > 2 && arguments[2]) msg.warning = String(arguments[2]);
+      }
+      try { transfer.source.postMessage(msg, transfer.origin); } catch (e) { rec('receipt post failed: ' + e.message, 'warn'); }
+    }
+
+    function renderPreview(payload, receipt){
+      var flights = payload.flights || [];
+      var taf = payload.tafContext || [];
+      var notam = payload.notamContext || [];
+      var noSig = Object.keys(payload.noSigStationMap || {});
+      var tafMissing = taf.filter(function(t){ return !t.available; }).length;
+      var rows = '';
+      rows += '<div class="kv"><b>Request ID</b><span>' + esc(transfer.requestId) + '</span></div>';
+      rows += '<div class="kv"><b>CBR template</b><span>' + esc(receipt.template || '(none)') + '</span></div>';
+      rows += '<div class="kv"><b>Audit status</b><span>' + esc(receipt.status || '') + '</span></div>';
+      rows += '<div class="kv"><b>Requested at</b><span>' + esc(payload.requestedAt || '') + '</span></div>';
+      rows += '<div class="kv"><b>Preview expires</b><span>' + esc(receipt.previewExpiresAt || '(n/a)') + '</span></div>';
+      rows += '<div class="kv"><b>Flights (' + flights.length + ')</b><span></span></div>';
+      flights.forEach(function(f){
+        rows += '<div class="flt">&nbsp;&nbsp;&bull; ' + esc(f.FLIGHT) + ' ' + esc(f.DEP) + '&rarr;' + esc(f.ARR) + ' ' + esc(f.STD) + '-' + esc(f.STA) + '</div>';
+      });
+      rows += '<div class="kv"><b>TAF stations</b><span>' + taf.length + (tafMissing ? ' (' + tafMissing + ' unavailable)' : '') + '</span></div>';
+      rows += '<div class="kv"><b>Selected NOTAMs</b><span>' + notam.length + '</span></div>';
+      var scope = payload.notamScope || {};
+      var dropped = Number(scope.droppedFirWide || 0);
+      if (dropped > 0) {
+        var droppedList = (scope.dropped || []).map(function(d){ return esc(d.id) + ' (' + esc(d.station) + ')'; }).join(', ');
+        rows += '<div class="kv"><b>Scope rule</b><span>AERODROME ONLY</span></div>';
+        rows += '<div class="kv"><b>FIR-wide excluded</b><span class="warn">' + dropped + ' NOTAM tidak dimasukkan (bukan aerodrome)' +
+                (droppedList ? '<br><span class="meta">' + droppedList + '</span>' : '') + '</span></div>';
+      } else if (scope.rule) {
+        rows += '<div class="kv"><b>Scope rule</b><span>' + esc(scope.rule) + (notam.length ? '' : ' &mdash; tidak ada NOTAM aerodrome') + '</span></div>';
+      }
+      rows += '<div class="kv"><b>NO SIG stations</b><span>' + (noSig.length ? esc(noSig.join(', ')) : 'none') + '</span></div>';
+      document.getElementById('preview-body').innerHTML = rows;
+      document.getElementById('preview').style.display = 'block';
+    }
+
+    // ---- READY handshake ----
+    readFragment(function(res){
+      if (!res.ok) { rec('['+ts()+'] FRAGMENT READ FAILED: ' + res.error, 'err'); return; }
+      var frag = parseFragment(res.hash);
+      rec('['+ts()+'] fragment.hash = ' + JSON.stringify(frag), 'meta');
+      transfer.nonce = frag.nonce || '';
+      var proposed = frag.sourceOrigin || '';
+      var originOk = WEB2_ORIGINS.indexOf(proposed) !== -1;
+      rec('['+ts()+'] fragment sourceOrigin = ' + (proposed||'(none)') + '  allowed = ' + originOk, originOk ? 'ok':'warn');
+      if (!transfer.nonce || !originOk) { rec('['+ts()+'] HALT: missing/invalid nonce or sourceOrigin. Safe waiting state.', 'err'); return; }
+
+      var opener = null;
+      try { opener = (window.top && window.top.opener) || null; } catch (e) { rec('['+ts()+'] window.top.opener access threw: ' + e.message, 'warn'); }
+      rec('['+ts()+'] window.top.opener present = ' + (opener ? 'yes' : 'no'), opener ? 'ok' : 'warn');
+      transfer.expectedWeb2Window = opener;
+      transfer.expectedOrigin = proposed;
+      if (!opener) { rec('['+ts()+'] HALT: no top.opener (direct open?). Open via Web 2 DOWNLOAD SHEET.', 'err'); return; }
+
+      opener.postMessage({ type:'AWQ_REPORT_READY', nonce: transfer.nonce }, proposed);
+      rec('['+ts()+'] SENT AWQ_REPORT_READY -> ' + proposed, 'ok');
+    });
+
+    // ---- CONTEXT -> receipt -> preview ----
+    window.addEventListener('message', function(ev){
+      if (!ev.data || ev.data.type !== 'AWQ_REPORT_CONTEXT') return;
+      var okSource = transfer.expectedWeb2Window && ev.source === transfer.expectedWeb2Window;
+      var okOrigin = transfer.expectedOrigin && ev.origin === transfer.expectedOrigin;
+      var okNonce = transfer.nonce && ev.data.nonce === transfer.nonce;
+      rec('['+ts()+'] CONTEXT: origin=' + ev.origin + ' sourceMatch=' + okSource + ' originMatch=' + okOrigin + ' nonceMatch=' + okNonce,
+          (okSource && okOrigin && okNonce) ? 'ok' : 'err');
+      if (!okSource || !okOrigin || !okNonce) { rec('['+ts()+'] REJECT: context failed validation (source/origin/nonce).', 'err'); return; }
+      if (transfer.received) { rec('['+ts()+'] IGNORE duplicate CONTEXT.', 'warn'); return; }
+      transfer.received = true;
+      transfer.source = ev.source;
+      transfer.origin = ev.origin;
+
+      var p = ev.data.payload || {};
+      transfer.payload = p;
+      transfer.requestId = p.reportRequestId || '';
+      rec('['+ts()+'] CONTEXT accepted: flights=' + ((p.flights||[]).length) +
+          ' tafContext=' + ((p.tafContext||[]).length) + ' notamContext=' + ((p.notamContext||[]).length) +
+          ' requestId=' + transfer.requestId, 'ok');
+
+      if (!hasRunner()) {
+        renderPreview(p, { status: 'RECEIVED-LOCAL', template: '(no backend)', previewExpiresAt: '' });
+        sendReceipt('AWQ_REPORT_ACCEPTED', 'RECEIVED-LOCAL');
+        rec('['+ts()+'] No backend in this context: ACK sent without an audit write.', 'warn');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(res){
+          if (res && res.ok) {
+            transfer.requestId = res.reportRequestId || transfer.requestId;
+            transfer.template = res.template || '';
+            renderPreview(p, res);
+            var scope = p.notamScope || {};
+            sendReceipt('AWQ_REPORT_ACCEPTED', res.status || 'AWAITING_CONFIRMATION', (scope.droppedFirWide || 0) > 0
+              ? 'Peringatan: ' + scope.droppedFirWide + ' NOTAM FIR-wide tidak dimasukkan ke report (hanya aerodrome).'
+              : '');
+            rec('['+ts()+'] RECEIVED recorded (status=' + (res.status || '') + '). Preview shown; awaiting confirmation.', 'ok');
+          } else {
+            sendReceipt('AWQ_REPORT_REJECTED', (res && res.error) || 'receipt failed');
+            rec('['+ts()+'] RECEIPT REJECTED: ' + ((res && res.error) || 'unknown'), 'err');
+          }
+        })
+        .withFailureHandler(function(err){
+          var m = err && err.message ? err.message : String(err);
+          sendReceipt('AWQ_REPORT_REJECTED', m);
+          rec('['+ts()+'] RECEIPT FAILED: ' + m, 'err');
+        })
+        .recordReportReceived(p);
+    });
+
+    // ---- operator confirmation -> generation ----
+    document.getElementById('btn-confirm').addEventListener('click', function(){
+      var btn = this;
+      var out = document.getElementById('result');
+      if (!transfer.payload) { out.innerHTML = '<span class="err">Nothing to confirm.</span>'; return; }
+      if (!hasRunner()) { out.innerHTML = '<span class="warn">No backend available; cannot generate.</span>'; return; }
+      btn.disabled = true;
+      out.textContent = 'Generating…';
+      google.script.run
+        .withSuccessHandler(function(res){
+          btn.disabled = false;
+          if (res && res.ok && res.status === 'SUCCEEDED' && res.url) {
+            out.innerHTML = '<span class="ok">SUCCEEDED</span><br><a href="' + esc(res.url) + '" target="_blank" rel="noopener noreferrer">OPEN GOOGLE SHEET</a>';
+          } else if (res && (res.status === 'RECONCILIATION_REQUIRED' || res.status === 'UNKNOWN' || res.status === 'BUSY')) {
+            out.innerHTML = '<span class="warn">' + esc(res.status) + '</span><br>' + esc(res.error || '') + '<br>Use CHECK REPORT STATUS; do not retry blindly.';
+          } else {
+            out.innerHTML = '<span class="err">' + esc((res && res.status) || 'ERROR') + '</span><br>' + esc((res && res.error) || 'Unknown error');
+          }
+        })
+        .withFailureHandler(function(err){
+          btn.disabled = false;
+          out.innerHTML = '<span class="err">FAILED</span><br>' + esc(err && err.message ? err.message : String(err));
+        })
+        .confirmReport(transfer.payload);
+    });
+
+    // ---- status lookup ----
+    document.getElementById('btn-check').addEventListener('click', function(){
+      var out = document.getElementById('result');
+      if (!transfer.requestId) { out.innerHTML = '<span class="err">No request ID available.</span>'; return; }
+      if (!hasRunner()) { out.innerHTML = '<span class="warn">No backend available.</span>'; return; }
+      out.textContent = 'Checking…';
+      google.script.run
+        .withSuccessHandler(function(res){
+          out.innerHTML = '<span class="' + (res && res.ok ? 'ok' : 'warn') + '">' + esc((res && res.status) || 'UNKNOWN') + '</span><br>' +
+            'requestId=' + esc(transfer.requestId) +
+            (res && res.url ? '<br><a href="' + esc(res.url) + '" target="_blank" rel="noopener noreferrer">OPEN GOOGLE SHEET</a>' : '') +
+            (res && res.error ? '<br>' + esc(res.error) : '');
+        })
+        .withFailureHandler(function(err){
+          out.innerHTML = '<span class="err">STATUS FAILED</span><br>' + esc(err && err.message ? err.message : String(err));
+        })
+        .getReportStatus(transfer.requestId);
+    });
+  </script>
+</body>
+</html>

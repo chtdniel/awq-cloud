@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Privacy Policy — AWQ Cloud Briefing</title>
-  <meta name="description" content="Kebijakan privasi AWQ Cloud Briefing: bagaimana aplikasi mengakses, memakai, menyimpan, dan membagikan data, termasuk data akun Google saat membuat laporan Google Sheets.">
+  <meta name="description" content="AWQ Cloud Briefing privacy policy: how the application accesses, uses, stores, and shares data, including Google account data when creating Google Sheets reports.">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -126,10 +126,11 @@
     <div class="wrap">
       <div class="brand">
         <b>AWQ Cloud Briefing</b>
-        <span>christiandaniel.my.id</span>
+        <span>awq.christiandaniel.my.id</span>
       </div>
       <nav class="legal-nav" aria-label="Legal">
         <a href="/">Home</a>
+        <a href="/app">Open workspace</a>
         <a href="/privacy" aria-current="page">Privacy Policy</a>
         <a href="/terms">Terms of Service</a>
       </nav>
@@ -138,102 +139,102 @@
 
   <main class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="meta">Terakhir diperbarui: 20 September 2026 · Berlaku untuk https://christiandaniel.my.id</p>
-    <p class="lede">AWQ Cloud Briefing adalah aplikasi kerja (workspace) untuk operasi briefing penerbangan: flight watch, NOTAM, TAF, cuaca, FIR, dan pembuatan crew briefing report. Halaman ini menjelaskan data apa yang diproses aplikasi, termasuk data akun Google ketika Anda membuat laporan dalam bentuk Google Sheets.</p>
+    <p class="meta">Last updated: 20 September 2026 · Applies to https://awq.christiandaniel.my.id</p>
+    <p class="lede">AWQ Cloud Briefing is a workspace application for flight briefing operations: flight watch, NOTAM, TAF, weather, FIR, and crew briefing report generation. This page explains what data the application processes, including Google account data when you create a report as a Google Sheet.</p>
 
     <div class="card">
-      <p><strong>Ringkasan singkat.</strong> Aplikasi hanya meminta satu izin Google: <code>https://www.googleapis.com/auth/drive.file</code>. Izin ini hanya memberi akses ke file yang dibuat atau dibuka oleh aplikasi ini — bukan seluruh isi Google Drive Anda. Token akses Google hanya dipakai di browser Anda untuk proses unggah saat itu dan tidak pernah disimpan di server kami. Kami tidak menjual dan tidak membagikan data Anda untuk periklanan.</p>
+      <p><strong>In short.</strong> The application requests only one Google permission: <code>https://www.googleapis.com/auth/drive.file</code>. That permission grants access only to files this application creates or opens — not the entire contents of your Google Drive. The Google access token is used only in your browser for that one upload and is never stored on our servers. We do not sell your data and we do not share it for advertising.</p>
     </div>
 
-    <h2>1. Data Google yang kami akses</h2>
-    <p>Saat Anda menekan tombol untuk membuat laporan Google Sheets, aplikasi meminta persetujuan Anda melalui layar consent Google untuk satu scope saja:</p>
+    <h2>1. Google data we access</h2>
+    <p>When you press the button to create a Google Sheets report, the application asks for your consent through the Google consent screen for a single scope:</p>
     <table>
       <thead>
-        <tr><th>Scope</th><th>Apa yang diberikan</th><th>Yang tidak diberikan</th></tr>
+        <tr><th>Scope</th><th>What it grants</th><th>What it does not grant</th></tr>
       </thead>
       <tbody>
         <tr>
           <td><code>drive.file</code></td>
-          <td>Membuat file baru di Google Drive Anda dan mengubah file yang Anda buka atau bagikan lewat aplikasi ini.</td>
-          <td>Tidak memberi akses ke file lain di Drive Anda, tidak membaca isi Drive Anda secara umum, tidak menghapus file di luar yang dibuat aplikasi ini.</td>
+          <td>Creating new files in your Google Drive and modifying files you open or share through this application.</td>
+          <td>No access to other files in your Drive, no general reading of your Drive contents, and no deletion of files other than those created by this application.</td>
         </tr>
       </tbody>
     </table>
-    <p>Kami tidak meminta akses ke Gmail, Kontak, Kalender, atau data Google lain, dan tidak meminta scope Drive yang lebih luas.</p>
+    <p>We do not request access to Gmail, Contacts, Calendar, or any other Google data, and we do not request broader Drive scopes.</p>
 
-    <h2>2. Bagaimana data Google digunakan</h2>
+    <h2>2. How Google data is used</h2>
     <ul>
-      <li><strong>Tujuan tunggal:</strong> membuat satu file spreadsheet crew briefing report atas permintaan Anda, di Google Drive milik akun Google yang Anda pilih sendiri, lalu membuka URL file tersebut di browser Anda.</li>
-      <li>Isi laporan berasal dari data yang sudah ada di dalam aplikasi (penerbangan, NOTAM, TAF, cuaca yang Anda pilih). Google tidak dipakai untuk menganalisis data Anda.</li>
-      <li>Kami tidak memakai data Google untuk iklan, profiling, penilaian kredit, atau keperluan apa pun di luar pembuatan laporan yang Anda minta.</li>
+      <li><strong>Single purpose:</strong> to create one crew briefing report spreadsheet at your request, in the Google Drive of the Google account you choose yourself, and then to open that file's URL in your browser.</li>
+      <li>The report contents come from data already inside the application (the flights, NOTAMs, TAF, and weather you selected). Google is not used to analyse your data.</li>
+      <li>We do not use Google data for advertising, profiling, credit assessment, or any purpose beyond producing the report you requested.</li>
     </ul>
 
-    <h2>3. Penyimpanan token dan data Google</h2>
+    <h2>3. Token and Google data storage</h2>
     <ul>
-      <li>Token akses Google diberikan langsung oleh Google ke browser Anda. Token itu dipakai hanya untuk proses unggah pada saat itu.</li>
-      <li>Token <strong>tidak</strong> disimpan di server aplikasi kami, <strong>tidak</strong> disimpan di <code>localStorage</code>, dan tidak dikirim ke backend aplikasi kami.</li>
-      <li>Kami tidak menyimpan salinan file Google Sheets atau isi Google Drive Anda di server kami. File tetap berada di Drive Anda dan tetap milik Anda.</li>
-      <li>Saat Anda menutup atau memuat ulang halaman, aplikasi akan meminta persetujuan Google lagi pada pemakaian berikutnya.</li>
+      <li>The Google access token is issued by Google directly to your browser. It is used only for that one upload.</li>
+      <li>The token is <strong>not</strong> stored on our application servers, is <strong>not</strong> written to <code>localStorage</code>, and is not sent to our application backend.</li>
+      <li>We keep no copy of Google Sheets files or of your Google Drive contents on our servers. The files stay in your Drive and remain yours.</li>
+      <li>When you close or reload the page, the application will ask for Google consent again the next time you use the feature.</li>
     </ul>
 
-    <h2>4. Pembagian data ke pihak ketiga</h2>
-    <p>Kami tidak menjual, menyewakan, atau memperdagangkan data pengguna. Data Google Anda tidak dibagikan kepada pihak ketiga, kecuali bila diwajibkan oleh hukum yang berlaku atau untuk menyelidiki penyalahgunaan. Aplikasi ini tidak memakai jaringan periklanan, data broker, atau pelacak pihak ketiga.</p>
+    <h2>4. Sharing data with third parties</h2>
+    <p>We do not sell, rent, or trade user data. Your Google data is not shared with third parties, except where required by applicable law or to investigate abuse. This application uses no advertising networks, data brokers, or third-party trackers.</p>
 
-    <h2>5. Kepatuhan Google API Services User Data Policy</h2>
-    <p>Penggunaan informasi yang diterima aplikasi ini dari Google API mengikuti <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener noreferrer" target="_blank">Google API Services User Data Policy</a>, termasuk persyaratan <strong>Limited Use</strong>. Secara khusus:</p>
+    <h2>5. Google API Services User Data Policy compliance</h2>
+    <p>This application's use of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener noreferrer" target="_blank">Google API Services User Data Policy</a>, including the <strong>Limited Use</strong> requirements. Specifically:</p>
     <ul>
-      <li>Data Google hanya dipakai untuk menyediakan atau meningkatkan fitur yang terlihat jelas di antarmuka aplikasi ini.</li>
-      <li>Data Google tidak ditransfer ke pihak lain kecuali seperlunya untuk menjalankan fitur tersebut, untuk alasan keamanan, atau untuk mematuhi hukum.</li>
-      <li>Manusia tidak membaca data Google Anda, kecuali Anda memberikan persetujuan eksplisit, atau bila diperlukan untuk keamanan/penyalahgunaan, atau bila diwajibkan hukum.</li>
-      <li>Data Google tidak dipakai atau ditransfer untuk periklanan, retargeting, penilaian kredit, atau penjualan data.</li>
+      <li>Google data is used only to provide or improve features that are clearly visible in this application's interface.</li>
+      <li>Google data is not transferred to others except as necessary to run those features, for security reasons, or to comply with the law.</li>
+      <li>Humans do not read your Google data unless you give explicit consent, or it is necessary for security/abuse purposes, or it is required by law.</li>
+      <li>Google data is not used or transferred for advertising, retargeting, credit assessment, or the sale of data.</li>
     </ul>
 
-    <h2>6. Data yang kami simpan sendiri (bukan dari Google)</h2>
-    <p>Agar aplikasi bisa berfungsi, kami menyimpan hal berikut di database kami sendiri (Cloudflare D1):</p>
+    <h2>6. Data we store ourselves (not from Google)</h2>
+    <p>To function, the application stores the following in our own database (Cloudflare D1):</p>
     <ul>
-      <li><strong>Akun:</strong> alamat email, hash password (PBKDF2) beserta salt, role akses (admin/registered/read only), dan status aktif.</li>
-      <li><strong>Profil operator:</strong> nama, IAA ID, dan LIC No. yang Anda isi sendiri.</li>
-      <li><strong>Data operasional:</strong> data penerbangan, NOTAM, TAF, cuaca, waypoint, dan hasil analisis yang dipakai untuk briefing serta jejak audit perubahan.</li>
+      <li><strong>Accounts:</strong> email address, password hash (PBKDF2) with salt, access role (admin/registered/read only), and active status.</li>
+      <li><strong>Operator profile:</strong> the name, IAA ID, and LIC No. that you enter yourself.</li>
+      <li><strong>Operational data:</strong> flight, NOTAM, TAF, weather, and waypoint data and the analysis results used for briefing, plus an audit trail of changes.</li>
     </ul>
-    <p>Data ini dipakai hanya untuk menjalankan fungsi operasional aplikasi, tidak untuk periklanan, dan tidak dijual. Penyimpanan dan pemrosesan dilakukan melalui penyedia infrastruktur kami, yaitu Cloudflare (hosting dan basis data).</p>
+    <p>This data is used only to run the application's operational functions, not for advertising, and it is not sold. Storage and processing are provided through our infrastructure provider, Cloudflare (hosting and database).</p>
 
-    <h2>7. Retensi dan penghapusan</h2>
+    <h2>7. Retention and deletion</h2>
     <ul>
-      <li>Data operasional dan jejak audit disimpan selama diperlukan untuk keperluan operasional dan keselamatan penerbangan.</li>
-      <li>Anda dapat meminta penghapusan akun dan data profil Anda dengan menghubungi kontak di bawah. Kami akan menindaklanjuti dalam waktu yang wajar.</li>
-      <li>Menghapus akun aplikasi tidak menghapus file Google Sheets yang sudah dibuat di Drive Anda — file itu milik Anda sepenuhnya dan bisa Anda kelola sendiri di Google Drive.</li>
-    </ul>
-
-    <h2>8. Hak Anda dan cara mencabut akses Google</h2>
-    <ul>
-      <li>Cabut izin aplikasi ini terhadap akun Google Anda kapan saja di <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer" target="_blank">myaccount.google.com/permissions</a>. Setelah dicabut, fitur pembuatan Google Sheets tidak akan bisa memakai akun tersebut sampai Anda memberi izin lagi.</li>
-      <li>Anda berhak meminta salinan, koreksi, atau penghapusan data akun dan profil Anda yang kami simpan.</li>
-      <li>Penolakan memberi izin Google tidak menghalangi fitur lain: laporan tetap bisa diunduh sebagai file XLSX tanpa akun Google.</li>
+      <li>Operational data and the audit trail are retained for as long as needed for operational and flight-safety purposes.</li>
+      <li>You can request deletion of your account and profile data by contacting the address below. We will follow up within a reasonable time.</li>
+      <li>Deleting your application account does not delete Google Sheets files already created in your Drive — those files are entirely yours and you can manage them yourself in Google Drive.</li>
     </ul>
 
-    <h2>9. Keamanan</h2>
-    <p>Akses ke aplikasi dibatasi oleh akun dan role. Password disimpan dalam bentuk hash (PBKDF2) dengan salt, bukan teks biasa. Komunikasi dengan aplikasi menggunakan HTTPS. Meski demikian, tidak ada sistem yang bisa dijamin sepenuhnya aman; laporkan dugaan masalah keamanan ke kontak di bawah.</p>
+    <h2>8. Your rights and how to revoke Google access</h2>
+    <ul>
+      <li>Revoke this application's permission for your Google account at any time at <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer" target="_blank">myaccount.google.com/permissions</a>. Once revoked, the Google Sheets report feature cannot use that account until you grant permission again.</li>
+      <li>You have the right to request a copy, correction, or deletion of the account and profile data we store about you.</li>
+      <li>Declining the Google permission does not block other features: reports can still be downloaded as an XLSX file without a Google account.</li>
+    </ul>
 
-    <h2>10. Perubahan kebijakan</h2>
-    <p>Kebijakan ini dapat diperbarui bila fungsi aplikasi atau kewajiban hukum berubah. Versi terbaru selalu tersedia di halaman ini dengan tanggal pembaruan di bagian atas.</p>
+    <h2>9. Security</h2>
+    <p>Access to the application is restricted by account and role. Passwords are stored as a hash (PBKDF2) with salt, not as plain text. Communication with the application uses HTTPS. Even so, no system can be guaranteed completely secure; report any suspected security issue to the contact below.</p>
 
-    <h2>11. Kontak</h2>
-    <p>Pertanyaan tentang kebijakan ini atau permintaan terkait data Anda: <a href="mailto:chtdniel@gmail.com">chtdniel@gmail.com</a>.</p>
+    <h2>10. Changes to this policy</h2>
+    <p>This policy may be updated when application features or legal obligations change. The latest version is always available on this page with the update date at the top.</p>
+
+    <h2>11. Contact</h2>
+    <p>Questions about this policy or requests relating to your data: <a href="mailto:christiandaniel@airasia.com">christiandaniel@airasia.com</a>.</p>
 
     <section class="en" lang="en">
       <h2>Summary for Google API reviewers</h2>
-      <p><strong>App:</strong> AWQ Cloud Briefing (<a href="https://christiandaniel.my.id/" rel="noopener noreferrer">https://christiandaniel.my.id</a>) — a flight dispatch briefing workspace for NOTAM, TAF, weather, FIR and crew briefing reports.</p>
+      <p><strong>App:</strong> AWQ Cloud Briefing (<a href="https://awq.christiandaniel.my.id/" rel="noopener noreferrer">https://awq.christiandaniel.my.id</a>) — a flight dispatch briefing workspace for NOTAM, TAF, weather, FIR and crew briefing reports.</p>
       <p><strong>Requested scope:</strong> only <code>https://www.googleapis.com/auth/drive.file</code> (non-sensitive). No other Google API scope is requested.</p>
       <p><strong>Why the scope is needed:</strong> the "Create Google Sheet" action converts the generated crew briefing report into a native Google Sheets file. The file is created in the signed-in user's own Google Drive using that user's own OAuth grant, and the app then opens the file's edit URL. The scope is limited to files this app creates or that the user opens with it; the app cannot list, read, or modify the user's other Drive files.</p>
       <p><strong>Token handling:</strong> the access token is obtained in the browser through Google Identity Services and is used only for that single upload. It is never stored on the application backend, never written to <code>localStorage</code>, and never sent to our servers.</p>
       <p><strong>Data storage:</strong> no Google user data (no Drive content, no Google profile data) is stored on our servers. The app's own account and operational data live in Cloudflare D1 and are unrelated to Google APIs.</p>
       <p><strong>Limited Use:</strong> our use of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" rel="noopener noreferrer" target="_blank">Google API Services User Data Policy</a>, including the Limited Use requirements. Google user data is not sold, not transferred to third parties, not used for advertising or retargeting, and is not read by humans except with explicit consent, for security purposes, or as required by law.</p>
       <p><strong>Revocation:</strong> users can revoke access at <a href="https://myaccount.google.com/permissions" rel="noopener noreferrer" target="_blank">myaccount.google.com/permissions</a> at any time. The XLSX download remains available without any Google account.</p>
-      <p><strong>Contact:</strong> <a href="mailto:chtdniel@gmail.com">chtdniel@gmail.com</a></p>
+      <p><strong>Contact:</strong> <a href="mailto:christiandaniel@airasia.com">christiandaniel@airasia.com</a></p>
     </section>
 
     <footer class="legal-footer">
-      <span>AWQ Cloud Briefing — christiandaniel.my.id</span>
+      <span>AWQ Cloud Briefing — awq.christiandaniel.my.id</span>
       <span><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></span>
     </footer>
   </main>

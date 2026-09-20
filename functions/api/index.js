@@ -6,7 +6,7 @@ export async function onRequest(context) {
     
     return Response.json({
       success: true,
-      message: "API AWQ-CLOUD Berjalan Normal",
+      message: "AWQ-CLOUD API running normally",
       data: results
     });
   } catch (error) {

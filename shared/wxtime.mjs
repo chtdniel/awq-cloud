@@ -90,24 +90,34 @@ export function parseTimeToken(value) {
 }
 
 /**
- * Absolute UTC instant of one flight time point. An ISO value already carries
- * its date; a legacy HH:MM value takes its date from `dof` (YYYYMMDD), so a
- * flight still has an absolute instant when only the clock time is stored.
+ * Absolute UTC instant of one flight time point.
+ *
+ * The DATE comes from `dof` (YYYYMMDD) whenever it is readable, and the CLOCK
+ * from the time value. That order matters: `dof` is the operator-controlled
+ * date of flight, while the date embedded in an ISO `etd`/`eta` can be stale by
+ * weeks — real production rows carry `dof=20260917` with
+ * `etd='2026-09-08T03:25:00.000Z'` (9 days apart, up to 17 in the sample). Using
+ * the embedded date anchored every analysis window to the wrong day, so no TAF
+ * validity period could ever intersect a flight window.
+ *
+ * Without a readable `dof` the embedded date is still better than nothing.
  *
  * @returns {number|null} epoch ms, or null when no date can be established.
  */
 export function flightInstant(raw, dof) {
     const t = parseTimeToken(raw);
     if (!t) return null;
-    if (t.utcMs !== null) return t.utcMs;
 
     const digits = String(dof === null || dof === undefined ? '' : dof).replace(/[^0-9]/g, '');
-    if (digits.length < 8) return null;
-    const year = Number(digits.slice(0, 4));
-    const month = Number(digits.slice(4, 6));
-    const day = Number(digits.slice(6, 8));
-    if (!(month >= 1 && month <= 12) || !(day >= 1 && day <= 31)) return null;
-    return Date.UTC(year, month - 1, day, Number(t.hh), Number(t.mm));
+    if (digits.length >= 8) {
+        const year = Number(digits.slice(0, 4));
+        const month = Number(digits.slice(4, 6));
+        const day = Number(digits.slice(6, 8));
+        if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+            return Date.UTC(year, month - 1, day, Number(t.hh), Number(t.mm));
+        }
+    }
+    return t.utcMs;
 }
 
 /**
@@ -170,12 +180,18 @@ export function validityCoversWindow(validity, windowStartMs, windowEndMs) {
  * instant, ALT the fixed STA+1h..STA+3h diversion window the WX page evaluates.
  * Any value is null when the flight has no absolute instant for it.
  *
+ * An STA clock earlier than the STD clock means the arrival is on the NEXT day
+ * (dof + 1) — the same rule the Flight board timeline already applies
+ * (`sta > std ? sta : sta + 1440`). Without it an overnight flight gets an ARR
+ * window that sits before its own departure, which inverts the window checks.
+ *
  * @returns {{dep: [number, number]|null, arr: [number, number]|null,
  *            alt: [number, number]|null, stdMs: number|null, staMs: number|null}}
  */
 export function flightLegWindows(etd, eta, dof) {
     const stdMs = flightInstant(etd, dof);
-    const staMs = flightInstant(eta, dof);
+    let staMs = flightInstant(eta, dof);
+    if (stdMs !== null && staMs !== null && staMs < stdMs) staMs += DAY_MS;
     return {
         stdMs: stdMs,
         staMs: staMs,
@@ -185,6 +201,19 @@ export function flightLegWindows(etd, eta, dof) {
             ? null
             : [staMs + ALT_WINDOW_OFFSET_HOURS * HOUR_MS, staMs + (ALT_WINDOW_OFFSET_HOURS + ALT_WINDOW_LENGTH_HOURS) * HOUR_MS]
     };
+}
+
+/**
+ * Short UTC label of a TAF validity period, for operator-facing messages:
+ * "20 12:00Z–21 18:00Z". Empty when the validity is unreadable.
+ */
+export function tafValidityLabel(validity) {
+    if (!validity) return '';
+    const stamp = (ms) => {
+        const d = new Date(ms);
+        return pad2(d.getUTCDate()) + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + 'Z';
+    };
+    return stamp(validity.startMs) + '–' + stamp(validity.endMs);
 }
 
 /** Hour-of-day (0-23) of a DB time value, or null. */

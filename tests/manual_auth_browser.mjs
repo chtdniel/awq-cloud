@@ -11,7 +11,7 @@ const bootstrap = await page.request.post(baseUrl + '/api/rpc', {
 });
 if (bootstrap.status() !== 200) throw new Error('Bootstrap failed: ' + await bootstrap.text());
 console.log('bootstrap passed');
-await page.goto(baseUrl);
+await page.goto(baseUrl + '/app');
 await page.waitForSelector('#awq-login-gate', { timeout: 15000 });
 console.log('login gate visible');
 await page.locator('#awq-login-form').evaluate(form => {

@@ -103,5 +103,5 @@ Probe membuka mock Web 2 (di `127.0.0.1:8788`), klik DOWNLOAD SHEET, lalu mereka
 
 - Ini **eksperimen prasyarat**, bukan otorisasi implementasi penuh.
 - Pakai **data sintetis**; **jangan** klik konfirmasi/generate (probe B0 berhenti di ACCEPTED).
-- Jangan deploy ke produksi, jangan edit `public/index.html` produksi, dan jangan pakai spreadsheet produksi.
+- Jangan deploy ke produksi, jangan edit `public/app/index.html` produksi (artefak build; sumbernya `src/`), dan jangan pakai spreadsheet produksi.
 - `REPORT_AUDIT` belum dibuat pada tahap ini (Gate B).

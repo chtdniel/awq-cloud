@@ -9,7 +9,7 @@ import { createWaypointFixture, onRequestPost } from './waypoint_fixture.mjs';
 
 const fixture = await createWaypointFixture();
 const ui = await readFile('src/LatLong_Ui.html', 'utf8');
-const built = await readFile('public/index.html', 'utf8');
+const built = await readFile('public/app/index.html', 'utf8');
 const styles = [...built.matchAll(new RegExp('<style[^>]*>[^]*?</style>', 'gi'))].map(match => match[0]).join('');
 const shim = await readFile('public/cloudflare-shim.js', 'utf8');
 const requests = [];

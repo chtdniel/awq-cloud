@@ -6,7 +6,7 @@ if (!temporaryPassword) throw new Error('AWQ_TEST_TEMP_PASSWORD is required');
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
-await page.goto(baseUrl);
+await page.goto(baseUrl + '/app');
 await page.waitForSelector('#awq-login-gate', { timeout: 15000 });
 await page.locator('#awq-login-form').evaluate((form, password) => {
   form.querySelector('#awq-login-email').value = 'christiandaniel@airasia.com';

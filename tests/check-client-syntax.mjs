@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-// build.js hanya meng-inline src/*.html ke public/index.html tanpa mem-parse JS,
-// jadi syntax error di blok <script> tidak akan ketahuan saat build. Skrip ini
+// build.js hanya meng-inline src/*.html ke public/app/index.html tanpa mem-parse
+// JS, jadi syntax error di blok <script> tidak akan ketahuan saat build. Skrip ini
 // mengompilasi tiap blok inline (tanpa menjalankannya) sebagai gerbang cepat.
 const files = process.argv.slice(2);
 if (!files.length) {

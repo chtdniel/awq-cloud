@@ -10,6 +10,7 @@ const server = createServer(async (req, res) => {
   try {
     let pathname = decodeURIComponent(new URL(req.url, 'http://local').pathname);
     if (pathname === '/') pathname = '/index.html';
+    if (pathname === '/app') pathname = '/app/index.html';
     const file = path.resolve(root, '.' + pathname);
     if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
     const body = await readFile(file);
@@ -61,7 +62,7 @@ try {
     return ok({});
   });
 
-  await page.goto(base);
+  await page.goto(base + '/app');
   await page.locator('#awq-account-toggle').waitFor();
 
   await page.locator('#awq-account-toggle').click();

@@ -9,7 +9,7 @@ import { build } from 'esbuild';
 // The ROUTE page marks every profile with its waypoint state in the database
 // (latlong table) and — for admins — offers a shortcut into WAYPOINT MANAGER with
 // the Route ID already filled in. This test drives the real client
-// (public/index.html) in Chromium so the chain is proven down to DOM + DB:
+// (public/app/index.html) in Chromium so the chain is proven down to DOM + DB:
 // per-profile marker, coverage KPI, "NO WAYPOINTS" filter, one click = one action,
 // then the full flow gap -> shortcut -> enter coordinates -> SAVE -> marker flips.
 // A non-admin must still see the markers, without a button that is certain to fail.
@@ -102,13 +102,13 @@ const viewerHeaders = await createUser('viewer@example.com', 'readonly');
 let sessionHeaders = adminHeaders;
 
 const publicDirectory = resolve('public');
-// charset=utf-8 is deliberate: public/index.html carries a <meta charset> now, and
+// charset=utf-8 is deliberate: public/app/index.html carries a <meta charset> now, and
 // this keeps the harness faithful to Cloudflare Pages, which also sends it. Without
 // it the em-dashes/arrows in the UI read as mojibake and text assertions mislead.
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png' };
 async function asset(request) {
   const pathname = decodeURIComponent(new URL(request.url).pathname);
-  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname));
+  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname === '/app' ? '/app/index.html' : pathname));
   if (!filename.startsWith(publicDirectory + '\\') && !filename.startsWith(publicDirectory + '/')) return new Response('Forbidden', { status: 403 });
   try { return new Response(await readFile(filename), { headers: { 'Content-Type': contentTypes[extname(filename)] || 'application/octet-stream' } }); }
   catch { return new Response('Not found', { status: 404 }); }
@@ -166,7 +166,7 @@ async function openRoutePage() {
   const page = await context.newPage();
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  await page.goto(baseUrl + '/app', { waitUntil: 'domcontentloaded' });
   // applySettingsAccessGate writes window.isAdmin once the session resolves, so its
   // non-null value marks boot complete and the access state already known.
   await page.waitForFunction(() => window.isAdmin !== null, null, { timeout: 20000 });

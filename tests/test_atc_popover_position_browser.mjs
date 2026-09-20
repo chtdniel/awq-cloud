@@ -29,10 +29,10 @@ const pageFile = process.env.ATC_PAGE_FILE ? resolve(process.env.ATC_PAGE_FILE) 
 const contentTypes = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png' };
 async function asset(request) {
   const pathname = decodeURIComponent(new URL(request.url).pathname);
-  if (pageFile && (pathname === '/' || pathname === '/index.html')) {
+  if (pageFile && (pathname === '/' || pathname === '/index.html' || pathname === '/app' || pathname === '/app/index.html')) {
     return new Response(await readFile(pageFile), { headers: { 'Content-Type': 'text/html' } });
   }
-  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname));
+  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname === '/app' ? '/app/index.html' : pathname));
   if (!filename.startsWith(publicDirectory + '\\') && !filename.startsWith(publicDirectory + '/')) return new Response('Forbidden', { status: 403 });
   try { return new Response(await readFile(filename), { headers: { 'Content-Type': contentTypes[extname(filename)] || 'application/octet-stream' } }); }
   catch { return new Response('Not found', { status: 404 }); }
@@ -152,7 +152,7 @@ async function withPage(name, body) {
   const page = await context.newPage();
   if (!browserContext) await page.setViewportSize({ width: 1440, height: 900 });
   try {
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.goto(baseUrl + '/app', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => typeof window.showATCConfirmPopover === 'function', null, { timeout: 20000 });
     await page.evaluate(SEED_PAGE);
     await body(page);

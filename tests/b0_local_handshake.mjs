@@ -44,7 +44,7 @@ const browser = await chromium.launch();
 try {
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.goto('http://127.0.0.1:8788/');
+  await page.goto('http://127.0.0.1:8788/app');
   const popupPromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
   await page.click('#btn-download-sheet');
   const popup = await popupPromise;

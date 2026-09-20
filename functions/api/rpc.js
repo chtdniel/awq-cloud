@@ -1,6 +1,6 @@
 import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
 import { fetchLatestTafs } from '../../shared/taf.mjs';
-import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, validityCoversWindow } from '../../shared/wxtime.mjs';
+import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, tafValidityLabel, validityCoversWindow } from '../../shared/wxtime.mjs';
 import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
@@ -87,7 +87,7 @@ export async function onRequestPost(context) {
     if (AUTHENTICATED_READ_METHODS.has(method) && !access.user) {
       return Response.json({ error: 'Authentication required.', code: 'AUTH_REQUIRED' }, { status: 401 });
     }
-    console.log(`[RPC] Memanggil method: ${method}`);
+    console.log(`[RPC] Calling method: ${method}`);
     // TODO: Implementasi logika untuk masing-masing fungsi backend (.gs) di sini
     switch (method) {
       case 'authLogin':
@@ -305,8 +305,8 @@ export async function onRequestPost(context) {
 
       
       default:
-        console.warn(`[RPC] Method tidak ditemukan: ${method}`);
-        return Response.json({ error: `Method ${method} belum diimplementasikan di Cloudflare.` }, { status: 404 });
+        console.warn(`[RPC] Method not found: ${method}`);
+        return Response.json({ error: `Method ${method} is not implemented on Cloudflare.` }, { status: 404 });
     }
   } catch (error) {
     console.error('[RPC] Error:', error);
@@ -429,7 +429,7 @@ async function handleGetBoardState(context, user) {
         rowIds = parsed.map(Number).filter(id => Number.isInteger(id) && id > 0);
       }
     } catch (error) {
-      console.warn('[RPC] getBoardState: row_ids korup untuk user', user.id, '-', error.message);
+      console.warn('[RPC] getBoardState: corrupt row_ids for user', user.id, '-', error.message);
       rowIds = [];
     }
   }
@@ -1098,12 +1098,13 @@ async function handleGetActiveFlightDataForWarning(context) {
 
         // 3. Combine. A leg is only analysed when the TAF validity period actually
         //    covers that leg window (STD for DEP, STA for ARR, STA+1h..+3h for ALT).
-        //    A TAF issued for another day is NO_DATA — never a verdict built on a
-        //    forecast that does not apply. An unreadable validity group (NIL, or a
-        //    value with no "DDHH/DDHH" block) keeps the displayed text instead of
-        //    being dropped, so the drawer can still show it verbatim.
-        const WX_NO_TAF_IN_WINDOW = 'No TAF data in database — TAF validity window does not cover this flight.';
-
+        //    The comparison is reported as a separate `*Coverage` field, NOT by
+        //    replacing the forecast: the board routinely holds flights whose DOF is
+        //    in the past while the registry only keeps today's TAF (production:
+        //    every DOF <= 19 SEP against a TAF valid 20 12Z-21 18Z). Substituting
+        //    "no TAF data" there blanked 100% of legs and destroyed the very
+        //    information the operator opens the page for. The forecast is always
+        //    shown; the UI says when it does not cover the flight window.
         const flights = flightRows.map(row => {
             const flightNo = String(row.callsign || row.flight || "").trim();
             const depApt = String(row.dep || "").trim().toUpperCase();
@@ -1114,13 +1115,19 @@ async function handleGetActiveFlightDataForWarning(context) {
             const dof = String(row.dof || "").trim();
             const legWindows = flightLegWindows(std, sta, dof);
 
+            // coverage: MISSING (station absent), IN, OUT, atau UNKNOWN (masa
+            // berlaku tidak terbaca, mis. NIL — jangan mengklaim apa pun).
             const getTaf = (icao, window) => {
                 const hit = tafMap[icao];
-                if (!hit) return { raw: "No TAF data in database", time: "---" };
+                if (!hit) return { raw: "No TAF data in database", time: "---", coverage: "MISSING", valid: "" };
                 const validity = parseTafValidity(hit.raw, hit.issueMs);
                 const covered = validityCoversWindow(validity, window ? window[0] : NaN, window ? window[1] : NaN);
-                if (covered === false) return { raw: WX_NO_TAF_IN_WINDOW, time: hit.time };
-                return { raw: hit.raw, time: hit.time };
+                return {
+                    raw: hit.raw,
+                    time: hit.time,
+                    coverage: covered === null ? "UNKNOWN" : (covered ? "IN" : "OUT"),
+                    valid: tafValidityLabel(validity)
+                };
             };
 
             const d = getTaf(depApt, legWindows.dep);
@@ -1138,10 +1145,16 @@ async function handleGetActiveFlightDataForWarning(context) {
                 altApt: altApt,
                 tafDep: d.raw,
                 tafDepTime: d.time,
+                tafDepCoverage: d.coverage,
+                tafDepValid: d.valid,
                 tafArr: a.raw,
                 tafArrTime: a.time,
+                tafArrCoverage: a.coverage,
+                tafArrValid: a.valid,
                 tafAlt: alt.raw,
-                tafAltTime: alt.time
+                tafAltTime: alt.time,
+                tafAltCoverage: alt.coverage,
+                tafAltValid: alt.valid
             };
         }).filter(f => f.flightNo && f.flightNo.trim() !== "" && f.depApt && f.depApt.trim() !== "");
 
@@ -2062,7 +2075,7 @@ async function firBulkValidateRows(context, parsedRows, skipDbDedup) {
             if (isDup) duplicates++; else preview.push({ Location: loc, 'NOTAM #': no, ok: true, textPreview: nt.slice(0, 80).replace(/\n/g, ' ') });
         } else invalid++;
         if (isDup) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: isDup });
-        else if (!rowOk) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: aerodromeOnly ? 'Aerodrome-only NOTAM (Q scope A): use UPDATE NOTAM.' : 'Invalid (butuh Location ICAO, NOTAM # A1234/26, dan B)/C) date)' });
+        else if (!rowOk) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: aerodromeOnly ? 'Aerodrome-only NOTAM (Q scope A): use UPDATE NOTAM.' : 'Invalid (needs Location ICAO, NOTAM # A1234/26, and B)/C) date)' });
     }
     return { valid, invalid, duplicates, preview: preview.slice(0, 40), validRows };
 }
@@ -2423,7 +2436,7 @@ async function handleFirUpdateNotam(context, args) {
                 message: 'NOTAM ' + clean['NOTAM #'] + ' updated.',
                 updatedAt: fresh ? String(fresh.updated_at || '') : '',
                 lockDowngraded: true,
-                lockNote: 'GAS LockService 5s tidak tersedia di Workers; diganti staleness check SELECT+UPDATE (race jendela kecil antara SELECT dan UPDATE tetap mungkin pada dua tab yang bersamaan persis).'
+                lockNote: 'GAS LockService 5s is unavailable on Workers; replaced by a staleness check (SELECT+UPDATE). A small race window between SELECT and UPDATE is still possible with two perfectly concurrent tabs.'
             }
         });
     } catch (e) {
@@ -2654,10 +2667,10 @@ function normalizeBulkFlightDof(value) {
 function validateFlightForm(fd) {
     if (!fd || typeof fd !== 'object') return 'formData invalid';
     const cs = String(fd.FLT_NO || '').trim().toUpperCase();
-    if (!callsignRe.test(cs)) return 'FLT_NO invalid (2-10 alfanumerik)';
+    if (!callsignRe.test(cs)) return 'FLT_NO invalid (2-10 alphanumeric)';
     if (!dofRe.test(String(fd.DOF || '').trim())) return 'DOF invalid (format YYYYMMDD)';
-    if (!icaoRe.test(String(fd.DEP || '').trim().toUpperCase())) return 'DEP invalid (kode ICAO 4 huruf)';
-    if (!icaoRe.test(String(fd.ARR || '').trim().toUpperCase())) return 'ARR invalid (kode ICAO 4 huruf)';
+    if (!icaoRe.test(String(fd.DEP || '').trim().toUpperCase())) return 'DEP invalid (ICAO 4-letter code)';
+    if (!icaoRe.test(String(fd.ARR || '').trim().toUpperCase())) return 'ARR invalid (ICAO 4-letter code)';
     if (String(fd.STD || '').trim() && !timeRe.test(String(fd.STD).trim())) return 'STD invalid (HHMM)';
     if (String(fd.STA || '').trim() && !timeRe.test(String(fd.STA).trim())) return 'STA invalid (HHMM)';
     return null;

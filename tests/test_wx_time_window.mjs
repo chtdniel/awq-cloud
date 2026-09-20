@@ -17,7 +17,8 @@ import { build } from 'esbuild';
 import { seedAuthUser } from './rpc_auth_fixture.mjs';
 import {
   parseTimeToken, flightInstant, dayHourNear, parseTafValidity,
-  validityCoversWindow, flightLegWindows, hourOf, newestTafRows, issueClockLabel
+  validityCoversWindow, flightLegWindows, hourOf, newestTafRows, issueClockLabel,
+  tafValidityLabel
 } from '../shared/wxtime.mjs';
 
 // --- 1. shared/wxtime.mjs ---------------------------------------------------
@@ -42,12 +43,21 @@ test('parseTimeToken reads ISO, HH:MM and the legacy digit forms', () => {
   assert.equal(hourOf('2026-09-08T23:30:00.000Z'), 23);
 });
 
-test('flightInstant falls back to dof for legacy clock-only values', () => {
-  assert.equal(flightInstant('2026-09-08T04:00:00.000Z', ''), Date.UTC(2026, 8, 8, 4, 0));
+test('flightInstant takes the DATE from dof and the CLOCK from the time value', () => {
+  // Production reality: dof and the date embedded in an ISO etd disagree by 6-17
+  // days. dof is the operator-controlled date of flight, so it must win.
+  assert.equal(flightInstant('2026-09-08T03:25:00.000Z', '20260917'), Date.UTC(2026, 8, 17, 3, 25));
+  assert.equal(flightInstant('2026-08-30T10:00:00.000Z', '20260916'), Date.UTC(2026, 8, 16, 10, 0));
+  // Clock-only values still resolve from dof.
   assert.equal(flightInstant('04:00', '20260908'), Date.UTC(2026, 8, 8, 4, 0));
   assert.equal(flightInstant('0400', '20260908'), Date.UTC(2026, 8, 8, 4, 0));
+  // No readable dof -> fall back to the embedded date, then to null.
+  assert.equal(flightInstant('2026-09-08T04:00:00.000Z', ''), Date.UTC(2026, 8, 8, 4, 0));
+  assert.equal(flightInstant('2026-09-08T04:00:00.000Z', 'undefined'), Date.UTC(2026, 8, 8, 4, 0));
   assert.equal(flightInstant('04:00', ''), null);
   assert.equal(flightInstant('04:00', 'not-a-date'), null);
+  // An invalid dof day/month must not silently produce a wrong instant.
+  assert.equal(flightInstant('04:00', '20261308'), null);
 });
 
 test('parseTafValidity anchors TAF day numbers to the month nearest the issue time', () => {
@@ -79,16 +89,30 @@ test('validityCoversWindow is null when the validity is unreadable', () => {
   assert.equal(validityCoversWindow(null, at(7), at(7)), null);             // unreadable TAF
 });
 
-test('flightLegWindows builds DEP/ARR/ALT windows and tolerates missing dates', () => {
+test('flightLegWindows builds DEP/ARR/ALT windows and rolls an overnight ARR to the next day', () => {
   const w = flightLegWindows('2026-09-08T04:00:00.000Z', '2026-09-08T07:50:00.000Z', '20260908');
   assert.deepEqual(w.dep, [Date.UTC(2026, 8, 8, 4, 0), Date.UTC(2026, 8, 8, 4, 0)]);
   assert.deepEqual(w.arr, [Date.UTC(2026, 8, 8, 7, 50), Date.UTC(2026, 8, 8, 7, 50)]);
   assert.equal(w.alt[0], Date.UTC(2026, 8, 8, 8, 50));   // STA + 1h
   assert.equal(w.alt[1], Date.UTC(2026, 8, 8, 10, 50));  // STA + 3h
+  // Overnight: STD 21:35, STA 03:20 -> arrival is the NEXT day, never before departure.
+  const overnight = flightLegWindows('21:35', '03:20', '20260821');
+  assert.equal(overnight.stdMs, Date.UTC(2026, 7, 21, 21, 35));
+  assert.equal(overnight.staMs, Date.UTC(2026, 7, 22, 3, 20));
+  assert.ok(overnight.staMs > overnight.stdMs);
+  assert.equal(overnight.alt[0], Date.UTC(2026, 7, 22, 4, 20));
   const noDate = flightLegWindows('0450', '0750', '');
   assert.equal(noDate.dep, null);
   assert.equal(noDate.arr, null);
   assert.equal(noDate.alt, null);
+});
+
+test('tafValidityLabel renders an operator-readable coverage period', () => {
+  assert.equal(
+    tafValidityLabel(parseTafValidity('TAF WADD 201100Z 2012/2118 12010KT 9999', Date.UTC(2026, 8, 20, 12, 6))),
+    '20 12:00Z–21 18:00Z'
+  );
+  assert.equal(tafValidityLabel(null), '');
 });
 
 test('dayHourNear resolves the nearest month like tafDate()', () => {
@@ -123,7 +147,7 @@ function loadWxClient() {
     .filter(m => !/\bsrc\s*=/i.test(m[1]) && m[2].trim());
   assert.equal(scripts.length, 1, 'expected exactly one inline script block in the WX page');
   const block = scripts[0][2];
-  const exportLine = '\n  globalThis.__wx = { wxPad2, wxParseTime, wxHourParts, wxFlightInstant, wxDayHourNear, wxLegWindow, wxWindowLabel, evaluateWeather };\n';
+  const exportLine = '\n  globalThis.__wx = { wxPad2, wxParseTime, wxHourParts, wxFlightInstant, wxDayHourNear, wxLegWindow, wxFlightWindows, wxCoverageNote, wxWindowLabel, evaluateWeather };\n';
   const instrumented = block.replace(/\}\)\(\);\s*$/, exportLine + '})();');
   assert.ok(instrumented.includes('globalThis.__wx'), 'could not instrument the WX script block');
 
@@ -174,15 +198,19 @@ test('client wxHourParts renders the real clock time for every stored format', (
   assert.notEqual(parts('2026-09-08T04:00:00.000Z'), parts('2026-09-08T07:50:00.000Z'));
 });
 
-test('client wxLegWindow is date-aware and derives the ALT window from STA', () => {
-  const std = wx.wxLegWindow('2026-09-08T04:00:00.000Z', '20260908', 0);
-  assert.equal(std.hour, 4);
-  assert.equal(std.instant, Date.UTC(2026, 8, 8, 4, 0));
-  const sta = wx.wxLegWindow('2026-09-08T07:50:00.000Z', '20260908', 0);
-  assert.equal(sta.hour, 7);
-  const alt = wx.wxLegWindow('2026-09-08T07:50:00.000Z', '20260908', 1);
-  assert.equal(alt.hour, 8);
-  assert.equal(alt.instant, Date.UTC(2026, 8, 8, 8, 50));
+test('client wxFlightWindows anchors to dof and rolls overnight arrivals', () => {
+  // dof wins over the stale date embedded in the ISO etd/eta.
+  const stale = wx.wxFlightWindows({ std: '2026-09-08T04:00:00.000Z', sta: '2026-09-08T07:50:00.000Z', dof: '20260917' });
+  assert.equal(stale.std.instant, Date.UTC(2026, 8, 17, 4, 0));
+  assert.equal(stale.sta.instant, Date.UTC(2026, 8, 17, 7, 50));
+  assert.equal(stale.std.hour, 4);
+  assert.equal(stale.alt.hour, 8);
+  assert.equal(stale.alt.instant, Date.UTC(2026, 8, 17, 8, 50));
+  // Overnight: STA clock earlier than STD clock belongs to the next day.
+  const overnight = wx.wxFlightWindows({ std: '21:35', sta: '03:20', dof: '20260821' });
+  assert.equal(overnight.std.instant, Date.UTC(2026, 7, 21, 21, 35));
+  assert.equal(overnight.sta.instant, Date.UTC(2026, 7, 22, 3, 20));
+  assert.ok(overnight.sta.instant > overnight.std.instant);
   // Legacy clock-only value still resolves its date from dof.
   assert.equal(wx.wxLegWindow('04:00', '20260908', 0).instant, Date.UTC(2026, 8, 8, 4, 0));
   // Midnight rollover of the ALT hour stays in 0..23.
@@ -191,6 +219,18 @@ test('client wxLegWindow is date-aware and derives the ALT window from STA', () 
   const empty = wx.wxLegWindow('', '', 0);
   assert.equal(empty.hour, null);
   assert.equal(empty.instant, null);
+});
+
+test('client wxCoverageNote only speaks up when a readable TAF misses the window', () => {
+  const note = wx.wxCoverageNote('OUT', '20 12:00Z–21 18:00Z', 'DEP');
+  assert.match(note, /OUTSIDE FLIGHT WINDOW/);
+  assert.match(note, /20 12:00Z/);
+  // IN / UNKNOWN / MISSING must not add a second, contradictory message: the leg
+  // badge already covers "no TAF at all".
+  assert.equal(wx.wxCoverageNote('IN', '20 12:00Z–21 18:00Z', 'DEP'), '');
+  assert.equal(wx.wxCoverageNote('UNKNOWN', '', 'DEP'), '');
+  assert.equal(wx.wxCoverageNote('MISSING', '', 'DEP'), '');
+  assert.equal(wx.wxCoverageNote(undefined, undefined, 'DEP'), '');
 });
 
 const TAF_TEMPO_NEXT_DAY = 'TAF WXXX 081700Z 0818/1000 9999 SCT016 TEMPO 0902/0905 TS';
@@ -304,7 +344,7 @@ async function warningPayload() {
   return { response, flights: JSON.parse(body.data) };
 }
 
-test('getActiveFlightDataForWarning picks the newest TAF and gates it by the flight window', async () => {
+test('getActiveFlightDataForWarning picks the newest TAF and reports coverage separately', async () => {
   const { response, flights } = await warningPayload();
   assert.equal(response.status, 200);
   const flight1 = flights.find(f => f.flightNo === '100');
@@ -314,15 +354,46 @@ test('getActiveFlightDataForWarning picks the newest TAF and gates it by the fli
   // Newest issue_time wins, not the last physical row.
   assert.equal(flight1.tafDep, 'TAF WADD 072300Z 0800/0906 12011KT 9999 SCT016');
   assert.equal(flight1.tafDepTime, '23:00');
-  // A TAF for another day is refused instead of producing a verdict.
-  assert.match(flight1.tafArr, /No TAF data in database/);
+  // The WADD TAF covers 08 SEP 00:00Z-09 SEP 06:00Z, so DEP is IN.
+  assert.equal(flight1.tafDepCoverage, 'IN');
+  assert.equal(flight1.tafDepValid, '08 00:00Z–09 06:00Z');
+  // ARR is WATO, whose TAF is for a later day: the forecast is still SHOWN (never
+  // blanked), and the mismatch is reported as coverage instead of "no TAF data".
+  assert.equal(flight1.tafArr, 'TAF WATO 101700Z 1018/1200 12011KT 9999 SCT016');
+  assert.equal(flight1.tafArrCoverage, 'OUT');
+  assert.equal(flight1.tafArrValid, '10 18:00Z–12 00:00Z');
+  assert.ok(!/No TAF data/.test(flight1.tafArr), 'a present TAF must never be replaced by a no-data sentinel');
   // dof travels to the client so the browser can date the STD/STA window.
   assert.equal(flight1.dof, '20260908');
   assert.equal(flight1.std, '2026-09-08T04:00:00.000Z');
   // Legacy clock-only row resolves the same window through dof.
   assert.equal(flight2.std, '04:00');
+  assert.equal(flight2.tafDepCoverage, 'IN');
   assert.equal(flight2.tafDep, 'TAF WADD 072300Z 0800/0906 12011KT 9999 SCT016');
-  assert.match(flight2.tafArr, /No TAF data in database/);
+});
+
+test('a flight whose dof differs from the date inside etd is anchored to dof', async () => {
+  const { database, DB } = createScenario();
+  // Same shape as production: etd carries 08 SEP while the operator's DOF is 10 SEP.
+  database.prepare("UPDATE flights SET dof = '20260910', etd = '2026-09-08T04:00:00.000Z', eta = '2026-09-08T07:50:00.000Z' WHERE callsign = '100'").run();
+  const authHeaders = await seedAuthUser(database, DB, 'registered');
+  const response = await onRequestPost({
+    request: new Request('http://localhost/api/rpc', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ method: 'getActiveFlightDataForWarning', args: [] })
+    }),
+    env: { DB }
+  });
+  const flights = JSON.parse((await response.json()).data);
+  database.close();
+  const flight1 = flights.find(f => f.flightNo === '100');
+  // Decisive assertion: the WADD TAF covers 08 SEP 00:00Z-09 SEP 06:00Z, so a 04:00Z
+  // departure is IN on the stale embedded date and OUT on the operator's DOF. Only
+  // the dof anchor can produce OUT here.
+  assert.equal(flight1.tafDepValid, '08 00:00Z–09 06:00Z');
+  assert.equal(flight1.tafDepCoverage, 'OUT');
+  assert.equal(flight1.tafArrCoverage, 'OUT');
 });
 
 test('an unreadable TAF validity keeps the displayed text instead of rejecting it', async () => {

@@ -108,7 +108,7 @@
             const response = await fetch('/api/google-sheets-config');
             if (!response.ok) throw new Error('Unable to load Google Sheets configuration. Reload the page to retry.');
             const config = await response.json();
-            if (!config.clientId) throw new Error('Google Sheets belum dikonfigurasi. Atur GOOGLE_OAUTH_CLIENT_ID di Cloudflare Pages, lalu deploy ulang. Download XLSX tetap tersedia.');
+            if (!config.clientId) throw new Error('Google Sheets is not configured. Set GOOGLE_OAUTH_CLIENT_ID in Cloudflare Pages, then redeploy. XLSX download remains available.');
             await new Promise(function (resolve, reject) {
                 if (window.google && google.accounts && google.accounts.oauth2) return resolve();
                 const script = document.createElement('script');

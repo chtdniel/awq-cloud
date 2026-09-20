@@ -58,7 +58,7 @@ const publicDirectory = resolve('public');
 const contentTypes = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.json': 'application/json', '.svg': 'image/svg+xml' };
 async function asset(request) {
   const pathname = decodeURIComponent(new URL(request.url).pathname);
-  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname));
+  const filename = resolve(publicDirectory, '.' + (pathname === '/' ? '/index.html' : pathname === '/app' ? '/app/index.html' : pathname));
   if (!filename.startsWith(publicDirectory + '\\') && !filename.startsWith(publicDirectory + '/')) return new Response('Forbidden', { status: 403 });
   try { return new Response(await readFile(filename), { headers: { 'Content-Type': contentTypes[extname(filename)] || 'application/octet-stream' } }); }
   catch { return new Response('Not found', { status: 404 }); }
@@ -140,7 +140,7 @@ await context.route('https://www.googleapis.com/upload/drive/v3/files?**', async
 });
 await context.route('https://docs.google.com/spreadsheets/d/fixture-sheet-123/edit', route => route.fulfill({ contentType: 'text/html', body: '<title>Fixture Google Sheet</title><h1>Google Sheets external boundary fixture</h1>' }));
 try {
-  await page.goto(baseUrl);
+  await page.goto(baseUrl + '/app');
   await page.getByRole('checkbox', { name: 'Select flight QZ646', exact: true }).check();
   await page.locator('#nav-data').click();
   await page.locator('[data-tab="fir-update"]').click();

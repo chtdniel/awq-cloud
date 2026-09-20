@@ -60,7 +60,7 @@
 
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
   <span class="eyebrow">Security — Access Control (ADMIN ONLY)</span>
-  <span class="settings-hint">Akses ditentukan oleh role akun (D1 auth_users), bukan allowlist</span>
+  <span class="settings-hint">Access is determined by the account role (D1 auth_users), not by an allowlist</span>
 </div>
 
 <div class="settings-note" style="margin-bottom:14px"><b>Access vocabulary:</b> <b>ADMIN</b> means the account can manage users and settings; <b>REGISTERED</b> means the account can view and update operational data; <b>READ ONLY</b> means the account can view data but cannot save changes. Your level comes from your account role, not from an email list.</div>
@@ -73,9 +73,9 @@
 
 <div id="settings-account-locked" class="locked-panel" hidden style="display:none;margin-bottom:14px">
   <span class="locked-title">🔒 Settings — Administrator Only</span>
-  <p style="margin:0;color:var(--text-secondary);line-height:1.6">Akun Anda tidak memiliki izin mengelola Settings. Halaman ini hanya untuk akun ber-role <b>admin</b>. Hubungi administrator bila Anda memang memerlukan akses ini.</p>
+  <p style="margin:0;color:var(--text-secondary);line-height:1.6">Your account does not have permission to manage Settings. This page is for accounts with the <b>admin</b> role only. Contact an administrator if you genuinely need this access.</p>
   <span class="locked-line" id="settings-locked-access">—</span>
-  <p class="settings-hint" style="margin:0">Anda tetap bisa memakai seluruh modul operasional (Flight, NOTAM, TAF, WX, FIR, Report) sesuai izin role akun.</p>
+  <p class="settings-hint" style="margin:0">You can still use every operational module (Flight, NOTAM, TAF, WX, FIR, Report) according to your account role's permissions.</p>
 </div>
 
 <!-- Fail closed: the admin shell starts hidden and is only revealed after the
@@ -87,7 +87,7 @@
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div>
         <div style="font:700 18px var(--font-display);letter-spacing:.02em">Your Access</div>
-        <div class="settings-hint" style="margin-top:4px">Sumber otorisasi tunggal: role akun pada sesi login D1</div>
+        <div class="settings-hint" style="margin-top:4px">Single source of authorisation: the account role on the D1 login session</div>
       </div>
       <span id="settings-mode-badge" class="badge badge-warn">Loading…</span>
     </div>
@@ -105,9 +105,9 @@
     <span class="settings-hint" id="settings-count">—</span>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
-    <div class="settings-note" style="border-style:solid">Daftar ini <b>tidak dipakai untuk otorisasi</b> sejak login internal aktif. Email di bawah hanya disimpan sebagai bukti migrasi dari Script Property lama.</div>
+    <div class="settings-note" style="border-style:solid">This list is <b>no longer used for authorisation</b> now that internal login is active. The emails below are kept only as evidence of the migration from the old Script Property.</div>
     <div id="settings-chips" class="settings-chips"></div>
-    <div id="settings-empty" class="settings-note" style="display:none"><b>Daftar legacy kosong</b> — tidak ada email lama yang perlu ditampilkan.</div>
+    <div id="settings-empty" class="settings-note" style="display:none"><b>Legacy list empty</b> — there are no old emails to display.</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn" id="settings-reveal-raw" onclick="settingsRevealRaw()" aria-pressed="false">Reveal email values</button>
       <button class="btn" id="settings-copy-raw" onclick="settingsCopyRaw()" aria-label="Copy raw legacy allowlist" disabled>⎘ Copy Raw</button>
@@ -124,20 +124,20 @@
   </div>
   <div style="padding:14px;display:grid;gap:10px">
     <div class="settings-note">
-      <b>Tidak lagi mengatur akses.</b> Sejak login internal aktif, izin ditentukan oleh <b>role akun</b> di tab Internal Users
-      (<code>admin</code> / <code>registered</code> / <code>readonly</code>). Daftar di bawah hanya disimpan sebagai bukti migrasi
-      dan tidak bisa diubah lagi dari sini — ini mencegah dua sumber kebenaran yang bisa berbeda.
+      <b>No longer controls access.</b> Since internal login became active, permissions are determined by the <b>account role</b> on the Internal Users tab
+      (<code>admin</code> / <code>registered</code> / <code>readonly</code>). The list below is kept only as migration evidence
+      and can no longer be changed from here — this prevents two sources of truth from diverging.
     </div>
     <label style="display:grid;gap:6px" for="settings-legacy-list">
-      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Legacy registered emails (OCC_ALLOWED_EMAILS, di tabel meta)</span>
+      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Legacy registered emails (OCC_ALLOWED_EMAILS, in the meta table)</span>
       <textarea id="settings-legacy-list" class="in" readonly aria-readonly="true" style="min-height:76px"></textarea>
-      <span class="settings-hint">Read-only. Untuk memberi akses, buat atau ubah role akun di tab <b>Internal Users</b>.</span>
+      <span class="settings-hint">Read-only. To grant access, create or change the account role on the <b>Internal Users</b> tab.</span>
     </label>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" onclick="settingsRefresh(true)" aria-label="Refresh legacy list">⟳ Refresh</button>
       <span id="settings-edit-status" class="settings-hint" style="align-self:center" role="status" aria-live="polite"></span>
     </div>
-    <div id="settings-locked-note" class="settings-note" style="display:none;border-color:var(--status-critical);background:var(--status-critical-bg);color:var(--status-critical)"><b>Not authorized</b> — halaman Settings hanya untuk administrator.</div>
+    <div id="settings-locked-note" class="settings-note" style="display:none;border-color:var(--status-critical);background:var(--status-critical-bg);color:var(--status-critical)"><b>Not authorized</b> — the Settings page is for administrators only.</div>
   </div>
 </div>
 
@@ -148,14 +148,14 @@
   </div>
   <div style="padding:14px;display:grid;gap:10px">
     <div class="settings-note">
-      <b>Tidak lagi mengatur siapa yang boleh membuka halaman ini.</b> Akses Settings mengikuti role <code>admin</code> pada akun.
-      Daftar <code>SETTINGS_ADMIN_EMAILS</code> di bawah hanya bukti migrasi dan tidak bisa diubah dari sini.
+      <b>No longer controls who may open this page.</b> Settings access follows the account's <code>admin</code> role.
+      The <code>SETTINGS_ADMIN_EMAILS</code> list below is migration evidence only and cannot be changed from here.
     </div>
     <div id="settings-admin-chips" class="settings-chips" aria-readonly="true"></div>
     <label style="display:grid;gap:6px" for="settings-legacy-admin-list">
-      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Legacy admin emails (SETTINGS_ADMIN_EMAILS, di tabel meta)</span>
+      <span style="font:700 10px var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Legacy admin emails (SETTINGS_ADMIN_EMAILS, in the meta table)</span>
       <textarea id="settings-legacy-admin-list" class="in" readonly aria-readonly="true" style="min-height:60px"></textarea>
-      <span class="settings-hint">Read-only. Ubah role akun di tab <b>Internal Users</b> untuk menambah atau mencabut admin.</span>
+      <span class="settings-hint">Read-only. Change the account role on the <b>Internal Users</b> tab to add or revoke an admin.</span>
     </label>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" onclick="settingsAdminRefresh()" aria-label="Refresh legacy admin list">⟳ Refresh</button>
@@ -169,7 +169,7 @@
     <span class="settings-title">Internal Auth Users</span>
     <button type="button" class="btn" onclick="authUsersRefresh()">⟳ Refresh</button>
   </div>
-  <div class="settings-note">Kelola akun login internal. Role menentukan akses: <b>admin</b> (kelola user + settings), <b>registered</b> (lihat + ubah data operasional), <b>readonly</b> (hanya lihat). Password sementara wajib diganti saat login pertama.</div>
+  <div class="settings-note">Manage internal login accounts. The role determines access: <b>admin</b> (manage users + settings), <b>registered</b> (view + update operational data), <b>readonly</b> (view only). A temporary password must be changed at first login.</div>
   <style>
     #auth-users-list { display:grid; gap:10px; margin:14px 0 16px; }
     #auth-users-list > .settings-chip { display:grid !important; grid-template-columns:minmax(0,1fr) auto !important; gap:12px !important; align-items:start !important; padding:16px !important; border:1px solid var(--border-subtle) !important; border-radius:12px !important; background:linear-gradient(180deg,var(--bg-panel),var(--bg-panel-alt)) !important; box-shadow:var(--shadow-soft) !important; }
@@ -199,8 +199,8 @@
   </div>
   <div style="padding:14px;display:grid;gap:10px">
     <div class="settings-note">
-      Read-only. Setiap perubahan allowlist legacy, role, status aktif, reset password, profil, dan konfigurasi WX AI dicatat beserta aktor,
-      hasil, dan ringkasan yang sudah diredaksi. Password dan token tidak pernah masuk ke log ini.
+      Read-only. Every change to the legacy allowlist, roles, active status, password resets, profiles, and the WX AI configuration is recorded together with the actor,
+      the outcome, and a redacted summary. Passwords and tokens never enter this log.
     </div>
     <div id="settings-audit-list" style="display:grid;gap:6px;max-height:340px;overflow:auto" role="region" aria-label="Audit log entries" tabindex="0"></div>
     <span id="settings-audit-status" class="settings-hint" role="status" aria-live="polite">—</span>
@@ -213,8 +213,8 @@
     <span id="settings-wxai-badge" class="badge badge-warn">—</span>
   </div>
   <div style="padding:14px;display:grid;gap:10px">
-    <div class="settings-note">Katalog model AI halaman WX + master kill-switch. Tersimpan di tabel <code>meta</code> D1 sebagai <code>WX_AI_CATALOG</code> / <code>WX_AI_ENABLED</code>. API key tidak pernah disimpan di sini.</div>
-    <span class="settings-hint" id="settings-wxai-saved">Terakhir diubah: —</span>
+    <div class="settings-note">AI model catalogue for the WX page + master kill-switch. Stored in the D1 <code>meta</code> table as <code>WX_AI_CATALOG</code> / <code>WX_AI_ENABLED</code>. API keys are never stored here.</div>
+    <span class="settings-hint" id="settings-wxai-saved">Last changed: —</span>
     <label style="display:flex;align-items:center;gap:8px;font:700 12px var(--font-mono);color:var(--text-primary)" for="settings-wxai-enabled">
       <input type="checkbox" id="settings-wxai-enabled" style="width:16px;height:16px"> AI Enabled (master kill-switch)
     </label>
@@ -252,7 +252,7 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" id="settings-sys-legacy-toggle" onclick="settingsSystemToggleLegacy()" aria-pressed="false" aria-controls="settings-sys-legacy-grid">Show legacy fields</button>
     </div>
-    <div class="settings-note">Data operasional tersimpan di <b>Cloudflare D1</b> (<code>awq-db</code>), bukan lagi Google Spreadsheet. Field legacy di atas hanya ditampilkan bila diperlukan untuk pemeriksaan migrasi.</div>
+    <div class="settings-note">Operational data is stored in <b>Cloudflare D1</b> (<code>awq-db</code>), no longer in a Google Spreadsheet. The legacy fields above are shown only when needed for migration checks.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" onclick="settingsSystemRefresh()" aria-label="Refresh system info">⟳ Refresh</button>
       <button id="settings-firlink-clear" class="btn" onclick="settingsFirLinkClear()" style="display:none" aria-label="Clear legacy FIR link">Clear legacy link</button>
@@ -309,7 +309,7 @@
         <input id="auth-reset-confirm" class="in" type="password" autocomplete="new-password" aria-describedby="auth-reset-confirm-error">
       </label>
       <p class="settings-hint" id="auth-reset-confirm-error" role="alert" style="color:var(--status-critical);min-height:14px;margin:2px 0 0"></p>
-      <p class="settings-hint" style="margin:4px 0 0">Akun akan dipaksa mengganti password saat login berikutnya, dan semua sesi aktifnya dicabut. Password sementara tidak pernah ditampilkan lagi setelah disimpan dan tidak masuk audit log.</p>
+      <p class="settings-hint" style="margin:4px 0 0">The account will be forced to change its password at the next login, and all of its active sessions are revoked. The temporary password is never displayed again after it is saved and never enters the audit log.</p>
       <p class="settings-hint" id="auth-reset-status" role="status" aria-live="polite" style="min-height:14px"></p>
     </div>
     <div class="modal-actions">
@@ -389,11 +389,11 @@
     var count = document.getElementById('settings-count');
     var allowed = res.allowed || [];
     if(allowed.length===0){
-       chips.innerHTML=''; empty.style.display=''; count.textContent='tidak ada entri legacy';
+       chips.innerHTML=''; empty.style.display=''; count.textContent='no legacy entries';
     } else {
       empty.style.display='none';
       chips.innerHTML = allowed.map(function(e){ return '<span class="settings-chip"><b>'+esc(rawRevealed ? e : maskEmail(e))+'</b></span>'; }).join('');
-      count.textContent = allowed.length + ' entri (legacy)';
+      count.textContent = allowed.length + ' entries (legacy)';
     }
     document.getElementById('settings-raw').textContent = rawRevealed ? (res.raw || '(empty)') : '(masked)';
     document.getElementById('settings-copy-raw').disabled = !rawRevealed;
@@ -572,7 +572,7 @@
   // A save that lost the race is reported, not silently retried: the older
   // editor must reload and re-apply its intent.
   window.settingsStaleRevisionModal = function(what, refresh){
-    settingsModal('Perubahan lebih baru terdeteksi', 'Another admin saved ' + what + ' after you loaded this page. Your edit was not applied. Refresh to see the latest version, then apply your change again.', 'Refresh now', function(){
+    settingsModal('Newer change detected', 'Another admin saved ' + what + ' after you loaded this page. Your edit was not applied. Refresh to see the latest version, then apply your change again.', 'Refresh now', function(){
       if(refresh) refresh();
     });
   };
@@ -616,7 +616,7 @@
     var chips = document.getElementById('settings-admin-chips');
     if(chips) chips.innerHTML = list.length
       ? list.map(function(e){ return '<span class="settings-chip"><b>'+esc(e)+'</b></span>'; }).join('')
-      : '<span class="settings-hint">Tidak ada entri legacy.</span>';
+      : '<span class="settings-hint">No legacy entries.</span>';
     var listBox = document.getElementById('settings-legacy-admin-list');
     if(listBox) listBox.value = list.join('\n');
   }
@@ -804,16 +804,16 @@
     var before = currentRoleFor(authRoleTarget);
     var impact = document.getElementById('auth-role-impact');
     impact.textContent = before
-      ? 'Akses saat ini: ' + (ROLE_LABELS[before] || before) + '. Perubahan berlaku pada login berikutnya akun tersebut.'
-      : 'Role akun saat ini tidak diketahui — refresh daftar user lalu coba lagi.';
+      ? 'Current access: ' + (ROLE_LABELS[before] || before) + '. The change takes effect at the next login of that account.'
+      : 'The current account role is unknown — refresh the user list and try again.';
     var save = document.getElementById('auth-role-save');
     if (save) save.disabled = !selected || selected === before;
   }
 
   function openAuthRole(email) {
-    if (!currentRoleFor(email)) { authUsersStatus('User tidak ditemukan di daftar. Refresh lalu coba lagi.'); return; }
+    if (!currentRoleFor(email)) { authUsersStatus('User not found in the list. Refresh and try again.'); return; }
     authRoleTarget = email;
-    document.getElementById('auth-role-target').textContent = 'Akun: ' + email;
+    document.getElementById('auth-role-target').textContent = 'Account: ' + email;
     document.getElementById('auth-role-select').value = currentRoleFor(email);
     document.getElementById('auth-role-status').textContent = '';
     document.getElementById('auth-role-backdrop').classList.add('open');
@@ -833,13 +833,13 @@
     if (!email || !role) return;
     var status = document.getElementById('auth-role-status');
     var save = document.getElementById('auth-role-save');
-    status.textContent = 'Menyimpan…';
+    status.textContent = 'Saving…';
     if (save) save.disabled = true;
     google.script.run.withSuccessHandler(function(){
       closeAuthRole();
-      authUsersRefresh('Role ' + email + ' diubah ke ' + role + '.');
+      authUsersRefresh('Role for ' + email + ' changed to ' + role + '.');
     }).withFailureHandler(function(error){
-      status.textContent = (error && error.message) || 'Tidak bisa mengubah role.';
+      status.textContent = (error && error.message) || 'Could not change the role.';
       refreshAuthRoleSave();
     }).adminUpdateUserRole(email, role);
   };
@@ -851,8 +851,8 @@
     var password = document.getElementById('auth-reset-password').value || '';
     var confirmValue = document.getElementById('auth-reset-confirm').value || '';
     var errors = {};
-    if (password.length < 12 || password.length > 256) errors.password = 'Password sementara harus 12-256 karakter.';
-    if (confirmValue !== password) errors.confirm = 'Konfirmasi password tidak sama.';
+    if (password.length < 12 || password.length > 256) errors.password = 'The temporary password must be 12-256 characters.';
+    if (confirmValue !== password) errors.confirm = 'The password confirmation does not match.';
     return { ok: Object.keys(errors).length === 0, errors: errors };
   }
 
@@ -873,7 +873,7 @@
 
   function openAuthReset(email) {
     authResetTarget = email;
-    document.getElementById('auth-reset-target').textContent = 'Reset password untuk: ' + email;
+    document.getElementById('auth-reset-target').textContent = 'Reset password for: ' + email;
     document.getElementById('auth-reset-password').value = '';
     document.getElementById('auth-reset-confirm').value = '';
     document.getElementById('auth-reset-password-error').textContent = '';
@@ -900,13 +900,13 @@
     var password = document.getElementById('auth-reset-password').value;
     var status = document.getElementById('auth-reset-status');
     var save = document.getElementById('auth-reset-save');
-    status.textContent = 'Menyimpan…';
+    status.textContent = 'Saving…';
     if (save) save.disabled = true;
     google.script.run.withSuccessHandler(function(){
       closeAuthReset();
-      authUsersRefresh('Password ' + email + ' direset. Semua sesi aktif dicabut.');
+      authUsersRefresh('Password for ' + email + ' reset. All active sessions revoked.');
     }).withFailureHandler(function(error){
-      status.textContent = (error && error.message) || 'Tidak bisa mereset password.';
+      status.textContent = (error && error.message) || 'Could not reset the password.';
       refreshAuthResetSave();
     }).adminResetPassword(email, password);
   };
@@ -1065,7 +1065,7 @@
     var box = document.getElementById('settings-audit-list');
     if(status) status.textContent = 'Loading…';
     if(typeof google==='undefined' || !google.script || !google.script.run){
-      if(box) box.innerHTML = '<div class="settings-note">Preview: audit log tidak tersedia tanpa backend.</div>';
+      if(box) box.innerHTML = '<div class="settings-note">Preview: the audit log is unavailable without a backend.</div>';
       if(status) status.textContent = '—';
       return;
     }
@@ -1082,11 +1082,11 @@
     var status = document.getElementById('settings-audit-status');
     var entries = res.entries || [];
     if(!entries.length){
-      box.innerHTML = '<div class="settings-note">Belum ada aktivitas tercatat.</div>';
+      box.innerHTML = '<div class="settings-note">No activity recorded yet.</div>';
     } else {
       box.innerHTML = entries.map(function(entry){
         var when = String(entry.createdAt || '').replace('T', ' ').replace(/\.\d+Z?$/, '');
-        var who = entry.actorEmail || '(sistem)';
+        var who = entry.actorEmail || '(system)';
         var target = entry.targetEmail || (entry.targetUserId ? '#' + entry.targetUserId : '—');
         return '<div class="settings-chip" style="display:grid;grid-template-columns:150px 170px 1fr 90px;gap:8px;align-items:center;border-radius:var(--radius-sm)">'
           + '<span style="color:var(--text-muted)">' + esc(when) + '</span>'
@@ -1098,9 +1098,9 @@
     }
     var retention = res.retention || {};
     document.getElementById('settings-audit-retention').textContent = res.pruned
-      ? 'retensi ' + (retention.maxAgeDays || 180) + ' hari / ' + (retention.maxRows || 5000) + ' baris · ' + res.pruned + ' entri lama dibersihkan'
-      : 'retensi ' + (retention.maxAgeDays || 180) + ' hari / ' + (retention.maxRows || 5000) + ' baris';
-    status.textContent = entries.length + ' entri terakhir' + (res.limit ? ' (maks ' + res.limit + ')' : '');
+      ? 'retention ' + (retention.maxAgeDays || 180) + ' days / ' + (retention.maxRows || 5000) + ' rows · ' + res.pruned + ' old entries pruned'
+      : 'retention ' + (retention.maxAgeDays || 180) + ' days / ' + (retention.maxRows || 5000) + ' rows';
+    status.textContent = entries.length + ' most recent entries' + (res.limit ? ' (max ' + res.limit + ')' : '');
   }
 
   document.querySelectorAll('#view-settings [data-settings-tab]').forEach(function(tab){
@@ -1253,7 +1253,7 @@
       + '<button type="button" class="btn" onclick="wxAiDelRow('+i+')" aria-label="Delete model">✕</button>'
       + '</div>'
       + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
-      + '<input class="in" data-f="label" value="'+esc(m.label)+'" placeholder="Label tampil" aria-label="Model label">'
+      + '<input class="in" data-f="label" value="'+esc(m.label)+'" placeholder="Display label" aria-label="Model label">'
       + '<input class="in" data-f="model" value="'+esc(m.model)+'" placeholder="model-id" aria-label="Model id value">'
       + '</div>'
       + '<p class="settings-hint" data-wxerror="'+i+'" role="alert" style="color:var(--status-critical);min-height:14px;margin:0"></p>'
@@ -1263,7 +1263,7 @@
   function render(list){
     var box = document.getElementById('settings-wxai-rows');
     if(!list.length){
-      box.innerHTML = '<div class="settings-note">Katalog kosong — AI akan memakai fallback default, dan tombol Save hanya menyimpan master switch.</div>';
+      box.innerHTML = '<div class="settings-note">Catalogue empty — AI will use the default fallback, and the Save button only stores the master switch.</div>';
       return;
     }
     box.innerHTML = list.map(rowHtml).join('');
@@ -1291,10 +1291,10 @@
     var id = String(row.id || '').trim().toLowerCase();
     var model = String(row.model || '').trim();
     var label = String(row.label || '').trim();
-    if(!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id)) errors.push('ID harus 2-64 karakter: huruf kecil, angka, dan tanda hubung.');
-    if(['gemini','openrouter','custom'].indexOf(row.provider) === -1) errors.push('Provider harus gemini, openrouter, atau custom.');
-    if(!model || model.length > 160) errors.push('Model wajib diisi, maksimal 160 karakter.');
-    if(!label || label.length > 160) errors.push('Label wajib diisi, maksimal 160 karakter.');
+    if(!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id)) errors.push('The ID must be 2-64 characters: lowercase letters, digits, and hyphens.');
+    if(['gemini','openrouter','custom'].indexOf(row.provider) === -1) errors.push('The provider must be gemini, openrouter, or custom.');
+    if(!model || model.length > 160) errors.push('Model is required, maximum 160 characters.');
+    if(!label || label.length > 160) errors.push('Label is required, maximum 160 characters.');
     return errors;
   }
 
@@ -1307,16 +1307,16 @@
       var errors = wxRowErrors(rows[index] || {});
       var id = String((rows[index] || {}).id || '').trim().toLowerCase();
       if(id){
-        if(seen[id]) errors.push('ID duplikat: "' + id + '".');
+        if(seen[id]) errors.push('Duplicate ID: "' + id + '".');
         else seen[id] = true;
       }
       var errorEl = rowEl.querySelector('[data-wxerror="'+index+'"]');
       if(errorEl) errorEl.textContent = errors.join(' ');
       rowEl.classList.toggle('settings-invalid', errors.length > 0);
       rowEl.setAttribute('aria-invalid', errors.length ? 'true' : 'false');
-      if(errors.length){ total += errors.length; problems.push('baris ' + (index + 1) + ': ' + errors[0]); }
+      if(errors.length){ total += errors.length; problems.push('row ' + (index + 1) + ': ' + errors[0]); }
     });
-    if(rows.length > 50){ problems.unshift('Maksimal 50 model.'); total += 1; }
+    if(rows.length > 50){ problems.unshift('Maximum 50 models.'); total += 1; }
     return { ok: total === 0, messages: problems, count: total };
   }
 
@@ -1328,10 +1328,10 @@
     if(isNaN(parsed.getTime())) return String(value);
     var stamp = parsed.toLocaleString();
     var ageMinutes = Math.round((Date.now() - parsed.getTime()) / 60000);
-    if(ageMinutes < 1) stamp += ' (baru saja)';
-    else if(ageMinutes < 60) stamp += ' (' + ageMinutes + ' menit lalu)';
-    else if(ageMinutes < 60 * 24) stamp += ' (' + Math.round(ageMinutes / 60) + ' jam lalu)';
-    else stamp += ' (' + Math.round(ageMinutes / (60 * 24)) + ' hari lalu)';
+    if(ageMinutes < 1) stamp += ' (just now)';
+    else if(ageMinutes < 60) stamp += ' (' + ageMinutes + ' minutes ago)';
+    else if(ageMinutes < 60 * 24) stamp += ' (' + Math.round(ageMinutes / 60) + ' hours ago)';
+    else stamp += ' (' + Math.round(ageMinutes / (60 * 24)) + ' days ago)';
     return stamp;
   }
 
@@ -1339,7 +1339,7 @@
     var el = document.getElementById('settings-wxai-saved');
     if(!el) return;
     var text = formatSavedAt(value);
-    el.textContent = text ? 'Terakhir diubah: ' + text : 'Terakhir diubah: belum pernah disimpan sejak default';
+    el.textContent = text ? 'Last changed: ' + text : 'Last changed: never saved since the default';
     el.title = value ? String(value) : '';
   }
 
@@ -1384,7 +1384,7 @@
   window.wxAiApplyBundle = function(bundle){
     applyAccess(bundle.access);
     if(bundle.wx && bundle.wx.ok){ applyWxAi(bundle.wx); status(''); }
-    else status('Server tidak mengekspos katalog WX (push Fase 1 dulu).');
+    else status('The server does not expose the WX catalogue (push Phase 1 first).');
   };
 
   window.wxAiRefresh = function(){
@@ -1445,8 +1445,8 @@
     if(!wxAiCanEdit){ status('Not authorized'); toast('Not authorized'); return; }
     var problems = validateBrowserRows();
     if(!problems.ok){
-      status('Perbaiki dulu: ' + problems.messages.slice(0, 2).join('; '));
-      toast('Katalog belum valid');
+      status('Fix these first: ' + problems.messages.slice(0, 2).join('; '));
+      toast('Catalogue is not valid yet');
       return;
     }
     var payload = {
@@ -1479,7 +1479,7 @@
       if(saveButton){ saveButton.textContent='💾 Save'; saveButton.removeAttribute('aria-busy'); }
       // Lost the race against another admin: reload instead of retrying blindly.
       if(err && err.code === 'STALE_REVISION'){
-        status('Konflik: katalog berubah di tempat lain.');
+        status('Conflict: the catalogue changed somewhere else.');
         if(window.settingsStaleRevisionModal) window.settingsStaleRevisionModal('the WX AI catalog', function(){ window.wxAiRefresh(); });
         return;
       }

@@ -1012,7 +1012,7 @@
     if (raw === null) return { present: false, owner: null };
     try { return { present: true, owner: JSON.parse(raw) }; }
     catch (e) {
-      console.warn('[BOARD] Stamp pemilik cache tidak terbaca — cache diabaikan.');
+      console.warn('[BOARD] Cache owner stamp is unreadable — cache ignored.');
       return { present: true, owner: null };
     }
   }
@@ -1116,7 +1116,7 @@
 
     return getBoardStateFromServer().then(state => {
       if (!state) {
-        console.warn('[BOARD] Server board state unavailable — sesi ini localStorage-only.');
+        console.warn('[BOARD] Server board state unavailable — this session is localStorage-only.');
         adoptCache();
         boardSyncReady = true; // render boleh jalan, push tetap diblokir
         return;
