@@ -117,6 +117,10 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   database.prepare('INSERT INTO auth_users (email_normalized, email_display, password_hash, password_salt, password_iterations, password_algorithm, role, is_active) VALUES (?,?,?,?,?,?,?,1)')
     .run('t@example.com', 't@example.com', encoded.hash, encoded.salt, encoded.iterations, encoded.algorithm, 'admin');
   const userId = database.prepare('SELECT id FROM auth_users').get().id;
+  // Dispatcher identity comes from the profile; the email is the documented
+  // fallback, so one assertion below drops this table on purpose.
+  database.exec('CREATE TABLE user_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER UNIQUE, full_name TEXT, iaa_id TEXT, lic_no TEXT, updated_by INTEGER, created_at TEXT, updated_at TEXT)');
+  database.prepare('INSERT INTO user_profiles (user_id, full_name, lic_no) VALUES (?, ?, ?)').run(userId, 'CHRIS DANIEL', 'FOOL-881234');
   const session = await createSession({ request: new Request('http://localhost/api/rpc'), env: { DB } }, userId);
   const cookieJar = session.headers.getSetCookie();
   const sessionCookie = cookieJar.find(v => v.startsWith('__Host-awq_session=')).split(';', 1)[0];
@@ -217,6 +221,63 @@ for (const ref of ['R2', 'T3', 'T4', 'B8', 'D8', 'G8', 'I8', 'J8', 'K8', 'N8', '
   assert(reportSheet.indexOf('</mergeCells>') < reportSheet.indexOf('<dataValidations') && reportSheet.indexOf('<dataValidations') < reportSheet.indexOf('<printOptions'), 'dataValidations sits between mergeCells and printOptions (schema order)');
   assert(/<c r="D9"[^>]*t="inlineStr"/.test(formSheet), 'briefing-form D9 still holds the flight-date TEXT');
   assert(!/<dataValidations/.test(formSheet), 'briefing-form XLSX gets no date validation (out of scope for the report-page rule)');
+
+  // --- TAF block: rows auto-fit to their text, empty rows auto-hidden -------
+  const rowTag = (sheet, n) => (sheet.match(new RegExp('<row r="' + n + '"[^>]*>')) || [''])[0];
+  const htOf = (sheet, n) => Number((rowTag(sheet, n).match(/ht="([\d.]+)"/) || [])[1]);
+  // One TAF (WADD / "NIL"): row 20 stays visible at content height, 21-26 hidden.
+  assert(htOf(reportSheet, 20) > 0 && !/hidden="1"/.test(rowTag(reportSheet, 20)), 'TAF row 20 (station present) stays visible and is sized');
+  assert(htOf(reportSheet, 20) < 60, 'one-line TAF row shrinks from the template 60pt (' + htOf(reportSheet, 20) + 'pt)');
+  for (let r = 21; r <= 26; r++) {
+    assert(/hidden="1"/.test(rowTag(reportSheet, r)), 'empty TAF row ' + r + ' is auto-hidden');
+  }
+  // A 5-line forecast (like YPGK/YPPD in the real report) must grow the row so
+  // nothing is clipped: 5 lines x ceil(14pt * 1.4) + 3 >= 100pt.
+  const multiTaf = ['TAF YPGK 200511Z 2006/2106 15008KT CAVOK', 'FM201400 11008KT CAVOK', 'FM201900 10008KT 9999 FEW010', 'FM210000 07008KT CAVOK', 'FM220000 09008KT CAVOK='].join('\n');
+  const multiPayload = { ...payload, tafs: [{ ...payload.tafs[0], forecast: multiTaf }] };
+  const multiRequest = new Request('http://localhost/api/rpc', { method: 'POST', headers, body: JSON.stringify({ method: 'generateBriefingXlsx', args: [multiPayload] }) });
+  const multiResponse = await onRequestPost({ request: multiRequest, env: { DB, ASSETS } });
+  assert(multiResponse.status === 200, 'generateBriefingXlsx with a 5-line TAF returns 200');
+  const multiSheet = new TextDecoder().decode(zipPartMap(new Uint8Array(await multiResponse.arrayBuffer())).get('xl/worksheets/sheet5.xml'));
+  assert(htOf(multiSheet, 20) >= 100, 'five-line TAF grows the row height (' + htOf(multiSheet, 20) + 'pt >= 100pt)');
+  assert(htOf(multiSheet, 20) > htOf(reportSheet, 20), 'multi-line row is taller than the one-line row');
+  assert(/customHeight="1"/.test(rowTag(multiSheet, 20)), 'computed height is explicit (customHeight) so Excel honours it');
+  assert((multiSheet.match(/<row r="20"[^>]*ht="60"/) || []).length === 0, 'the template 60pt height no longer survives in the TAF block');
+  // The editable briefing form is the same document, so it follows the same rule.
+  assert(/hidden="1"/.test(rowTag(formSheet, 21)), 'briefing-form TAF block hides empty rows too');
+  assert(htOf(formSheet, 20) < 60, 'briefing-form TAF row is auto-fit as well (' + htOf(formSheet, 20) + 'pt)');
+
+  // --- SIGNIFICANT NOTAM block: same auto-fit + auto-hide rule ---------------
+  // One NOTAM group ("NIL"): row 39 visible at content height, rows 40-45 hidden.
+  assert(!/hidden="1"/.test(rowTag(reportSheet, 39)), 'NOTAM row 39 (content present) stays visible');
+  assert(htOf(reportSheet, 39) > 0 && htOf(reportSheet, 39) < 138.75, 'NOTAM row auto-fits from the template 138.75pt (' + htOf(reportSheet, 39) + 'pt)');
+  for (let r = 40; r <= 45; r++) {
+    assert(/hidden="1"/.test(rowTag(reportSheet, r)), 'empty NOTAM row ' + r + ' is auto-hidden');
+  }
+  assert(/hidden="1"/.test(rowTag(formSheet, 40)), 'briefing-form SIGNIFICANT NOTAM block hides empty rows too');
+
+  // --- Dispatcher name from the login account (F50) -------------------------
+  const cellText = (sheet, ref) => {
+    const cell = (sheet.match(new RegExp('<c r="' + ref + '"[^>]*>[\\s\\S]*?</c>')) || [''])[0];
+    return (cell.match(/<is><t[^>]*>([\s\S]*?)<\/t><\/is>/) || [])[1] || '';
+  };
+  assert(cellText(reportSheet, 'F50') === 'CHRIS DANIEL', 'report F50 carries the logged-in dispatcher profile name (' + cellText(reportSheet, 'F50') + ')');
+  assert(cellText(formSheet, 'F50') === 'CHRIS DANIEL', 'briefing-form F50 carries the dispatcher name too');
+  assert(cellText(reportSheet, 'E48') === 'CHRIS DANIEL (LIC: FOOL-881234)', 'E48 keeps the form DXR signature untouched');
+
+  // A raw 4-line NOTAM must grow the SIGNIFICANT NOTAM row. Dropping the profile
+  // table first also proves the documented fallback: the account email.
+  database.exec('DROP TABLE user_profiles');
+  const multiNotam = ['A1234/26 NOTAMN', 'Q) WIIF/QRTCA/IV/BO/A/000/999/0600S10600E005', 'A) WADD B) 2609010000 C) 2610010000', 'E) AIRSPACE RESTRICTED'].join('\n');
+  const notamPayload = { ...payload, notams: [{ ...payload.notams[0], text: multiNotam }] };
+  const notamRequest = new Request('http://localhost/api/rpc', { method: 'POST', headers, body: JSON.stringify({ method: 'generateBriefingXlsx', args: [notamPayload] }) });
+  const notamResponse = await onRequestPost({ request: notamRequest, env: { DB, ASSETS } });
+  assert(notamResponse.status === 200, 'generateBriefingXlsx with a 4-line NOTAM returns 200');
+  const notamSheet = new TextDecoder().decode(zipPartMap(new Uint8Array(await notamResponse.arrayBuffer())).get('xl/worksheets/sheet5.xml'));
+  assert(!/hidden="1"/.test(rowTag(notamSheet, 39)), 'the four-line NOTAM row stays visible');
+  assert(htOf(notamSheet, 39) >= 4 * 17, 'four-line NOTAM grows the row height (' + htOf(notamSheet, 39) + 'pt >= 68pt)');
+  assert(htOf(notamSheet, 39) > htOf(reportSheet, 39), 'a longer NOTAM row is taller than the one-line row');
+  assert(cellText(notamSheet, 'F50') === 't@example.com', 'F50 falls back to the account email when no profile name exists (' + cellText(notamSheet, 'F50') + ')');
 
   console.log('PASS: report XLSX (report page) carries no QR image part or anchor; DATE row defaults to today (UTC) with DD-MMM-YYYY + date validation.');
   database.close();

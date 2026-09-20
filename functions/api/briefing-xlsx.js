@@ -1,4 +1,5 @@
 import { decodeNotamText } from './notamUtils.js';
+import { getRequestUser } from './auth.js';
 import { qrEncode, qrPngBytes } from '../../shared/qr.mjs';
 
 // ============================================================================
@@ -249,6 +250,117 @@ function dateCellValidationXml() {
         + '</dataValidation></dataValidations>';
 }
 
+// --- Row auto-fit / auto-hide (Terminal Aerodrome Forecasts block) ----------
+// Rows 20-26 hold one aerodrome each (station in C:D, forecast text in the merged
+// E:S cell). Excel never auto-fits a row whose content lives in a MERGED cell, and
+// the template pins every one of these rows to ht="60" customHeight="1" — so a
+// 5-line TAF gets clipped. We therefore compute the height ourselves from the text
+// (explicit line breaks + wrap estimate for the merged width) and hide the rows
+// that carry no station at all.
+
+const TAF_BLOCK = { firstRow: 20, rows: 7, stationColumn: 'C', textColumn: 'E' };
+
+// The NOTAM block mirrors the TAF block: station in C:D, then two text cells —
+// left in the merged E:K, right in the merged L:S.
+const NOTAM_BLOCK = { firstRow: 39, rows: 7, stationColumn: 'C', leftColumn: 'E', rightColumn: 'L' };
+
+// Dispatcher name printed under the DXR signature block, taken from the login
+// account (profile full name, else the account email).
+const DISPATCHER_CELL = 'F50';
+
+function columnLetterToIndex(letter) {
+    let index = 0;
+    for (const ch of String(letter).toUpperCase()) index = index * 26 + (ch.charCodeAt(0) - 64);
+    return index;
+}
+
+// Merged range of a cell, e.g. mergedRangeEnd(sheetXml, 'E20') → 'S' for E20:S20.
+function mergedRangeEnd(sheetXml, ref) {
+    const merges = (sheetXml.match(/<mergeCells[\s\S]*?<\/mergeCells>/) || [''])[0];
+    const m = merges.match(new RegExp('<mergeCell ref="' + ref + ':([A-Z]+)\\d+"/>'));
+    return m ? m[1] : null;
+}
+
+function columnWidthUnits(sheetXml, firstCol, lastCol) {
+    const defaultWidth = Number((sheetXml.match(/<sheetFormatPr[^>]*defaultColWidth="([\d.]+)"/) || [])[1]) || 8.43;
+    const cols = (sheetXml.match(/<cols>[\s\S]*?<\/cols>/) || [''])[0];
+    const widths = {};
+    for (const c of cols.matchAll(/<col ([^>]*)\/>/g)) {
+        const min = Number((c[1].match(/min="(\d+)"/) || [])[1]);
+        const max = Number((c[1].match(/max="(\d+)"/) || [])[1]);
+        const width = Number((c[1].match(/width="([\d.]+)"/) || [])[1]);
+        for (let i = min; i <= max; i++) widths[i] = width;
+    }
+    let total = 0;
+    for (let i = firstCol; i <= lastCol; i++) total += widths[i] || defaultWidth;
+    return total;
+}
+
+// Font size + wrap setting of a cell's style (the height depends on both).
+function readCellTextStyle(stylesXml, sheetXml, ref) {
+    const styleId = Number((sheetXml.match(new RegExp('<c r="' + ref + '"[^>]*\\ss="(\\d+)"')) || [])[1]);
+    const xfs = [...(stylesXml.match(/<cellXfs[^>]*>[\s\S]*?<\/cellXfs>/) || [''])[0]
+        .matchAll(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g)].map(m => m[0]);
+    const xf = xfs[styleId] || '';
+    const fontId = Number((xf.match(/fontId="(\d+)"/) || [])[1]);
+    const fonts = [...(stylesXml.match(/<fonts[^>]*>[\s\S]*?<\/fonts>/) || [''])[0]
+        .matchAll(/<font>[\s\S]*?<\/font>|<font\/>/g)].map(m => m[0]);
+    const size = Number(((fonts[fontId] || '').match(/<sz val="([\d.]+)"/) || [])[1]) || 11;
+    return { size, wrap: /wrapText="1"/.test(xf) };
+}
+
+function countWrappedLines(text, style, widthUnits) {
+    // Excel's column-width unit is one digit of the default font, so a larger font
+    // fits proportionally fewer characters into the same merged width.
+    const charsPerLine = Math.max(10, Math.floor((widthUnits * 11 / style.size) * 0.95));
+    let lines = 0;
+    String(text || '').split(/\r?\n/).forEach(segment => {
+        if (!style.wrap) { lines += 1; return; }
+        const words = segment.trim().split(/\s+/).filter(Boolean);
+        if (words.length === 0) { lines += 1; return; }
+        let used = 1;
+        let current = 0;
+        words.forEach(word => {
+            const add = current === 0 ? word.length : word.length + 1;
+            if (current > 0 && current + add > charsPerLine) { used += 1; current = word.length; }
+            else current += add;
+        });
+        lines += used;
+    });
+    return Math.max(1, lines);
+}
+
+function columnOf(ref) {
+    return String(ref).replace(/\d+/g, '');
+}
+
+// Tallest content across the row's merged text cells (NOTAM rows carry left and
+// right text). The height is measured from the text, the cell's own font size and
+// whether that cell wraps — Excel cannot auto-fit a merged cell by itself.
+function rowHeightForCells(sheetXml, stylesXml, cells) {
+    let lines = 1;
+    let lineHeight = 15;
+    cells.forEach(cell => {
+        const startColumn = columnOf(cell.ref);
+        const endColumn = mergedRangeEnd(sheetXml, cell.ref) || startColumn;
+        const widthUnits = columnWidthUnits(sheetXml, columnLetterToIndex(startColumn), columnLetterToIndex(endColumn));
+        const style = readCellTextStyle(stylesXml, sheetXml, cell.ref);
+        lines = Math.max(lines, countWrappedLines(cell.text, style, widthUnits));
+        lineHeight = Math.max(lineHeight, Math.ceil(style.size * 1.4));
+    });
+    return Math.min(409, Math.max(15, lines * lineHeight + 3));
+}
+
+// Rewrites a row's height/hidden attributes without touching the rest of the tag.
+function setRowLayout(sheetXml, row, layout) {
+    return sheetXml.replace(new RegExp('(<row r="' + row + '"[^>]*?)(/?>)'), (match, attrs, close) => {
+        let out = attrs.replace(/\s+(?:ht|customHeight|hidden)="[^"]*"/g, '');
+        if (layout.height) out += ' ht="' + layout.height + '" customHeight="1"';
+        if (layout.hidden) out += ' hidden="1"';
+        return out + close;
+    });
+}
+
 function findSheetFile(workbookXml, workbookRelsXml, sheetName) {
     const tagRe = new RegExp('<sheet[^>]*name="' + sheetName + '"[^>]*/?>');
     const tag = workbookXml.match(tagRe);
@@ -497,6 +609,8 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
 // options.dateCellToday: true writes TODAY (UTC) into the DATE row as a real,
 // changeable date (DD-MMM-YYYY + date validation) instead of the flight-date
 // range. Used by the report page; the editable briefing form keeps the range.
+// options.dispatcherName: printed into DISPATCHER_CELL (F50) — the logged-in
+// account that generated the workbook.
 async function buildXlsxResponse(context, form, options = {}) {
     const embedSignatureQr = options.embedSignatureQr !== false;
     const dateCellToday = options.dateCellToday === true;
@@ -563,11 +677,20 @@ async function buildXlsxResponse(context, form, options = {}) {
         xml = setInlineCell(xml, txCol + r, t.forecast || '');
     });
     const weatherStations = [...new Map((form.tafs || []).filter(taf => taf.stationEntered || taf.station).map(taf => [taf.stationEntered || taf.station, taf])).values()];
-    for (let index = 0; index < 7; index++) {
+    const stylesXml = (get('xl/styles.xml') || {}).text || '';
+    for (let index = 0; index < TAF_BLOCK.rows; index++) {
         const taf = weatherStations[index];
-        const continuation = index === 6 && weatherStations.length > 7;
-        xml = setInlineCell(xml, 'C' + (20 + index), continuation ? 'CONT.' : taf?.stationEntered || taf?.station || '');
-        xml = setInlineCell(xml, 'E' + (20 + index), continuation ? 'See WX sheet for all station forecasts.' : taf?.forecast || '');
+        const continuation = index === TAF_BLOCK.rows - 1 && weatherStations.length > TAF_BLOCK.rows;
+        const stationText = continuation ? 'CONT.' : taf?.stationEntered || taf?.station || '';
+        const forecastText = continuation ? 'See WX sheet for all station forecasts.' : taf?.forecast || '';
+        const row = TAF_BLOCK.firstRow + index;
+        xml = setInlineCell(xml, TAF_BLOCK.stationColumn + row, stationText);
+        xml = setInlineCell(xml, TAF_BLOCK.textColumn + row, forecastText);
+        // Auto-fit the row to its content and hide the rows with no aerodrome.
+        xml = setRowLayout(xml, row, {
+            height: rowHeightForCells(xml, stylesXml, [{ ref: TAF_BLOCK.textColumn + row, text: forecastText }]),
+            hidden: !stationText
+        });
     }
     const notamGroups = [];
     (form.notams || []).forEach(nt => {
@@ -585,17 +708,31 @@ async function buildXlsxResponse(context, form, options = {}) {
             cbrNotamRows.push({ station: group.station, left: group.texts[i], right: group.texts[i + 1] || '' });
         }
     });
-    for (let index = 0; index < 7; index++) {
+    for (let index = 0; index < NOTAM_BLOCK.rows; index++) {
         const item = cbrNotamRows[index];
-        const continuation = index === 6 && cbrNotamRows.length > 7;
-        const row = 39 + index;
-        xml = setInlineCell(xml, 'C' + row, continuation ? 'CONT.' : item?.station || '');
-        xml = setInlineCell(xml, 'E' + row, continuation ? 'See NOTAM sheet for all selected NOTAMs.' : item?.left || '');
-        xml = setInlineCell(xml, 'L' + row, continuation ? '' : item?.right || '');
+        const continuation = index === NOTAM_BLOCK.rows - 1 && cbrNotamRows.length > NOTAM_BLOCK.rows;
+        const row = NOTAM_BLOCK.firstRow + index;
+        const stationText = continuation ? 'CONT.' : item?.station || '';
+        const leftText = continuation ? 'See NOTAM sheet for all selected NOTAMs.' : item?.left || '';
+        const rightText = continuation ? '' : item?.right || '';
+        xml = setInlineCell(xml, NOTAM_BLOCK.stationColumn + row, stationText);
+        xml = setInlineCell(xml, NOTAM_BLOCK.leftColumn + row, leftText);
+        xml = setInlineCell(xml, NOTAM_BLOCK.rightColumn + row, rightText);
+        // Auto-fit to the taller of the two text cells; hide fully empty rows.
+        xml = setRowLayout(xml, row, {
+            height: rowHeightForCells(xml, stylesXml, [
+                { ref: NOTAM_BLOCK.leftColumn + row, text: leftText },
+                { ref: NOTAM_BLOCK.rightColumn + row, text: rightText }
+            ]),
+            hidden: !stationText && !leftText && !rightText
+        });
     }
     const sig = form.signatures || {};
     xml = setInlineCell(xml, ANCHORS.dxrName, sig.dxrName || '');
     xml = setInlineCell(xml, ANCHORS.picName, sig.picName || '');
+    // Dispatcher on duty = the logged-in account that generated this workbook.
+    const dispatcherName = String(options.dispatcherName || '').trim();
+    if (dispatcherName) xml = setInlineCell(xml, DISPATCHER_CELL, dispatcherName);
     cbrSheet.text = xml;
     const wxFile = findSheetFile(workbookXml, workbookRels, 'WX');
     if (wxFile) {
@@ -687,13 +824,37 @@ async function buildXlsxResponse(context, form, options = {}) {
 
 // --- Handler ----------------------------------------------------------------
 
+// Dispatcher on duty for the workbook: the logged-in account's profile name, or
+// the account email when no profile is filled in yet. Never throws — a missing
+// profile table (fresh DB) must not break report generation.
+async function resolveDispatcherName(context) {
+    try {
+        const user = await getRequestUser(context);
+        if (!user) return '';
+        try {
+            const profile = await context.env.DB.prepare(
+                'SELECT full_name FROM user_profiles WHERE user_id = ? LIMIT 1'
+            ).bind(user.id).first();
+            const fullName = profile && profile.full_name ? String(profile.full_name).trim() : '';
+            if (fullName) return fullName;
+        } catch (profileErr) {
+            console.warn('[XLSX] dispatcher profile lookup skipped:', profileErr.message);
+        }
+        return String(user.email || '').trim();
+    } catch (userErr) {
+        console.warn('[XLSX] dispatcher lookup skipped:', userErr.message);
+        return '';
+    }
+}
+
 export async function handleGenerateBriefingXlsx(context, args) {
     const [form] = args || [];
     if (!form || !Array.isArray(form.legs)) {
         return Response.json({ error: 'Invalid form payload (need {legs,tafs,notams,signatures,fields})' }, { status: 400 });
     }
     try {
-        return await buildXlsxResponse(context, form, { embedSignatureQr: true });
+        const dispatcherName = await resolveDispatcherName(context);
+        return await buildXlsxResponse(context, form, { embedSignatureQr: true, dispatcherName });
     } catch (e) {
         console.error('[XLSX] generate failed:', e);
         return Response.json({ error: 'XLSX generation failed: ' + e.message }, { status: e instanceof RangeError ? 400 : 500 });
@@ -717,7 +878,8 @@ export async function handleGenerateReportXlsx(context, args) {
         }
         // Report page (DOWNLOAD SHEET XLSX / CREATE GOOGLE SHEET): no signature QR,
         // and the DATE row defaults to today (UTC) with a date picker/validation.
-        return await buildXlsxResponse(context, form, { embedSignatureQr: false, dateCellToday: true });
+        const dispatcherName = await resolveDispatcherName(context);
+        return await buildXlsxResponse(context, form, { embedSignatureQr: false, dateCellToday: true, dispatcherName });
     } catch (e) {
         console.error('[XLSX report] generate failed:', e);
         return Response.json({ error: 'XLSX report generation failed: ' + e.message }, { status: e instanceof RangeError ? 400 : 500 });
