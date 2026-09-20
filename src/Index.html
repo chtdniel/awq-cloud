@@ -1486,13 +1486,13 @@
           <button type="button" class="dropdown-item" role="menuitem" data-tab="update-notam" onclick="window.switchTab('update-notam')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-pen"/></svg>NOTAM UPDATE</button>
           <button type="button" class="dropdown-item" role="menuitem" data-tab="fir-update" onclick="window.switchTab('fir-update')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-sync"/></svg>FIR UPDATE</button>
           <button type="button" class="dropdown-item" role="menuitem" data-tab="waypoint" onclick="window.switchTab('waypoint')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-stack"/></svg>WAYPOINT</button>
+          <button type="button" class="dropdown-item" role="menuitem" data-tab="route" onclick="window.switchTab('route')"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-arrow-r"/></svg>ROUTE</button>
         </div>
       </div>
       <button id="nav-taf" class="nav-tab" onclick="window.switchTab('taf')" title="TAF Manager"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-note"/></svg>TAF</button>
       <button id="nav-notam" class="nav-tab" onclick="window.switchTab('notam')" title="NOTAM Analysis"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-alert"/></svg>NOTAM<span id="nav-notam-badge" style="display:none; background:var(--status-critical); color:#fff; font-size:9px; font-weight:900; min-width:16px; height:16px; line-height:16px; border-radius:8px; padding:0 4px; text-align:center; margin-left:6px;">0</span></button>
       <button id="nav-report" class="nav-tab" onclick="window.switchTab('report')" title="Release Compiler"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-files"/></svg>REPORT</button>
-      <button id="nav-weather" class="nav-tab" onclick="window.switchTab('weather')" title="Weather Warning"><svg class="ic ic-sm" style="margin-right:6px; color:var(--status-warning);"><use href="#i-warn"/></svg>WX</button>
-      <button id="nav-route" class="nav-tab" onclick="window.switchTab('route')" title="Route Manager"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-arrow-r"/></svg>ROUTE</button>
+      <button id="nav-weather" class="nav-tab" onclick="window.switchTab('weather')" title="Weather Monitoring"><svg class="ic ic-sm" style="margin-right:6px; color:var(--status-warning);"><use href="#i-warn"/></svg>WX</button>
        <button id="nav-fir" class="nav-tab" onclick="window.switchTab('fir')" title="FIR Dispatch Control"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-arrow-r"/></svg>FIR</button>
         <button id="nav-fir-notam" class="nav-tab" onclick="window.switchTab('fir-notam')" title="FIR NOTAM Editor"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-pen"/></svg>FIR NOTAM</button>
         <button id="nav-checklist" class="nav-tab" onclick="window.switchTab('checklist')" title="Operational Checklist"><svg class="ic ic-sm" style="margin-right:6px;"><use href="#i-check-circle"/></svg>CHECKLIST</button>
@@ -1626,10 +1626,10 @@
 
       const targetView = document.getElementById('view-' + tabName);
       const targetNav = document.getElementById('nav-' + tabName);
-      // Submenu entries (NOTAM UPDATE / FIR UPDATE / WAYPOINT) live under the DATA parent.
+      // Submenu entries (NOTAM UPDATE / FIR UPDATE / WAYPOINT / ROUTE) live under the DATA parent.
       // Their views have no dedicated top-level nav button, so active state + aria-current
       // fall back to the DATA parent tab.
-      const dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint'];
+      const dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint', 'route'];
       const isDataSubmenu = dataSubmenuTabs.indexOf(tabName) !== -1;
       
       if (!targetView) {
@@ -1732,7 +1732,7 @@
     (function() {
       var __occRunDiagnostics = function() {
         var sections = ['flight', 'update-notam', 'fir-update', 'taf', 'notam', 'report', 'weather', 'route', 'waypoint'];
-        var dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint'];
+        var dataSubmenuTabs = ['update-notam', 'fir-update', 'waypoint', 'route'];
         var missing = [];
         sections.forEach(function(s) {
           var el = document.getElementById('view-' + s);
