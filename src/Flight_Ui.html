@@ -3484,6 +3484,46 @@
       .syncCgoData(boardIds);
   };
 
+  // =========================================================
+  // CGO PUSH ACTION (LINKS menu)
+  // =========================================================
+  // The sheet is read inside Google Apps Script, which the Worker cannot call,
+  // so an operator triggers the push from a browser that is already signed in to
+  // airasia.com. The URL is requested from the backend on click instead of being
+  // written into this page, because this page is served without authentication
+  // and the URL carries the shared token.
+  window.pushCgoPlan = function() {
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      alert('CGO push is unavailable in this environment.');
+      return;
+    }
+    // Opened inside the click, then redirected once the URL arrives: a
+    // window.open after the response would be treated as an unsolicited pop-up.
+    const tab = window.open('about:blank', '_blank');
+    if (tab) {
+      tab.opener = null;
+      tab.document.title = 'Pushing CGO plan';
+      tab.document.body.textContent = 'Reading the CGO PLAN sheet and sending it to the board...';
+    }
+
+    const failed = message => {
+      if (tab && !tab.closed) tab.close();
+      alert('CGO push unavailable: ' + message);
+    };
+
+    google.script.run
+      .withFailureHandler(err => failed(err && err.message ? err.message : String(err)))
+      .withSuccessHandler(result => {
+        if (!result || !result.url) {
+          failed('the server has no push URL configured. Set CGO_BRIDGE_URL in Cloudflare Pages.');
+          return;
+        }
+        if (tab && !tab.closed) tab.location.replace(result.url);
+        else window.open(result.url, '_blank');
+      })
+      .getCgoPushUrl();
+  };
+
   // Final Initialization Trigger
   (function() {
     console.log('[SYSTEM] Script block reached EOF. Triggering init...');

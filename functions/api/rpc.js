@@ -41,7 +41,7 @@ const AUTHENTICATED_READ_METHODS = new Set([
   'getActiveFlightList', 'getFlightSummary', 'getWxRules', 'getWxManualExcerpt', 'wxAiGetCatalog',
   'generateBriefingXlsx', 'generateReportXlsx', 'getBriefingForm', 'getBriefingFormHistory', 'getOperationalReadiness',
   'getNotamUpdateHistory', 'getNotamData', 'getAirportNotes', 'analyzeFlightBoardNotams', 'getSettingsAccessInfo',
-  'getBoardState'
+  'getBoardState', 'getCgoPushUrl'
 ]);
 
 function rpcGuard(context) {
@@ -307,6 +307,9 @@ export async function onRequestPost(context) {
         return await handlePersistAnalysisResults(context, args);
       case 'syncCgoData':
         return await handleSyncCgoData(context, access.requestUser, args);
+
+      case 'getCgoPushUrl':
+        return await handleGetCgoPushUrl(context);
 
       
       default:
@@ -2763,6 +2766,41 @@ async function handlePersistAnalysisResults(context, args) {
         console.error('Persist Analysis Error:', e);
         return Response.json({ error: e.message }, { status: 500 });
     }
+}
+
+// The one-click push link for the board's LINKS menu.
+//
+// It is assembled here rather than written into the page because the app HTML is
+// served without authentication: a token baked into it would be readable by
+// anyone who fetches /app/index.html. Only a signed-in session can ask for this,
+// and the answer is never cached.
+async function handleGetCgoPushUrl(context) {
+    const notConfigured = (detail) => Response.json({
+        error: `CGO push is not configured: ${detail}`,
+        code: 'PUSH_NOT_CONFIGURED'
+    }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
+
+    const raw = String(context.env.CGO_BRIDGE_URL || '').trim();
+    if (!raw) return notConfigured('set CGO_BRIDGE_URL in Cloudflare Pages to the Apps Script /exec deployment URL, then redeploy.');
+
+    let parsed;
+    try {
+        parsed = new URL(raw);
+    } catch {
+        return notConfigured('CGO_BRIDGE_URL is not a valid URL.');
+    }
+    // The token is appended to this URL, so the destination is checked before it
+    // is built — a misconfigured variable must not be able to leak the token to
+    // another host.
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'script.google.com' || !parsed.pathname.endsWith('/exec')) {
+        return notConfigured('CGO_BRIDGE_URL must be the https://script.google.com/.../exec deployment URL.');
+    }
+    const token = String(context.env.CGO_BRIDGE_TOKEN || '').trim();
+    if (!token) return notConfigured('set the CGO_BRIDGE_TOKEN secret in Cloudflare Pages, then redeploy.');
+
+    parsed.searchParams.set('token', token);
+    parsed.searchParams.set('action', 'push');
+    return Response.json({ data: { url: parsed.toString() } }, { headers: { 'Cache-Control': 'no-store' } });
 }
 
 // How old the pushed sheet snapshot is. The operator has to judge whether the

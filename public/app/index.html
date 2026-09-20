@@ -647,6 +647,18 @@
       transition: opacity 0.2s;
     }
     .dropdown-item:hover::after { opacity: 0.85; }
+
+    /* The push entry is an action, not a link, so it is a real <button>. These
+       rules strip the browser's default button chrome so it matches its siblings. */
+    #ext-links-menu button.dropdown-item {
+      width: 100%;
+      background: transparent;
+      border: 0;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    #ext-links-menu button.dropdown-item:disabled { opacity: 0.5; cursor: progress; }
     
     .dropdown-divider {
       height: 1px;
@@ -1504,6 +1516,7 @@
         <div id="ext-links-menu" class="dropdown-menu">
           <a class="dropdown-item" href="https://docs.google.com/spreadsheets/d/1PAV7ajnwv6CpYoGzsMKzAjlmdhLsrOd1Tsz0UDOfdj8/edit?gid=1555717677#gid=1555717677" target="_blank">A/C STATUS</a>
           <a class="dropdown-item" href="https://docs.google.com/spreadsheets/d/1jHGaWQB5PtzkmVKwb7k_a1nPTZoUhcJjn7NnKWaw-Qg/edit?gid=0#gid=0" target="_blank">CGO PLAN</a>
+          <button type="button" class="dropdown-item" onclick="window.pushCgoPlan()">PUSH CGO PLAN</button>
           <a class="dropdown-item" href="https://drive.google.com/drive/folders/1_TqB_9wV9Bqz6bEh-Ip0s_adFqf3bZcJ" target="_blank">DISPATCH BULETIN</a>
           <div class="dropdown-divider"></div>
           <a class="dropdown-item" href="https://aviationweather.gov/data/taf/" target="_blank">ADDS (TAF)</a>
@@ -5016,6 +5029,46 @@
         }
       })
       .syncCgoData(boardIds);
+  };
+
+  // =========================================================
+  // CGO PUSH ACTION (LINKS menu)
+  // =========================================================
+  // The sheet is read inside Google Apps Script, which the Worker cannot call,
+  // so an operator triggers the push from a browser that is already signed in to
+  // airasia.com. The URL is requested from the backend on click instead of being
+  // written into this page, because this page is served without authentication
+  // and the URL carries the shared token.
+  window.pushCgoPlan = function() {
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      alert('CGO push is unavailable in this environment.');
+      return;
+    }
+    // Opened inside the click, then redirected once the URL arrives: a
+    // window.open after the response would be treated as an unsolicited pop-up.
+    const tab = window.open('about:blank', '_blank');
+    if (tab) {
+      tab.opener = null;
+      tab.document.title = 'Pushing CGO plan';
+      tab.document.body.textContent = 'Reading the CGO PLAN sheet and sending it to the board...';
+    }
+
+    const failed = message => {
+      if (tab && !tab.closed) tab.close();
+      alert('CGO push unavailable: ' + message);
+    };
+
+    google.script.run
+      .withFailureHandler(err => failed(err && err.message ? err.message : String(err)))
+      .withSuccessHandler(result => {
+        if (!result || !result.url) {
+          failed('the server has no push URL configured. Set CGO_BRIDGE_URL in Cloudflare Pages.');
+          return;
+        }
+        if (tab && !tab.closed) tab.location.replace(result.url);
+        else window.open(result.url, '_blank');
+      })
+      .getCgoPushUrl();
   };
 
   // Final Initialization Trigger

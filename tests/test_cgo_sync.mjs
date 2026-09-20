@@ -283,6 +283,8 @@ const SHEET = [
   ['QZ999', '21/09/2026', 'SUB', 'KUL', '5:05', '8:40', '700', '', '']
 ];
 
+const BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbTestDeploymentId/exec';
+
 async function makeEnv(role, { withMeta = true } = {}) {
   const database = new DatabaseSync(':memory:');
   database.exec(`
@@ -313,7 +315,7 @@ async function makeEnv(role, { withMeta = true } = {}) {
     DB,
     database,
     authHeaders,
-    env: { DB, CGO_BRIDGE_TOKEN: 'tok_123' }
+    env: { DB, CGO_BRIDGE_TOKEN: 'tok_123', CGO_BRIDGE_URL: BRIDGE_URL }
   };
 }
 
@@ -404,6 +406,58 @@ await checkAsync('ingest drops non-array rows and stringifies cells', async () =
   assert.equal(result.body.rowCount, 2, 'the stray string row is dropped');
   const snapshot = storedSnapshot(env.database);
   assert.deepEqual(snapshot.values[1].slice(0, 3), ['1', '2', '']);
+});
+
+// ---- Push link for the LINKS menu ----
+
+await checkAsync('getCgoPushUrl returns the token-bearing push URL to a signed-in session', async () => {
+  const env = await makeEnv('readonly');
+  const result = await rpc(env, 'getCgoPushUrl');
+  assert.equal(result.status, 200);
+  const url = new URL(result.data.url);
+  assert.equal(url.hostname, 'script.google.com');
+  assert.ok(url.pathname.endsWith('/exec'));
+  assert.equal(url.searchParams.get('action'), 'push');
+  assert.equal(url.searchParams.get('token'), 'tok_123');
+});
+
+await checkAsync('getCgoPushUrl refuses an anonymous caller, so the token never reaches the public page', async () => {
+  const env = await makeEnv('registered');
+  const result = await rpc(env, 'getCgoPushUrl', [], {});
+  assert.equal(result.status, 401);
+  assert.equal(result.body.code, 'AUTH_REQUIRED');
+});
+
+await checkAsync('getCgoPushUrl refuses a host that is not script.google.com', async () => {
+  const env = await makeEnv('registered');
+  env.env.CGO_BRIDGE_URL = 'https://evil.example.com/macros/s/x/exec';
+  const result = await rpc(env, 'getCgoPushUrl');
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /must be the https:\/\/script\.google\.com/);
+});
+
+await checkAsync('getCgoPushUrl refuses a /dev URL and a non-URL', async () => {
+  const env = await makeEnv('registered');
+  env.env.CGO_BRIDGE_URL = 'https://script.google.com/macros/s/x/dev';
+  const dev = await rpc(env, 'getCgoPushUrl');
+  assert.equal(dev.status, 503);
+  env.env.CGO_BRIDGE_URL = 'not a url';
+  const broken = await rpc(env, 'getCgoPushUrl');
+  assert.equal(broken.status, 503);
+  assert.match(broken.body.error, /not a valid URL/);
+});
+
+await checkAsync('getCgoPushUrl explains a missing bridge URL or token', async () => {
+  const env = await makeEnv('registered');
+  env.env.CGO_BRIDGE_URL = '';
+  const noUrl = await rpc(env, 'getCgoPushUrl');
+  assert.equal(noUrl.status, 503);
+  assert.match(noUrl.body.error, /set CGO_BRIDGE_URL/);
+  env.env.CGO_BRIDGE_URL = BRIDGE_URL;
+  env.env.CGO_BRIDGE_TOKEN = '';
+  const noToken = await rpc(env, 'getCgoPushUrl');
+  assert.equal(noToken.status, 503);
+  assert.match(noToken.body.error, /CGO_BRIDGE_TOKEN secret/);
 });
 
 // ---- RPC path ----

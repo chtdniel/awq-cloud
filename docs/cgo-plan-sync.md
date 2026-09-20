@@ -110,14 +110,17 @@ Pages → the project → **Settings → Environment variables → Production**:
 | Name | Type | Value |
 |---|---|---|
 | `CGO_BRIDGE_TOKEN` | **Secret** | the shared token |
+| `CGO_BRIDGE_URL` | **Secret** | the Apps Script `/exec` deployment URL — the same one the bookmark uses |
 
-Then **redeploy** — Pages reads environment variables at deployment time. `CGO_BRIDGE_URL` is no longer used and can be deleted.
+Then **redeploy** — Pages reads environment variables at deployment time.
 
 > Only **Secrets** can be managed from the dashboard, because this project's plain variables are managed through `wrangler.toml`.
 
+`CGO_BRIDGE_URL` is what powers **LINKS → PUSH CGO PLAN** on the board: the Worker appends the token and hands the finished URL to a signed-in operator, who clicks it to push. It is deliberately assembled on the server — the app page is served *without* authentication, so a URL carrying the token must never be written into it.
+
 ### 5. Verify
 
-- The sheet menu's **Push CGO plan now** reports `CGO plan pushed` with the counts.
+- The bookmark (or **LINKS → PUSH CGO PLAN**) reports `CGO plan pushed` with the counts.
 - On the board, **Sync CGO Data** shows `[ CGO SYNC ]` with the weights and the snapshot's age.
 
 ---
@@ -150,5 +153,6 @@ Then **redeploy** — Pages reads environment variables at deployment time. `CGO
 | `functions/api/cgo-ingest.js` | the authenticated push endpoint; validates and stores the snapshot |
 | `shared/cgo.mjs` | header resolution, date/weight parsing, board matching, summary text — pure, no I/O |
 | `functions/api/rpc.js` | `handleSyncCgoData` — reads the snapshot, writes `flights.cgo`, returns the board payload |
-| `src/Flight_Ui.html` | `window.syncCgoData()` — sends the board ids, shows the summary |
+| `src/Flight_Ui.html` | `window.syncCgoData()` and `window.pushCgoPlan()` — sends the board ids, shows the summary, opens the push tab |
+| `src/Index.html` | the **LINKS → PUSH CGO PLAN** entry |
 | `tests/test_cgo_sync.mjs` | parsing, matching, the ingest endpoint, and the whole RPC path |
