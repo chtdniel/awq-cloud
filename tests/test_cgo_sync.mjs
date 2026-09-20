@@ -1,27 +1,23 @@
-// Sync CGO Data: sheet parsing, board matching, the Apps Script bridge client,
-// and the full RPC path against a stubbed bridge.
+// Sync CGO Data: sheet parsing, board matching, the push ingest endpoint, and
+// the full RPC path.
 //
-// The real functions/api/rpc.js is bundled, so these assertions run the same
-// guards the deployed Worker runs — including the tier and CSRF rules that apply
-// because the sync writes.
+// The sheet reaches the Worker by push (the Workspace blocks anonymous Apps
+// Script web apps), so the sync reads a snapshot stored in the `meta` table.
+// Both the real functions/api/rpc.js and functions/api/cgo-ingest.js are
+// bundled, so these assertions run the same guards the deployed Worker runs.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
-import { matchCgoEntries, normalizeCgoValue, normalizeFlightNo, parseCgoSheet, parseSheetDate, summarizeCgoSync } from '../shared/cgo.mjs';
+import { CGO_SNAPSHOT_KEY, matchCgoEntries, normalizeCgoValue, normalizeFlightNo, parseCgoSheet, parseSheetDate, summarizeCgoSync } from '../shared/cgo.mjs';
 import { seedAuthUser } from './rpc_auth_fixture.mjs';
 
-// functions/api/*.js is ESM for Cloudflare Pages Functions, but this package is
-// "type": "commonjs", so Node would read it as CommonJS. Load it the same way
-// rpc_auth_fixture.mjs loads auth.js — possible because cgo-bridge.js has no
-// relative imports of its own.
-const bridgeSource = await readFile(new URL('../functions/api/cgo-bridge.js', import.meta.url), 'utf8');
-const { readBridgeValues, sanitizeBridgeUrl } = await import(
-  'data:text/javascript;base64,' + Buffer.from(bridgeSource).toString('base64')
-);
+async function bundle(entry) {
+  const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'esm', write: false });
+  return import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
+}
 
-const bridgeBundle = await build({ entryPoints: ['functions/api/rpc.js'], bundle: true, platform: 'node', format: 'esm', write: false });
-const { onRequestPost } = await import('data:text/javascript;base64,' + Buffer.from(bridgeBundle.outputFiles[0].text).toString('base64'));
+const { onRequestPost } = await bundle('functions/api/rpc.js');
+const { onRequestPost: onCgoIngest } = await bundle('functions/api/cgo-ingest.js');
 
 let failures = 0;
 function check(name, fn) {
@@ -258,109 +254,17 @@ check('summarizeCgoSync explains an unmatched flight to the operator', () => {
   assert.match(lines, /Not on the board: 1 \(999\)/);
 });
 
-// ---- Apps Script bridge client ----
-
-const BRIDGE_URL = 'https://script.google.com/macros/s/AKfycbTestBridgeDeploymentId/exec';
-
-function bridgeResponse(payload, { asHtml = false } = {}) {
-  return new Response(asHtml ? '<!DOCTYPE html><html>Sign in</html>' : JSON.stringify(payload), {
-    status: 200,
-    headers: { 'Content-Type': asHtml ? 'text/html' : 'application/json' }
-  });
-}
-
-check('sanitizeBridgeUrl only accepts an https script.google.com /exec URL', () => {
-  assert.equal(sanitizeBridgeUrl(BRIDGE_URL).hostname, 'script.google.com');
-  assert.throws(() => sanitizeBridgeUrl(''), /CGO_BRIDGE_URL variable/);
-  assert.throws(() => sanitizeBridgeUrl('not a url'), /not a valid URL/);
-  assert.throws(() => sanitizeBridgeUrl('http://script.google.com/macros/s/x/exec'), /must be an https URL/);
-  assert.throws(() => sanitizeBridgeUrl('https://evil.example.com/macros/s/x/exec'), /must point at script\.google\.com/);
-  assert.throws(() => sanitizeBridgeUrl('https://script.google.com/macros/s/x/dev'), /\/exec deployment URL/);
+check('summarizeCgoSync states the snapshot age and warns when it is old', () => {
+  const plan = parseCgoSheet([HEADER, ['QZ320', '21/09/2026', 'SUB', 'KUL', '5:05', '8:40', '2500', '', '']]);
+  const match = matchCgoEntries(plan.entries, board);
+  const fresh = summarizeCgoSync(plan, match, { sheetName: 'CGO PLAN', ageMinutes: 3 }).join('\n');
+  assert.match(fresh, /"CGO PLAN" was read 3 minute\(s\) ago\./);
+  assert.doesNotMatch(fresh, /WARNING/);
+  const stale = summarizeCgoSync(plan, match, { sheetName: 'CGO PLAN', ageMinutes: 400 }).join('\n');
+  assert.match(stale, /WARNING: that snapshot is over 2 hours old/);
 });
 
-await checkAsync('readBridgeValues sends the token and returns the sheet grid', async () => {
-  const seen = [];
-  const result = await readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok_123' }, {
-    fetchImpl: async (url, options) => {
-      seen.push({ url: String(url), options });
-      return bridgeResponse({ ok: true, sheetName: 'CGO', readAt: '2026-09-21T00:00:00.000Z', values: [HEADER, ['QZ320', '21/09/2026', 'SUB', 'KUL', '5:05', '8:40', '2500', '', '']] });
-    }
-  });
-  assert.equal(seen.length, 1);
-  assert.ok(seen[0].url.includes('token=tok_123'), 'the token is sent');
-  assert.equal(seen[0].options.redirect, 'follow');
-  assert.equal(result.sheetName, 'CGO');
-  assert.equal(result.values.length, 2);
-});
-
-await checkAsync('readBridgeValues explains a missing bridge URL', async () => {
-  await assert.rejects(readBridgeValues({}, { fetchImpl: async () => bridgeResponse({ ok: true }) }), /CGO_BRIDGE_URL variable/);
-});
-
-await checkAsync('readBridgeValues explains a missing token', async () => {
-  await assert.rejects(
-    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL }, { fetchImpl: async () => bridgeResponse({ ok: true }) }),
-    /CGO_BRIDGE_TOKEN secret/
-  );
-});
-
-await checkAsync('readBridgeValues explains a deployment that is not public', async () => {
-  await assert.rejects(
-    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok' }, { fetchImpl: async () => bridgeResponse({}, { asHtml: true }) }),
-    /did not return JSON.*Who has access: Anyone/s
-  );
-});
-
-await checkAsync('readBridgeValues names the permission failure and points at diagnose()', async () => {
-  // The Apps Script runs, but as an account that cannot open the spreadsheet.
-  // Google answers with its own error page, so the message must not blame the
-  // deployment's access setting.
-  const permissionPage = '<!DOCTYPE html><html><head><style>body{}</style></head><body>'
-    + '<div class="errorMessage">Sorry, you do not have permission to access the requested document.</div>'
-    + '<script>window.x=1;</script></body></html>';
-  await assert.rejects(
-    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok' }, {
-      fetchImpl: async () => new Response(permissionPage, { status: 200, headers: { 'Content-Type': 'text/html' } })
-    }),
-    error => /did not return JSON/.test(error.message)
-      && /do not have permission/.test(error.message)
-      && /run diagnose\(\)/.test(error.message)
-      && !/Who has access: Anyone/.test(error.message)
-  );
-});
-
-await checkAsync('readBridgeValues recognises the Indonesian permission page', async () => {
-  const indonesian = '<html><body><p>Maaf, Anda tidak memiliki izin untuk mengakses dokumen yang diminta.</p></body></html>';
-  await assert.rejects(
-    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok' }, {
-      fetchImpl: async () => new Response(indonesian, { status: 200, headers: { 'Content-Type': 'text/html' } })
-    }),
-    /run diagnose\(\)/
-  );
-});
-
-await checkAsync('readBridgeValues names the token mismatch', async () => {
-  await assert.rejects(
-    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'wrong' }, { fetchImpl: async () => bridgeResponse({ ok: false, error: 'unauthorized' }) }),
-    /CGO_BRIDGE_TOKEN must match CGO_BRIDGE_TOKEN in the Apps Script project properties/
-  );
-});
-
-await checkAsync('readBridgeValues relays a bridge-side read failure', async () => {
-  await assert.rejects(
-    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok' }, { fetchImpl: async () => bridgeResponse({ ok: false, error: 'No item with the given ID could be found' }) }),
-    /could not read the sheet: No item with the given ID/
-  );
-});
-
-await checkAsync('readBridgeValues rejects a response that carries no grid', async () => {
-  await assert.rejects(
-    readBridgeValues({ CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok' }, { fetchImpl: async () => bridgeResponse({ ok: true }) }),
-    /returned no sheet values/
-  );
-});
-
-// ---- RPC path ----
+// ---- Ingest endpoint ----
 
 function statement(database, sql, parameters = []) {
   return {
@@ -379,7 +283,7 @@ const SHEET = [
   ['QZ999', '21/09/2026', 'SUB', 'KUL', '5:05', '8:40', '700', '', '']
 ];
 
-async function makeEnv(role, { sheetValues = SHEET, bridge = null } = {}) {
+async function makeEnv(role, { withMeta = true } = {}) {
   const database = new DatabaseSync(':memory:');
   database.exec(`
     CREATE TABLE flights (
@@ -393,6 +297,7 @@ async function makeEnv(role, { sheetValues = SHEET, bridge = null } = {}) {
       sid TEXT, waypoint_seq TEXT, star TEXT, arr_rwy TEXT, route_string TEXT);
     CREATE TABLE latlong (id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT, waypoint TEXT,
       latitude REAL, longitude REAL, sequence_order INTEGER);
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
   `);
   const DB = {
     prepare: (sql, parameters) => statement(database, sql, parameters),
@@ -404,42 +309,120 @@ async function makeEnv(role, { sheetValues = SHEET, bridge = null } = {}) {
   insert.run('321', 'WMKK', 'WADD', '20260921', '1800', '2026-09-21T10:00:00.000Z', '2026-09-21T12:00:00.000Z');
   insert.run('646', 'WADD', 'WATO', '20260917', null, '2026-09-17T03:25:00.000Z', '2026-09-17T04:40:00.000Z');
 
-  const calls = [];
-  const fetchImpl = bridge || (async (url, options = {}) => {
-    calls.push({ url: String(url), options });
-    return bridgeResponse({ ok: true, sheetName: 'CGO PLAN', readAt: '2026-09-21T00:00:00.000Z', values: sheetValues });
-  });
-
   return {
     DB,
     database,
     authHeaders,
-    calls,
-    fetchImpl,
-    env: { DB, CGO_BRIDGE_URL: BRIDGE_URL, CGO_BRIDGE_TOKEN: 'tok_123' }
+    env: { DB, CGO_BRIDGE_TOKEN: 'tok_123' }
   };
 }
 
-async function rpc(handle, method, args = [], headers = handle.authHeaders, fetchImpl = handle.fetchImpl) {
-  const original = globalThis.fetch;
-  globalThis.fetch = fetchImpl;
-  try {
-    const request = new Request('http://localhost/api/rpc', {
-      method: 'POST',
-      headers: { Origin: 'http://localhost', Host: 'localhost', 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ method, args })
-    });
-    const response = await onRequestPost({ request, env: handle.env });
-    let body = null;
-    try { body = await response.json(); } catch { body = null; }
-    return { status: response.status, body, data: body && body.data };
-  } finally {
-    globalThis.fetch = original;
-  }
+async function ingest(env, body, token = 'tok_123') {
+  const request = new Request('http://localhost/api/cgo-ingest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-AWQ-CGO-Token': token },
+    body: typeof body === 'string' ? body : JSON.stringify(body)
+  });
+  const response = await onCgoIngest({ request, env });
+  let parsed = null;
+  try { parsed = await response.json(); } catch { parsed = null; }
+  return { status: response.status, body: parsed };
+}
+
+function storedSnapshot(database) {
+  const row = database.prepare('SELECT value FROM meta WHERE key = ?').get(CGO_SNAPSHOT_KEY);
+  return row ? JSON.parse(row.value) : null;
+}
+
+function pushPayload(values = SHEET, extra = {}) {
+  return { sheetId: 'sheet-1', sheetName: 'CGO PLAN', pushedAt: new Date().toISOString(), values, ...extra };
+}
+
+await checkAsync('ingest stores a valid push', async () => {
+  const env = await makeEnv('registered');
+  const result = await ingest(env.env, pushPayload());
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.rowCount, 5);
+  assert.equal(result.body.entryCount, 4);
+  const snapshot = storedSnapshot(env.database);
+  assert.equal(snapshot.sheetName, 'CGO PLAN');
+  assert.equal(snapshot.entryCount, 4);
+  assert.equal(snapshot.values.length, 5);
+});
+
+await checkAsync('ingest refuses a wrong token', async () => {
+  const env = await makeEnv('registered');
+  const result = await ingest(env.env, pushPayload(), 'wrong');
+  assert.equal(result.status, 401);
+  assert.equal(result.body.error, 'unauthorized');
+  assert.equal(storedSnapshot(env.database), null);
+});
+
+await checkAsync('ingest refuses when the shared secret is not configured', async () => {
+  const env = await makeEnv('registered');
+  const result = await ingest({ DB: env.DB }, pushPayload());
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /CGO_BRIDGE_TOKEN is not configured/);
+});
+
+await checkAsync('ingest refuses a body that is not JSON', async () => {
+  const env = await makeEnv('registered');
+  const result = await ingest(env.env, '<html>nope</html>');
+  assert.equal(result.status, 400);
+  assert.match(result.body.error, /not JSON/);
+});
+
+await checkAsync('ingest refuses a body without a grid', async () => {
+  const env = await makeEnv('registered');
+  const result = await ingest(env.env, { sheetName: 'CGO PLAN' });
+  assert.equal(result.status, 400);
+  assert.match(result.body.error, /body\.values/);
+});
+
+await checkAsync('ingest refuses a sheet whose header moved, keeping the previous snapshot', async () => {
+  const env = await makeEnv('registered');
+  await ingest(env.env, pushPayload());
+  const before = storedSnapshot(env.database);
+  const result = await ingest(env.env, pushPayload([['notes only'], ['nothing here']]));
+  assert.equal(result.status, 422);
+  assert.match(result.body.error, /CGO PLAN header not found/);
+  assert.deepEqual(storedSnapshot(env.database), before, 'the good snapshot survived');
+});
+
+await checkAsync('ingest refuses an oversized payload', async () => {
+  const env = await makeEnv('registered');
+  const result = await ingest(env.env, { values: [[ 'x'.repeat(1024 * 1024 + 10) ]] });
+  assert.equal(result.status, 413);
+  assert.match(result.body.error, /payload too large/);
+});
+
+await checkAsync('ingest drops non-array rows and stringifies cells', async () => {
+  const env = await makeEnv('registered');
+  const result = await ingest(env.env, pushPayload([HEADER, 'not a row', [1, 2, null, undefined, '', '', 2500, '', '']]));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.rowCount, 2, 'the stray string row is dropped');
+  const snapshot = storedSnapshot(env.database);
+  assert.deepEqual(snapshot.values[1].slice(0, 3), ['1', '2', '']);
+});
+
+// ---- RPC path ----
+
+async function rpc(handle, method, args = [], headers = handle.authHeaders) {
+  const request = new Request('http://localhost/api/rpc', {
+    method: 'POST',
+    headers: { Origin: 'http://localhost', Host: 'localhost', 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify({ method, args })
+  });
+  const response = await onRequestPost({ request, env: handle.env });
+  let body = null;
+  try { body = await response.json(); } catch { body = null; }
+  return { status: response.status, body, data: body && body.data };
 }
 
 await checkAsync('syncCgoData writes the plan weight onto the board flights', async () => {
   const env = await makeEnv('registered');
+  await ingest(env.env, pushPayload());
   // The board holds flights 1 (320), 2 (321) and 3 (646). Flight 4 is not on the
   // board — its plan line (QZ999) must stay untouched.
   const result = await rpc(env, 'syncCgoData', [[1, 2, 3]]);
@@ -456,6 +439,7 @@ await checkAsync('syncCgoData writes the plan weight onto the board flights', as
 
 await checkAsync('syncCgoData leaves a flight alone when it is not on the board', async () => {
   const env = await makeEnv('registered');
+  await ingest(env.env, pushPayload());
   const result = await rpc(env, 'syncCgoData', [[1]]);
   assert.equal(result.status, 200);
   assert.equal(env.database.prepare('SELECT cgo FROM flights WHERE callsign = ?').get('321').cgo, '1800', 'flight 321 was not on the board');
@@ -464,29 +448,51 @@ await checkAsync('syncCgoData leaves a flight alone when it is not on the board'
 
 await checkAsync('syncCgoData refreshes the board payload the frontend re-renders from', async () => {
   const env = await makeEnv('registered');
+  await ingest(env.env, pushPayload());
   const result = await rpc(env, 'syncCgoData', [[1, 2, 3]]);
   assert.ok(Array.isArray(result.data.flights));
   assert.equal(result.data.flights.find(flight => flight.FLIGHT === '320').CGO, '2500');
   assert.ok(Array.isArray(result.data.cgoSync.summary) && result.data.cgoSync.summary.length > 0);
 });
 
+await checkAsync('syncCgoData tells the operator to push when no snapshot has arrived', async () => {
+  const env = await makeEnv('registered');
+  const result = await rpc(env, 'syncCgoData', [[1, 2, 3]]);
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, 'NO_SNAPSHOT');
+  assert.match(result.body.error, /pushCgoPlan\(\)/);
+});
+
+await checkAsync('syncCgoData reports an unreadable snapshot instead of writing junk', async () => {
+  const env = await makeEnv('registered');
+  env.database.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(CGO_SNAPSHOT_KEY, '{not json');
+  const result = await rpc(env, 'syncCgoData', [[1, 2, 3]]);
+  assert.equal(result.status, 500);
+  assert.equal(result.body.code, 'SNAPSHOT_CORRUPT');
+});
+
+await checkAsync('syncCgoData warns the operator about a stale snapshot', async () => {
+  const env = await makeEnv('registered');
+  const old = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
+  await ingest(env.env, pushPayload(SHEET, { pushedAt: old }));
+  const result = await rpc(env, 'syncCgoData', [[1]]);
+  assert.equal(result.status, 200);
+  assert.ok(result.data.cgoSync.snapshotAgeMinutes >= 299);
+  assert.ok(result.data.cgoSync.summary.some(line => /WARNING: that snapshot is over 2 hours old/.test(line)));
+});
+
 await checkAsync('syncCgoData refuses an empty board with an actionable message', async () => {
   const env = await makeEnv('registered');
+  await ingest(env.env, pushPayload());
   const result = await rpc(env, 'syncCgoData', [[]]);
   assert.equal(result.status, 400);
   assert.equal(result.body.code, 'BOARD_EMPTY');
   assert.match(result.body.error, /No flights are on the board/);
 });
 
-await checkAsync('syncCgoData reports a sheet whose header moved rather than writing nothing', async () => {
-  const env = await makeEnv('registered', { sheetValues: [['notes only'], ['nothing here']] });
-  const result = await rpc(env, 'syncCgoData', [[1, 2, 3]]);
-  assert.equal(result.status, 422);
-  assert.equal(result.body.code, 'SHEET_LAYOUT');
-});
-
 await checkAsync('syncCgoData requires the registered tier because it writes', async () => {
   const env = await makeEnv('readonly');
+  await ingest(env.env, pushPayload());
   const result = await rpc(env, 'syncCgoData', [[1]]);
   assert.equal(result.status, 403);
   assert.equal(result.body.code, 'REGISTERED_REQUIRED');
@@ -495,30 +501,16 @@ await checkAsync('syncCgoData requires the registered tier because it writes', a
 
 await checkAsync('syncCgoData requires a CSRF token', async () => {
   const env = await makeEnv('registered');
+  await ingest(env.env, pushPayload());
   const { 'X-AWQ-CSRF': _csrf, ...withoutCsrf } = env.authHeaders;
   const result = await rpc(env, 'syncCgoData', [[1]], withoutCsrf);
   assert.equal(result.status, 403);
   assert.equal(result.body.code, 'CSRF_INVALID');
 });
 
-await checkAsync('syncCgoData surfaces an unconfigured bridge as an actionable error', async () => {
-  const env = await makeEnv('registered');
-  env.env.CGO_BRIDGE_URL = '';
-  const result = await rpc(env, 'syncCgoData', [[1]]);
-  assert.equal(result.status, 500);
-  assert.match(result.body.error, /CGO_BRIDGE_URL variable/);
-});
-
-await checkAsync('syncCgoData reads the sheet through the bridge', async () => {
-  const env = await makeEnv('registered');
-  await rpc(env, 'syncCgoData', [[1]]);
-  assert.equal(env.calls.length, 1, 'exactly one bridge call');
-  assert.ok(env.calls[0].url.startsWith(BRIDGE_URL), 'calls the configured bridge');
-  assert.ok(env.calls[0].url.includes('token=tok_123'), 'authenticates with the secret');
-});
-
 await checkAsync('syncCgoData records an audit entry for the sync', async () => {
   const env = await makeEnv('registered');
+  await ingest(env.env, pushPayload());
   await rpc(env, 'syncCgoData', [[1, 2, 3]]);
   const entry = env.database.prepare("SELECT action, result, change_summary AS summary FROM auth_audit_log WHERE action = 'cgo_sync'").get();
   assert.ok(entry, 'cgo_sync was audited');

@@ -4,8 +4,7 @@ import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, taf
 import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam, parseNotamGeometry } from './notamUtils.js';
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
-import { matchCgoEntries, parseCgoSheet, summarizeCgoSync } from '../../shared/cgo.mjs';
-import { readBridgeValues } from './cgo-bridge.js';
+import { CGO_SNAPSHOT_KEY, matchCgoEntries, parseCgoSheet, summarizeCgoSync } from '../../shared/cgo.mjs';
 
 const REGISTERED_WRITE_METHODS = new Set([
   'saveFlightEdit', 'saveFlightRoute', 'deleteRoute', 'setActiveFlightRoute',
@@ -2766,6 +2765,15 @@ async function handlePersistAnalysisResults(context, args) {
     }
 }
 
+// How old the pushed sheet snapshot is. The operator has to judge whether the
+// weights in front of them are still current, so the age travels with the sync
+// result instead of being implied.
+function snapshotAgeMinutes(snapshot) {
+    const stamp = Date.parse((snapshot && (snapshot.pushedAt || snapshot.receivedAt)) || '');
+    if (!Number.isFinite(stamp)) return null;
+    return Math.max(0, Math.round((Date.now() - stamp) / 60000));
+}
+
 // Sync CGO Data: read the CGO PLAN Google Sheet and write the weight onto the
 // flights currently on the board.
 //
@@ -2801,11 +2809,23 @@ async function handleSyncCgoData(context, user, args) {
             }, { status: 409 });
         }
 
-        // The sheet is read through the Apps Script bridge: this organization
-        // blocks service-account key creation, so the Worker holds no Google
-        // credential of its own.
-        const sheet = await readBridgeValues(context.env);
-        const plan = parseCgoSheet(sheet.values);
+        // The sheet reaches us by push, not by pull: the Apps Script web app
+        // cannot be deployed for anonymous callers in this Workspace, so it
+        // POSTs the grid to /api/cgo-ingest on a schedule instead.
+        const snapshotRaw = await metaGet(context, CGO_SNAPSHOT_KEY);
+        if (!snapshotRaw) {
+            return Response.json({
+                error: 'No CGO PLAN data has been received yet. Run pushCgoPlan() in the Apps Script project, or wait for its trigger to fire.',
+                code: 'NO_SNAPSHOT'
+            }, { status: 409 });
+        }
+        let snapshot;
+        try {
+            snapshot = JSON.parse(snapshotRaw);
+        } catch {
+            return Response.json({ error: 'The stored CGO PLAN snapshot is unreadable. Push it again from the Apps Script project.', code: 'SNAPSHOT_CORRUPT' }, { status: 500 });
+        }
+        const plan = parseCgoSheet(snapshot.values);
         if (plan.error) return Response.json({ error: plan.error, code: 'SHEET_LAYOUT' }, { status: 422 });
 
         const match = matchCgoEntries(plan.entries, results.map(row => ({
@@ -2831,6 +2851,7 @@ async function handleSyncCgoData(context, user, args) {
             JSON.stringify({
                 boardRows: results.length,
                 planRows: plan.entries.length,
+                snapshotAgeMinutes: snapshotAgeMinutes(snapshot),
                 matched: match.updates.length,
                 updated: changedUpdates.length,
                 unmatched: match.unmatched.length,
@@ -2854,8 +2875,10 @@ async function handleSyncCgoData(context, user, args) {
         payload.data.cgoSync = {
             boardRows: results.length,
             planRows: plan.entries.length,
-            sheetName: sheet.sheetName,
-            sheetReadAt: sheet.readAt,
+            sheetName: snapshot.sheetName || null,
+            sheetPushedAt: snapshot.pushedAt || null,
+            sheetReceivedAt: snapshot.receivedAt || null,
+            snapshotAgeMinutes: snapshotAgeMinutes(snapshot),
             sheetHeaderRow: plan.headerRow,
             matched: match.updates.length,
             updated: changedUpdates.length,
@@ -2870,7 +2893,10 @@ async function handleSyncCgoData(context, user, args) {
             rowsWithoutWeight: plan.rowsWithoutWeight,
             rowsWithoutDate: plan.rowsWithoutDate,
             updatedFlights: changedUpdates.map(update => ({ rowIdx: update.rowIdx, flight: update.boardFlight, from: update.previous, to: update.value, source: update.source })),
-            summary: summarizeCgoSync(plan, match)
+            summary: summarizeCgoSync(plan, match, {
+                sheetName: snapshot.sheetName || null,
+                ageMinutes: snapshotAgeMinutes(snapshot)
+            })
         };
         return Response.json(payload);
     } catch (e) {

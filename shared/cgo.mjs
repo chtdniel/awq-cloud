@@ -12,7 +12,10 @@
 //
 // This module is pure: parsing and matching take values in and give a decision
 // out, so the rules can be tested without touching Google or D1.
-// The sheet itself is fetched by functions/api/cgo-bridge.js.
+//
+// The sheet grid is pushed in by the Apps Script side (functions/api/cgo-ingest.js)
+// and kept under this key in the `meta` table until the board syncs from it.
+export const CGO_SNAPSHOT_KEY = 'CGO_SHEET_SNAPSHOT';
 
 function cell(row, index) {
   if (!Array.isArray(row) || index < 0 || index >= row.length) return '';
@@ -239,9 +242,22 @@ export function matchCgoEntries(entries, boardFlights) {
 
 // One-line-per-issue digest for the operator. The full lists stay in the
 // response; this is what the board shows after a sync.
-export function summarizeCgoSync(plan, match) {
+//
+// `snapshot` describes where the sheet data came from (it is pushed on a
+// schedule, so its age is part of the answer the operator needs).
+const STALE_SNAPSHOT_MINUTES = 120;
+
+export function summarizeCgoSync(plan, match, snapshot = null) {
   const changed = match.updates.filter(update => update.changed);
   const lines = [];
+  if (snapshot && Number.isFinite(snapshot.ageMinutes)) {
+    const label = snapshot.sheetName ? `"${snapshot.sheetName}"` : 'the CGO PLAN sheet';
+    const age = snapshot.ageMinutes;
+    lines.push(`${label} was read ${age < 1 ? 'less than a minute' : `${age} minute(s)`} ago.`);
+    if (age > STALE_SNAPSHOT_MINUTES) {
+      lines.push(`WARNING: that snapshot is over ${Math.round(STALE_SNAPSHOT_MINUTES / 60)} hours old — run pushCgoPlan() in the Apps Script project to refresh it.`);
+    }
+  }
   lines.push(`Matched ${match.updates.length} of ${plan.entries.length} plan row(s) on the board.`);
   lines.push(`Updated ${changed.length} flight(s)${match.updates.length - changed.length ? `, ${match.updates.length - changed.length} already up to date` : ''}.`);
   if (match.unmatched.length) lines.push(`Not on the board: ${match.unmatched.length} (${match.unmatched.slice(0, 8).map(row => row.flightNo).join(', ')}${match.unmatched.length > 8 ? ', …' : ''}).`);
