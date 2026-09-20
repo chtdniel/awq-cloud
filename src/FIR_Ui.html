@@ -436,6 +436,7 @@
   .fir-ui .fir-hazard-item.risk-HIGH { border-left-color:var(--status-critical); }
   .fir-ui .fir-hazard-item.risk-MEDIUM { border-left-color:var(--status-warning); }
   .fir-ui .fir-hazard-item.risk-LOW { border-left-color:var(--status-safe); }
+  .fir-ui .fir-hazard-item.risk-UNVERIFIED { border-left-color:var(--status-warning); border-left-style:dashed; }
   
   .fir-ui .fir-hazard-id { 
     font-family:var(--font-mono); 
@@ -521,7 +522,8 @@
   .fir-ui .fir-risk-LOW, 
   .fir-ui .fir-risk-Clear { background: var(--status-safe); }
   .fir-ui .fir-risk-NO_FIR_MAPPED, 
-  .fir-ui .fir-risk-NO_ROUTE { 
+  .fir-ui .fir-risk-NO_ROUTE,
+  .fir-ui .fir-risk-UNVERIFIED { 
     background: var(--status-warning); 
     color:#1c1917; 
   }
@@ -649,7 +651,12 @@
     hzStatus: 'ACTIVE',  // default hanya ACTIVE — pilih 'ALL' untuk tampilkan FUTURE/EXPIRED juga
     flightDataLoaded: false, // Track if flight data has been loaded
     initialized: false,
-    flightLoadRequest: 0
+    flightLoadRequest: 0,
+    // Fail-closed bookkeeping: sumber NOTAM / analisa gagal tidak boleh tampil sebagai
+    // "tidak ada dampak". Keduanya menggerakkan banner di hazard list.
+    notamSourceError: '',
+    analysisError: '',
+    notamSkipped: 0
   };
   // Exposed for FIR NOTAM UI to filter map by selected FIR tab
   window.firSetMapFirFilter = function(loc) {
@@ -693,11 +700,40 @@
 
   function getRiskClass(risk) {
     const r = String(risk || '').toUpperCase();
-    return 'risk-' + (r === 'HIGH' ? 'HIGH' : r === 'MEDIUM' || r === 'MED' ? 'MEDIUM' : 'LOW');
+    if (r === 'HIGH') return 'risk-HIGH';
+    if (r === 'MEDIUM' || r === 'MED') return 'risk-MEDIUM';
+    if (r === 'LOW') return 'risk-LOW';
+    // Risiko tak dikenal bukan "aman": fail-closed, tandai UNVERIFIED (amber).
+    return 'risk-UNVERIFIED';
   }
+  // Fail-closed: badge tidak boleh menyatakan "Clear"/LOW hijau saat data risiko belum
+  // ada (analisa belum selesai / gagal). null|''|UNKNOWN -> badge amber UNVERIFIED.
+  // Kelas CSS memakai ejaan campur (HIGH/MEDIUM/LOW/Clear), jadi dipetakan lewat lookup:
+  // toUpperCase() dulu menghasilkan fir-risk-CLEAR yang tidak ada di CSS, sehingga badge
+  // "Clear" tidak pernah dapat warna aman.
   function riskBadge(r) {
-    const v = r || 'Clear';
-    return '<span class="fir-risk-badge fir-risk-' + v.toUpperCase() + '">' + esc(v) + '</span>';
+    const cls = {
+      HIGH: 'HIGH', MEDIUM: 'MEDIUM', MED: 'MEDIUM', LOW: 'LOW', CLEAR: 'Clear',
+      UNVERIFIED: 'UNVERIFIED', UNKNOWN: 'UNVERIFIED', 'N/A': 'UNVERIFIED',
+      NO_FIR_MAPPED: 'NO_FIR_MAPPED', NO_ROUTE: 'NO_ROUTE'
+    }[String(r == null ? '' : r).trim().toUpperCase()] || 'UNVERIFIED';
+    const label = String(r == null ? '' : r).trim() || 'UNVERIFIED';
+    return '<span class="fir-risk-badge fir-risk-' + cls + '">' + esc(label) + '</span>';
+  }
+  // Status baris NOTAM dari server: ACTIVE/FUTURE/EXPIRED/UNVERIFIED/REPLACED/CANCELLED.
+  // Hanya ACTIVE dan UNVERIFIED yang boleh diperlakukan sebagai warning yang berlaku.
+  function notamIsLive(n) {
+    const st = String((n && n.status) || '').trim().toUpperCase();
+    if (st === 'REPLACED' || st === 'CANCELLED' || st === 'EXPIRED') return false;
+    if (st === 'FUTURE') return false;
+    return n && n.active !== false;
+  }
+  function notamStatusKey(n) {
+    const st = String((n && n.status) || '').trim().toUpperCase();
+    if (st === 'REPLACED' || st === 'CANCELLED' || st === 'EXPIRED') return st;
+    if (st === 'UNVERIFIED') return 'UNVERIFIED';
+    if (st === 'FUTURE') return 'FUTURE';
+    return n && n.active === false ? 'EXPIRED' : 'ACTIVE';
   }
   function formatTime(v) {
     if (v == null) return '00:00';
@@ -963,11 +999,16 @@
         else { if(n===7){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);sec=parseInt(digits.slice(5,7),10);} else if(n===5){deg=parseInt(digits.slice(0,3),10);min=parseInt(digits.slice(3,5),10);} else {deg=parseInt(digits,10);} }
         let dec = deg + min/60 + sec/3600; if (/S|W/i.test(hemi)) dec = -dec; return Math.round(dec*10000)/10000;
       };
-      const collect = (src) => {
+      const collect = (src, joinWrapped) => {
         const out = [];
+        // joinWrapped=true HANYA untuk field E): di sana newline memang bisa membelah satu
+        // token ("23" + baris "42S"). Di luar itu newline bukan pembungkus token dan
+        // menyambung digit lintas baris bisa mengarang koordinat (baris "2630" + "42S
+        // 07500E" menjadi 30°42'S 075°00'E) — hazard tergambar di tempat yang salah.
+        const joined = joinWrapped ? String(src || '').replace(/(\d)[ \t]*\r?\n[ \t]*(\d)/g, '$1$2') : String(src || '');
         const re = /(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
         let m;
-        while ((m = re.exec(src)) !== null) {
+        while ((m = re.exec(joined)) !== null) {
           const latDigits = m[1] || m[5], latHemi = m[2] || m[6];
           const lonDigits = m[3] || m[7], lonHemi = m[4] || m[8];
           if (!latDigits || !lonDigits) continue;
@@ -987,9 +1028,9 @@
       const eMatch = /(?:^|\n)[ \t]*E\)[ \t]*([\s\S]*?)(?=(?:\n[ \t]*[FG]\))|$)/i.exec(text);
       const eIdx = text.indexOf('E)');
       const eText = eMatch ? eMatch[1] : (eIdx >= 0 ? text.slice(eIdx + 2) : '');
-      const polygon = collect(eText);
+      const polygon = collect(eText, true);
       const textRadius = parseRadiusPhraseFromText(eText);
-      if (!center) { const fallbackPoint = polygon.length ? polygon : collect(text); if (fallbackPoint.length) center = [fallbackPoint[0][0], fallbackPoint[0][1]]; }
+      if (!center) { const fallbackPoint = polygon.length ? polygon : collect(text, false); if (fallbackPoint.length) center = [fallbackPoint[0][0], fallbackPoint[0][1]]; }
       return { center, radiusNm: textRadius !== null ? textRadius : (qRadius > 0 ? qRadius : null), polygon: polygon.length >= 2 ? polygon : [] };
     } catch (e) { return empty; }
   }
@@ -1052,8 +1093,8 @@
       location: location !== undefined ? location : n.location,
       number: number !== undefined ? number : n.number,
       cls: nfield(n,'cls','Class','CLASS') || null,
-      active: n.active !== false && String(n.status || '').toUpperCase() !== 'EXPIRED',
-      risk: nfield(n,'risk','Risk','RISK LEVEL') || 'LOW',
+      active: notamIsLive(n),
+      risk: nfield(n,'risk','Risk','RISK LEVEL') || 'UNVERIFIED',
       text: text,
       effectiveDate: n.effectiveDate || null,
       expirationDate: n.expirationDate || null,
@@ -1211,10 +1252,10 @@
       const lat = ll[0], lon = ll[1];
       const location = nfield(n,'location','Location','LOCATION','FIR','FIR ID','ICAO');
       if (firFilter && String(location || '').trim().toUpperCase() !== firFilter) return;
-      const risk = nfield(n,'risk','Risk','RISK LEVEL') || 'LOW';
-      const active = n.active !== false && String(n.status || '').toUpperCase() !== 'EXPIRED';
+      const risk = nfield(n,'risk','Risk','RISK LEVEL') || 'UNVERIFIED';
+      const active = notamIsLive(n);
       const radius = !active ? 4 : risk === 'HIGH' ? 9 : risk === 'MEDIUM' ? 7 : 5;
-      const color = !active ? '#5a5f66' : risk === 'HIGH' ? '#ef5350' : risk === 'MEDIUM' ? '#fb923c' : '#34d399';
+      const color = !active ? '#5a5f66' : risk === 'HIGH' ? '#ef5350' : risk === 'MEDIUM' ? '#fb923c' : risk === 'UNVERIFIED' ? '#f0b429' : '#34d399';
       const props = notamShapeProps(n, lat, lon);
       const ring = buildNotamGeom(props);
       if (ring.length >= 3 && state.showNotams) {
@@ -1461,13 +1502,16 @@
     renderHazardList();
   }
 
+  function hazardStatusBucket(n) {
+    const k = notamStatusKey(n);
+    return (k === 'REPLACED' || k === 'CANCELLED') ? 'INACTIVE' : k;
+  }
   function hazardFiltered() {
     const q = (state.hzQuery || '').toLowerCase();
     return (state.hazards || []).filter(n => {
-      const risk = String(n.risk || 'LOW').toUpperCase();
+      const risk = String(n.risk || 'UNVERIFIED').toUpperCase();
       if (state.hzRisk && risk !== state.hzRisk) return false;
-      const st = (n.active === false || String(n.status || '').toUpperCase() === 'EXPIRED') ? 'EXPIRED'
-        : (String(n.status || '').toUpperCase() === 'FUTURE' ? 'FUTURE' : 'ACTIVE');
+      const st = hazardStatusBucket(n);
       if (state.hzStatus && state.hzStatus !== 'ALL' && st !== state.hzStatus) return false;
       if (q && !(String(n.location||'') + ' ' + String(n.number||'') + ' ' + String(n.text||'')).toLowerCase().includes(q)) return false;
       return true;
@@ -1478,8 +1522,11 @@
     const box = document.getElementById('fir-hazard-chips');
     const countEl = document.getElementById('fir-hazard-count');
     const all = state.hazards || [];
-    const count = (r) => all.filter(n => String(n.risk || 'LOW').toUpperCase() === r).length;
+    const count = (r) => all.filter(n => String(n.risk || 'UNVERIFIED').toUpperCase() === r).length;
     const opts = [['', 'ALL', all.length], ['HIGH', 'HIGH', count('HIGH')], ['MEDIUM', 'MEDIUM', count('MEDIUM')], ['LOW', 'LOW', count('LOW')]];
+    // Risiko tak dikenal harus punya chip sendiri, bukan menumpang hitungan LOW.
+    const unverified = count('UNVERIFIED');
+    if (unverified > 0) opts.push(['UNVERIFIED', 'UNV', unverified]);
     let h = '<span class="fir-hazard-filter-label">Risk</span>';
     opts.forEach(o => {
       const active = state.hzRisk === o[0];
@@ -1487,12 +1534,12 @@
     });
     // Status filter: ALL default menampilkan semua, ACTIVE hanya yang berlaku sekarang
     h += '<span class="fir-hazard-filter-label" style="margin-left:8px;">Status</span>';
-    const stCount = (s) => all.filter(n => {
-      const st = (n.active === false || String(n.status || '').toUpperCase() === 'EXPIRED') ? 'EXPIRED'
-        : (String(n.status || '').toUpperCase() === 'FUTURE' ? 'FUTURE' : 'ACTIVE');
-      return s === 'ALL' || st === s;
-    }).length;
-    [['ALL', 'ALL', stCount('ALL')], ['ACTIVE', 'ACT', stCount('ACTIVE')], ['FUTURE', 'FUT', stCount('FUTURE')], ['EXPIRED', 'EXP', stCount('EXPIRED')]].forEach(o => {
+    const stCount = (s) => all.filter(n => s === 'ALL' || hazardStatusBucket(n) === s).length;
+    const statusChips = [['ALL', 'ALL', stCount('ALL')], ['ACTIVE', 'ACT', stCount('ACTIVE')], ['FUTURE', 'FUT', stCount('FUTURE')], ['UNVERIFIED', 'UNV', stCount('UNVERIFIED')], ['EXPIRED', 'EXP', stCount('EXPIRED')]];
+    // REPLACED/CANCELLED hanya muncul sebagai chip kalau memang ada di data.
+    const inactive = stCount('INACTIVE');
+    if (inactive > 0) statusChips.push(['INACTIVE', 'N/A', inactive]);
+    statusChips.forEach(o => {
       const on = state.hzStatus === o[0];
       h += '<button type="button" class="fir-hz-chip' + (on ? ' active' : '') + '" data-s="' + o[0] + '" aria-pressed="' + on + '">' + o[1] + '<span class="fir-hz-chip-count">' + o[2] + '</span></button>';
     });
@@ -1517,6 +1564,16 @@
     document.getElementById('fir-hazard-count').textContent = list.length + ' shown of ' + (state.hazards || []).length;
     if (!list.length) {
       const hasHazards = (state.hazards || []).length > 0;
+      // Fail-closed: jangan pernah mengklaim "tidak ada dampak" saat sumber NOTAM atau
+      // analisa flight gagal — dispatcher harus tahu bahwa hasilnya belum terverifikasi.
+      if (state.notamSourceError) {
+        box.innerHTML = '<div class="fir-empty" style="color:var(--status-critical);">SOURCE UNAVAILABLE — daftar NOTAM gagal dimuat, jadi "no impact" tidak bisa diklaim. Verifikasi manual.<br><span style="font-size:10px;opacity:.85;">' + esc(state.notamSourceError) + '</span></div>';
+        return;
+      }
+      if (state.analysisError) {
+        box.innerHTML = '<div class="fir-empty" style="color:var(--status-critical);">ANALYSIS FAILED — hasil analisa NOTAM untuk flight ini tidak tersedia. Verifikasi manual.<br><span style="font-size:10px;opacity:.85;">' + esc(state.analysisError) + '</span></div>';
+        return;
+      }
       box.innerHTML = hasHazards ? '<div class="fir-empty">No hazards match current filter.</div>' : '<div class="fir-empty">No direct NOTAM impact found for current flight context.</div>';
       return;
     }
@@ -1607,11 +1664,31 @@
     if (data && !data.error) {
       // Semua status dimuat (ACTIVE/FUTURE/EXPIRED) — status chip di hazard list mengatur tampilan.
       state.notams = data.notams || [];
+      state.notamSkipped = Number(data.skipped || 0);
+      state.notamSourceError = '';
+    } else {
+      // Fail-closed: sumber gagal BUKAN "tidak ada NOTAM". Baris lama dibuang supaya
+      // peta/hazard stack tidak pernah menampilkan data basi sebagai kondisi terkini.
+      state.notamSourceError = String((data && data.error) || 'unknown error');
+      state.notams = [];
+      state.notamSkipped = 0;
     }
-    if (!state.notams.length) state.notams = [];
     updateNotamLayer();
-    const cnt = state.notams.filter(n => n.active !== false).length;
-    document.getElementById('fir-notam-status').textContent = 'NOTAM: ' + cnt + ' active / ' + state.notams.length;
+    const live = state.notams.filter(n => notamIsLive(n)).length;
+    const el = document.getElementById('fir-notam-status');
+    if (el) {
+      if (state.notamSourceError) {
+        el.textContent = 'NOTAM: SOURCE UNAVAILABLE — verifikasi manual';
+        el.style.color = 'var(--status-critical)';
+        el.title = state.notamSourceError;
+      } else {
+        el.textContent = 'NOTAM: ' + live + ' live / ' + state.notams.length
+          + (state.notamSkipped ? ' · ' + state.notamSkipped + ' dilewati (Q-scope A)' : '');
+        el.style.color = '';
+        el.title = '';
+      }
+    }
+    renderHazardList();
   }
 
   async function selectFlight(rowId) {
@@ -1637,6 +1714,7 @@
 
     const result = await run('analyzeFlightNotams', row);
     if (result && !result.error) {
+      state.analysisError = '';
       const idx = state.flights.findIndex(f => Number(f._rowId) === row);
       if (idx > -1) {
         // Merge: keep board display fields (QZ/DES etc), take analysis/risk/flags
@@ -1652,7 +1730,14 @@
         renderInspector(merged);
       }
     } else if (result && result.error) {
+      // Analisa gagal: inspector tetap menampilkan UNVERIFIED (bukan Clear) dan hazard
+      // list menjelaskan kegagalannya, bukan "no direct NOTAM impact found".
+      state.analysisError = String(result.error);
+      renderHazardList();
       addToast('Analysis error: ' + result.error);
+    } else {
+      state.analysisError = 'analisa tidak mengembalikan hasil';
+      renderHazardList();
     }
   }
 

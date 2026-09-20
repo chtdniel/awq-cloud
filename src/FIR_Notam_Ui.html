@@ -114,6 +114,12 @@
   .fir-notam-ui .firn-b { font-size:9px; font-weight:900; padding:3px 9px; border-radius:999px; letter-spacing:.04em; text-transform:uppercase; color:#fff; }
   .fir-notam-ui .firn-b-status-active { background:var(--status-safe); color:#d1fae5; }
   .fir-notam-ui .firn-b-status-expired { background:var(--status-critical); color:#fecaca; }
+  /* Status selain ACTIVE tidak boleh hijau: FUTURE menunggu, UNVERIFIED belum bisa
+     diverifikasi, REPLACED/CANCELLED sudah tidak berlaku. */
+  .fir-notam-ui .firn-b-status-future { background:var(--status-info); color:#e0f2fe; }
+  .fir-notam-ui .firn-b-status-unverified { background:var(--status-warning); color:#1c1917; }
+  .fir-notam-ui .firn-b-status-replaced { background:#6b7280; color:#f3f4f6; }
+  .fir-notam-ui .firn-b-status-cancelled { background:#4b5563; color:#e5e7eb; text-decoration:line-through; }
   .fir-notam-ui .firn-b-cls { background:var(--status-info); color:#eaf2f9; }
   .fir-notam-ui .firn-b-risk-high { background:var(--status-critical); }
   .fir-notam-ui .firn-b-risk-medium { background:var(--status-warning); color:#1c1917; }
@@ -385,7 +391,10 @@
     firnMapShow: true,
     firnMapShowAll: false,
     firnMapPopup: null,
-    firnMapFocused: null
+    firnMapFocused: null,
+    // Pesan gagal load terakhir; dibaca renderResults supaya baris basi tidak pernah
+    // dilukis ulang sebagai data segar dan empty state tidak diklaim saat sumber gagal.
+    lastResultsError: ''
   };
 
   function getFirCounts() {
@@ -487,6 +496,9 @@
       }
       var eIdx=text.indexOf('E)');
       var eText=eIdx>=0? text.slice(eIdx) : '';
+      // AFTN 69 karakter bisa membelah satu token koordinat ("23" + baris "42S");
+      // sambung dulu supaya tidak ada koordinat yang hilang tanpa jejak.
+      eText=eText.replace(/(\d)[ \t]*\r?\n[ \t]*(\d)/g,'$1$2');
       var polygon=[];
       var re=/(\d{6})\s*([NS])\s*(\d{7})\s*([EW])|(\d{4})\s*([NS])\s*(\d{5})\s*([EW])/gi;
       var m;
@@ -532,7 +544,9 @@
     return null;
   }
   function firnRiskColor(risk, status){
-    if (status==='EXPIRED') return '#5a5f66';
+    var key=String(status||'').trim().toUpperCase();
+    if (key==='EXPIRED' || key==='REPLACED' || key==='CANCELLED') return '#5a5f66';
+    if (key==='UNVERIFIED') return '#f0b429';
     var r=String(risk||'LOW').toUpperCase();
     if (r==='HIGH') return '#ef5350';
     if (r==='MEDIUM' || r==='MED') return '#fb923c';
@@ -610,7 +624,7 @@
       if (!ll) return;
       var lat=ll[0], lon=ll[1];
       var color=firnRiskColor(n.risk, n.status);
-      var active = n.active!==false && n.status!=='EXPIRED';
+      var active = firnIsLive(n);
       var radius = !active?4:n.risk==='HIGH'?9:n.risk==='MEDIUM'?7:5;
       var geom=firnParseNotamGeometry(n['NOTAM Text']||'');
       var geomCoords=firnBuildGeomCoords(geom);
@@ -876,13 +890,34 @@
   }
 
   /* ---- Results tab ---- */
+  // Status eksplisit. Server memancarkan ACTIVE/FUTURE/EXPIRED/UNVERIFIED/REPLACED/
+  // CANCELLED; sebelumnya apa pun selain EXPIRED dirender hijau "Active", sehingga
+  // NOTAM yang sudah di-replace/cancel tampak sebagai hazard yang berlaku.
+  var FIRN_STATUS = {
+    ACTIVE:     { key: 'active',     label: 'Active' },
+    FUTURE:     { key: 'future',     label: 'Future' },
+    EXPIRED:    { key: 'expired',    label: 'Expired' },
+    UNVERIFIED: { key: 'unverified', label: 'Unverified' },
+    REPLACED:   { key: 'replaced',   label: 'Replaced' },
+    CANCELLED:  { key: 'cancelled',  label: 'Cancelled' }
+  };
+  function firnStatusMeta(status) {
+    var key = String(status || '').trim().toUpperCase();
+    return FIRN_STATUS[key] || FIRN_STATUS.UNVERIFIED;
+  }
+  // Baris yang masih harus diperlakukan sebagai warning berlaku: ACTIVE dan UNVERIFIED
+  // (belum bisa diparse = jangan dianggap aman, tapi juga jangan dianggap aktif penuh).
+  function firnIsLive(n) {
+    var key = String((n && n.status) || '').trim().toUpperCase();
+    return key === 'ACTIVE' || key === 'UNVERIFIED' || key === '';
+  }
   function badgeHtml(n) {
-    var status = n.status === 'EXPIRED' ? 'expired' : 'active';
+    var meta = firnStatusMeta(n.status);
     var risk = String(n.risk || 'LOW').toLowerCase();
     var type = String(n.type || 'NEW').toLowerCase();
     var cls = String(n.Class || 'N/A').toUpperCase();
     var h = '<div class="firn-badges">';
-    h += '<span class="firn-b firn-b-status-' + status + '">● ' + (status === 'active' ? 'Active' : 'Expired') + '</span>';
+    h += '<span class="firn-b firn-b-status-' + meta.key + '">● ' + esc(meta.label) + '</span>';
     h += '<span class="firn-b firn-b-cls">Class ' + esc(cls) + '</span>';
     h += '<span class="firn-b firn-b-risk-' + risk + '">' + esc(n.risk || 'LOW') + '</span>';
     h += '<span class="firn-b firn-b-type-' + type + '">' + esc(n.type || 'NEW') + '</span>';
@@ -892,7 +927,7 @@
 
   function renderFilterControls() {
     var defs = [
-      {key:'status', id:'firn-filter-status', state:'statusFilter', values:['ACTIVE','EXPIRED']},
+      {key:'status', id:'firn-filter-status', state:'statusFilter', values:['ACTIVE','FUTURE','EXPIRED','UNVERIFIED','REPLACED','CANCELLED']},
       {key:'risk', id:'firn-filter-risk', state:'riskFilter', values:['HIGH','MEDIUM','LOW']},
       {key:'type', id:'firn-filter-type', state:'typeFilter', values:['NEW','RPL','CNL']},
       {key:'class', id:'firn-filter-class', state:'classFilter', values:['A','B','C','D','E','F','O']}
@@ -949,6 +984,16 @@
     // re-render FIR tabs to update counts after results loaded
     if (box && box._lastFirRender !== state.selectedFir) { /* no-op, tabs updated via renderFirLocations elsewhere */ }
     if (!list.length) {
+      // Sumber gagal ≠ "tidak ada NOTAM". Jangan pernah menyatakan kosong saat load
+      // terakhir error: dispatcher harus tahu datanya belum terverifikasi.
+      if (state.lastResultsError) {
+        box.innerHTML = '<div class="firn-empty" style="color:var(--status-critical);border:1px solid var(--status-critical);border-radius:var(--radius-sm);padding:10px;">'
+          + 'SOURCE UNAVAILABLE — daftar NOTAM gagal dimuat, data di bawah tidak lengkap.<br>'
+          + '<span style="font-size:10px;opacity:.85;">' + esc(state.lastResultsError) + '</span><br>'
+          + '<button type="button" class="firn-btn" onclick="reloadFirNotams()" style="margin-top:8px;">Retry</button></div>';
+        try { updateFirnMap(); } catch(e){}
+        return;
+      }
       var emptyMsg = 'No FIR NOTAM results found.';
       if (state.results.length) {
         if (state.selectedFir && state.filter) emptyMsg = 'No match for FIR ' + esc(state.selectedFir) + ' + search "' + esc(state.filter) + '".';
@@ -1008,13 +1053,23 @@
     if (data && data.ok) {
       state.results = data.results || [];
       state.lastResultsLoad = Date.now();
+      state.lastResultsError = '';
       renderFirLocations();
       renderResults();
       if (box) box.scrollTop = prevScroll;
     } else {
-      box.innerHTML = '<div class="firn-empty">Failed to load: ' + esc((data && data.error) || 'unknown') + '</div>';
+      // Gagal load: tandai error dan BUANG hasil lama supaya render berikutnya (perubahan
+      // filter, pencarian, pindah tab) tidak melukis ulang baris basi sebagai data segar.
+      state.lastResultsError = String((data && data.error) || 'unknown error');
+      state.results = [];
+      state.lastResultsLoad = 0;
+      renderFirLocations();
+      renderResults();
     }
   }
+  // Dipakai tombol Retry di banner SOURCE UNAVAILABLE.
+  function reloadFirNotams() { loadResults(true); }
+  window.reloadFirNotams = reloadFirNotams;
 
   function editFromResults(rowId) {
     var n = state.results.find(function (x) { return x.rowId === rowId; });
@@ -1245,11 +1300,20 @@
   }
 
   // ---- Paste / auto-fill parser ----
+  // YYMMDDHHMM dari B)/C)/issue AFTN. Mengembalikan '' kalau tanggalnya tidak ada di
+  // kalender ("2602311200" = 31 Feb, "2613459900"): tanpa cek ini stringnya lolos ke
+  // input datetime-local, di-rollover oleh Date.UTC, dan operator melihat window
+  // validitas yang berbeda dari isi NOTAM tanpa peringatan apa pun.
   function yyMMddHHmm(s) {
-    var y = 2000 + Number(s.slice(0,2)), mo = Number(s.slice(2,4)), d = Number(s.slice(4,6));
-    var hh = Number(s.slice(6,8)), mm = Number(s.slice(8,10));
+    var digits = String(s == null ? '' : s).replace(/\D/g, '').slice(0, 10);
+    if (digits.length !== 10) return '';
+    var y = 2000 + Number(digits.slice(0, 2)), mo = Number(digits.slice(2, 4)), d = Number(digits.slice(4, 6));
+    var hh = Number(digits.slice(6, 8)), mm = Number(digits.slice(8, 10));
+    if (!(mo >= 1 && mo <= 12) || !(d >= 1 && d <= 31) || !(hh <= 23) || !(mm <= 59)) return '';
+    var dt = new Date(Date.UTC(y, mo - 1, d, hh, mm));
+    if (isNaN(dt.getTime()) || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return '';
     var p = function (n) { return String(n).padStart(2, '0'); };
-    return y + '-' + p(mo) + '-' + p(d) + ' ' + p(hh) + ':' + p(mm);
+    return dt.getUTCFullYear() + '-' + p(dt.getUTCMonth() + 1) + '-' + p(dt.getUTCDate()) + ' ' + p(dt.getUTCHours()) + ':' + p(dt.getUTCMinutes());
   }
   function parseNotam(raw) {
     var out = { Location: '', 'NOTAM #': '', Class: '', 'Issue Date': '', 'Effective Date': '', 'Expiration Date': '', 'NOTAM Text': '' };
@@ -1286,10 +1350,32 @@
     }
     var lines = text.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
 
-    var qLine = lines.find(function (l) { return /^Q\)/i.test(l); });
+    // AFTN 69 karakter membungkus baris di tengah token. Q) dirakit ulang dulu, dan
+    // nilai digit B)/C) digabung sebelum dipotong — tanpa ini "B) 26092812" + baris
+    // "23" kehilangan Effective Date tanpa peringatan apa pun.
+    function joinField(letter) {
+      var re = new RegExp('^' + letter + '\\)', 'i');
+      var idx = -1;
+      for (var i = 0; i < lines.length; i++) { if (re.test(lines[i])) { idx = i; break; } }
+      if (idx < 0) return '';
+      var acc = lines[idx].replace(re, '').trim();
+      for (var j = idx + 1; j < lines.length; j++) {
+        if (/^[A-Z]\)/i.test(lines[j])) break;  // designator berikutnya
+        acc += ' ' + lines[j];
+        if (/\)\s*$/.test(lines[j])) break;      // akhir record pada blob multi-NOTAM
+      }
+      return acc.trim();
+    }
+    function dateCodeField(letter) {
+      var m = text.match(new RegExp('(?:^|\\s)' + letter + '\\)\\s*(\\d[\\d\\s]{6,}\\d)', 'i'));
+      if (!m) return '';
+      var digits = m[1].replace(/\s+/g, '').slice(0, 10);
+      return digits.length === 10 ? digits : '';
+    }
+
+    var qLine = joinField('Q');
     if (qLine) {
-      var q = qLine.replace(/^Q\)/i, '').trim();
-      var parts = q.split('/');
+      var parts = qLine.split('/');
       if (parts[0] && /^[A-Z]{4}$/i.test(parts[0].trim())) out.Location = parts[0].trim().toUpperCase();
       if (parts[1]) {
         var qcode = parts[1].trim().toUpperCase();
@@ -1304,17 +1390,28 @@
     if (aMatch && !out.Location) out.Location = aMatch[1].toUpperCase();
 
     // ICAO fields may share one physical line: A) ... B) ... C) ...
-    var bMatch = text.match(/(?:^|\s)B\)\s*(\d{10})/i);
-    if (bMatch) out['Effective Date'] = yyMMddHHmm(bMatch[1]);
+    var bCode = dateCodeField('B');
+    var cCode = dateCodeField('C');
+    // Tanggal imajiner tidak boleh diam-diam jadi tanggal lain: catat warning, fieldnya
+    // dibiarkan kosong supaya operator mengisi manual (jangan fail-open, jangan silent).
+    var parseWarnings = [];
+    var setDateField = function (field, designator, code) {
+      var parsed = yyMMddHHmm(code);
+      if (parsed) { out[field] = parsed; return; }
+      parseWarnings.push(designator + ' ' + code + ' bukan tanggal yang valid — isi manual.');
+    };
+    if (bCode) setDateField('Effective Date', 'B)', bCode);
 
-    var cMatch = text.match(/(?:^|\s)C\)\s*(\d{10}|PERM)/i);
-    if (cMatch) {
-      out['Expiration Date'] = /^PERM$/i.test(cMatch[1]) ? 'PERM' : yyMMddHHmm(cMatch[1]);
-    }
+    // PERM/EST/UFN: hanya PERM yang punya penanganan sendiri; EST/UFN mengikuti
+    // perilaku lama (diambil dari digit bila ada) — lihat temuan M5 di laporan audit.
+    var cPerm = text.match(/(?:^|\s)C\)\s*(PERM)\b/i);
+    if (cPerm) out['Expiration Date'] = 'PERM';
+    else if (cCode) setDateField('Expiration Date', 'C)', cCode);
 
     var firstLine = lines[0] || '';
     var im = firstLine.match(/(\d{10})/);
-    if (im) out['Issue Date'] = yyMMddHHmm(im[1]);
+    if (im) setDateField('Issue Date', 'Issue', im[1]);
+    if (parseWarnings.length) out._warnings = parseWarnings;
 
     out['NOTAM Text'] = text.trim();
     out.locations = Array.from(new Set((text.match(/(?:Q\)|A\))\s*([A-Z]{4})/gi) || []).map(function (line) {
@@ -1367,7 +1464,8 @@
     setLastUpdate(null, null, p.locations);
     updateTextCount();
     validateForm(false);
-    addToast('Parsed — review fields, then SAVE.');
+    if (p._warnings && p._warnings.length) addToast('Parsed dengan catatan: ' + p._warnings.join(' '));
+    else addToast('Parsed — review fields, then SAVE.');
   }
 
   function bindEditorEnhancements() {

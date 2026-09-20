@@ -7,6 +7,16 @@ import {
 import { resolveRouteForFlight } from '../../shared/routegeom.mjs';
 import { flightLegWindows, newestTafRows, issueClockLabel, parseTafValidity, tafValidityLabel, validityCoversWindow } from '../../shared/wxtime.mjs';
 import { decodeNotamText, parseNotamRow, duFormatDateTimeUTC, duParseFlightTime, checkScheduleDOverlap, checkRouteMatch, isAerodromeOnlyNotam, parseNotamGeometry } from './notamUtils.js';
+
+// Koordinat Q) sebuah NOTAM yang sudah di-parse, dalam bentuk {lat, lon} untuk
+// checkScheduleDOverlap (token matahari SR/SS/HJ/HN butuh posisi).
+function notamCoords(parsed) {
+    if (parsed && Array.isArray(parsed.center) && parsed.center.length === 2) {
+        const lon = Number(parsed.center[0]), lat = Number(parsed.center[1]);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+    }
+    return null;
+}
 import { handleGenerateBriefingXlsx, handleGenerateReportXlsx } from './briefing-xlsx.js';
 import { audit, clearAuthCookies, createSession, getRequestUser, hashPassword, normalizeEmail, normalizeFullName, normalizeIaaId, normalizeLicNo, requireCsrf, revokeCurrentSession, revokeUserSessions, verifyPassword } from './auth.js';
 import { CGO_SNAPSHOT_KEY, matchCgoEntries, parseCgoSheet, summarizeCgoSync } from '../../shared/cgo.mjs';
@@ -796,7 +806,7 @@ async function handleAnalyzeNotams(context, args) {
                 
                 stationNotams.forEach(notam => {
                     const isTimeOverlap = (notam.effTo >= sector.start && notam.effFrom <= sector.end);
-                    const isScheduleOverlap = checkScheduleDOverlap(notam.schedule, sector.start, sector.end);
+                    const isScheduleOverlap = checkScheduleDOverlap(notam.schedule, sector.start, sector.end, notamCoords(notam));
                     
                     let matchesRoute = true;
                     if (sector.role === 'ENROUTE') {
@@ -1796,6 +1806,15 @@ async function handleGetFirData(context, args) {
     }
 }
 
+// Risiko konservatif untuk baris yang gagal di-parse (SNOWTAM/ASHTAM/baris DINS pendek):
+// HIGH pada kata kunci hazard, MEDIUM selain itu. Satu sumber kebenaran untuk kedua
+// handler baca (getActiveNotams dan firGetNotamResults) — sebelumnya firGetNotamResults
+// memakai 'LOW' sehingga baris yang sama tampil LOW di satu halaman, UNVERIFIED di lain.
+function firUnverifiedRisk(message) {
+    return /(MILITARY|DANGER|RESTRIC|ROCKET|LAUNCH|MISSILE|HAZARDOUS|RE-ENTRY|SPLASHDOWN|EXPLOSI|FIRING|BOMBING)/i
+        .test(String(message || '')) ? 'HIGH' : 'MEDIUM';
+}
+
 async function handleGetActiveNotams(context) {
     try {
         // Halaman FIR menampilkan FIR NOTAM saja (kind='FIR'); aerodrome (kind='AD') tetap
@@ -1806,8 +1825,19 @@ async function handleGetActiveNotams(context) {
         const now = new Date();
         const activeNotams = [];
 
-        for (const row of notamRows) {
-            if (!isValidFirNotam(row, firIds)) continue;
+        // Lifecycle NOTAMR/NOTAMC: harus dihitung atas himpunan baris yang sama dengan
+        // yang ditampilkan, kalau tidak NOTAM yang sudah di-replace/cancel tetap tampil
+        // sebagai hazard aktif (dulu lifecycle hanya dipakai handleFirGetNotamResults).
+        const visibleRows = notamRows.filter(row => isValidFirNotam(row, firIds));
+        const lifecycleMap = parseNotamLifecycleMap(visibleRows.map(row => ({
+            'NOTAM #': row.id,
+            'NOTAM Text': decodeNotamText(row.message)
+        })));
+        // Baris yang dibuang isValidFirNotam (mis. Q-scope A) jangan hilang tanpa jejak:
+        // dilaporkan jumlahnya supaya UI bisa menampilkan bahwa ada yang tidak dianalisa.
+        const skippedRows = notamRows.length - visibleRows.length;
+
+        for (const row of visibleRows) {
             const parsed = parseNotamRow(row);
             const isUnverified = !parsed;
             
@@ -1816,8 +1846,7 @@ async function handleGetActiveNotams(context) {
             // archive firAnalyzeFlight fail-closed branch). Dates fall back to the D1
             // valid_from/valid_to columns; active is computed normally; risk is
             // conservative: HIGH on military keyword, MEDIUM otherwise.
-            const unverifiedRisk = /(MILITARY|DANGER|RESTRIC|ROCKET|LAUNCH|MISSILE|HAZARDOUS|RE-ENTRY|SPLASHDOWN|EXPLOSI|FIRING|BOMBING)/i
-                .test(String(row.message || '')) ? 'HIGH' : 'MEDIUM';
+            const unverifiedRisk = firUnverifiedRisk(row.message);
             const rowTime = (raw) => {
                 if (!raw) return null;
                 const d = new Date(raw);
@@ -1831,9 +1860,17 @@ async function handleGetActiveNotams(context) {
                 ? (parsed.effTo ? parsed.effTo.getTime() : 8640000000000000)
                 : (rowTime(row.valid_to) !== null ? rowTime(row.valid_to) : 8640000000000000);
             const active = !(now.getTime() < effTime || now.getTime() > expTime);
-            const status = isUnverified
+            const lifecycle = lifecycleMap[String(row.id || '').trim().toUpperCase()] || 'ACTIVE';
+            let status = isUnverified
                 ? 'UNVERIFIED'
                 : (now.getTime() < effTime ? 'FUTURE' : (now.getTime() > expTime ? 'EXPIRED' : 'ACTIVE'));
+            // REPLACED/CANCELLED hanya menimpa status waktu; NOTAMC (CANCEL_MARKER) sendiri
+            // bukan warning aktif.
+            if (lifecycle === 'REPLACED' || lifecycle === 'CANCELLED') {
+                if (status === 'ACTIVE') status = lifecycle;
+            } else if (lifecycle === 'CANCEL_MARKER') {
+                status = 'CANCELLED';
+            }
             
             // Geometry for the FIR map layer: Q) centre/radius + E) area boundary.
             // Both used to be hardcoded null/[] so the FIR page drew point markers
@@ -1858,11 +1895,12 @@ async function handleGetActiveNotams(context) {
                 radiusNm: geometry.radiusNm,
                 polygon: geometry.polygon,
                 active: active,
-                status: status
+                status: status,
+                lifecycle: lifecycle
             });
         }
         
-        return Response.json({ data: { notams: activeNotams } });
+        return Response.json({ data: { notams: activeNotams, skipped: skippedRows } });
     } catch (e) {
         console.error("Get Active NOTAMs Error:", e);
         return Response.json({ error: e.message }, { status: 500 });
@@ -1888,6 +1926,26 @@ async function handleGetSelectedFlightsData(context, args) {
         const { results: rawRoutes } = await context.env.DB.prepare('SELECT * FROM routes').all();
         const { results: rawLatlong } = await context.env.DB.prepare('SELECT * FROM latlong ORDER BY id ASC').all();
 
+        // FIR 1..8: panel "Traversed FIR Boundaries" di halaman FIR membaca kunci ini
+        // (FIR_Ui.html getFIRArray). Dulu tidak pernah dikirim sehingga panel selalu
+        // "None specified" walau analisa memakai FIR hasil mapping airport_firs.
+        const airportFirs = await fetchAirportFirMap(context);
+        const firIds = await fetchFirIds(context);
+        const firKeys = (row) => {
+            const list = [];
+            const push = (code) => { const c = String(code || '').trim().toUpperCase(); if (c && !list.includes(c)) list.push(c); };
+            [row.dep, row.dest, row.alt, row.enr1, row.enr2, row.enr3].forEach(code => {
+                const c = String(code || '').trim().toUpperCase();
+                if (!/^[A-Z]{4}$/.test(c)) return;
+                const mapped = airportFirs.get(c) || [];
+                if (mapped.length) mapped.forEach(push);
+                else if (firIds.has(c.toLowerCase())) push(c);
+            });
+            const out = {};
+            for (let i = 1; i <= 8; i++) out['FIR ' + i] = list[i - 1] || '';
+            return out;
+        };
+
         const flights = rawFlights.map(row => ({
             _rowId: row.id,
             id: row.id,
@@ -1909,7 +1967,8 @@ async function handleGetSelectedFlightsData(context, args) {
             ATC: row.atc,
             REMARK: row.remarks,
             ROUTE_ID: row.active_route_id,
-            ACTIVE_ROUTE_ID: row.active_route_id
+            ACTIVE_ROUTE_ID: row.active_route_id,
+            ...firKeys(row)
         }));
 
         const routes = rawRoutes.map(r => ({
@@ -2013,8 +2072,9 @@ async function handleAnalyzeFlightNotams(context, args) {
         // Halaman FIR: kind='FIR' saja; aerodrome (kind='AD') milik halaman NOTAM/FLIGHT.
         const { results: notams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
         const firIds = await fetchFirIds(context);
+        const airportFirs = await fetchAirportFirMap(context);
 
-        const result = analyzeSingleFlight(flight, notams.filter(row => isValidFirNotam(row, firIds)), routes);
+        const result = analyzeSingleFlight(flight, notams.filter(row => isValidFirNotam(row, firIds)), routes, { airportFirs, firIds });
         return Response.json({ data: result });
     } catch (e) {
         console.error('Analyze Flight NOTAMs Error:', e);
@@ -2033,9 +2093,10 @@ async function handleAnalyzeFlightList(context, args) {
         const { results: routes } = await context.env.DB.prepare('SELECT * FROM routes').all();
         const { results: notams } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
         const firIds = await fetchFirIds(context);
+        const airportFirs = await fetchAirportFirMap(context);
 
         const firNotams = notams.filter(row => isValidFirNotam(row, firIds));
-        const results = flights.map(f => analyzeSingleFlight(f, firNotams, routes));
+        const results = flights.map(f => analyzeSingleFlight(f, firNotams, routes, { airportFirs, firIds }));
         return Response.json({ data: results });
     } catch (e) {
         console.error('Analyze Flight List Error:', e);
@@ -2043,7 +2104,7 @@ async function handleAnalyzeFlightList(context, args) {
     }
 }
 
-function analyzeSingleFlight(flight, notamRows, routeRows) {
+function analyzeSingleFlight(flight, notamRows, routeRows, firCtx) {
     const flightId = flight.id;
     const dep = String(flight.dep || '').trim().toUpperCase();
     const dest = String(flight.dest || '').trim().toUpperCase();
@@ -2053,7 +2114,10 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
     const enr3 = String(flight.enr3 || '').trim().toUpperCase();
     const activeRouteId = String(flight.active_route_id || '').trim().toUpperCase();
 
-    const airportFirMap = {
+    // Scope bandara -> FIR diambil dari tabel airport_firs lewat firCtx. Literal di
+    // bawah HANYA fallback kalau tabel kosong/tidak terbaca, supaya DB yang belum
+    // di-seed tidak kehilangan scope sama sekali.
+    const FALLBACK_AIRPORT_FIRS = {
         'WADD': ['WAAF'],
         'WIII': ['WIIF'],
         'YPPH': ['YMMM'],
@@ -2067,14 +2131,23 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
         'WSSS': ['WSJC'],
         'RPLL': ['RPHI']
     };
+    const usingDbMap = !!(firCtx && firCtx.airportFirs instanceof Map && firCtx.airportFirs.size > 0);
+    const airportFirMap = usingDbMap ? firCtx.airportFirs : new Map(Object.entries(FALLBACK_AIRPORT_FIRS));
+    const knownFirIds = (firCtx && firCtx.firIds instanceof Set) ? firCtx.firIds : new Set();
 
     const candidateLocs = new Set();
+    const firScope = [];
+    const pushFir = (code) => {
+        const c = String(code || '').trim().toUpperCase();
+        if (c && !firScope.includes(c)) firScope.push(c);
+    };
     [dep, dest, alt, enr1, enr2, enr3].forEach(c => {
         if (c && /^[A-Z]{4}$/.test(c)) {
             candidateLocs.add(c);
-            if (airportFirMap[c]) {
-                airportFirMap[c].forEach(fir => candidateLocs.add(fir));
-            }
+            const mapped = airportFirMap.get(c) || [];
+            mapped.forEach(fir => { candidateLocs.add(fir); pushFir(fir); });
+            // Nilai enroute boleh berupa kode FIR langsung (mis. ENR1 = YBBB).
+            if (mapped.length === 0 && knownFirIds.has(c.toLowerCase())) pushFir(c);
         }
     });
 
@@ -2132,7 +2205,7 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
         if (!parsed) return;
 
         const isTimeOverlap = (parsed.effTo >= winStart && parsed.effFrom <= winEnd);
-        const isScheduleOverlap = checkScheduleDOverlap(parsed.schedule, winStart, winEnd);
+        const isScheduleOverlap = checkScheduleDOverlap(parsed.schedule, winStart, winEnd, notamCoords(parsed));
         const timeMatch = isTimeOverlap && isScheduleOverlap;
 
         const isAerodrome = (location === dep || location === dest || location === alt);
@@ -2178,6 +2251,10 @@ function analyzeSingleFlight(flight, notamRows, routeRows) {
         REG: flight.ac_type,
         analysis,
         riskLevel: finalRisk,
+        // FIR yang benar-benar dijadikan scope analisa (dep/dest/alt/enr1-3 + airport_firs),
+        // supaya bisa diaudit dari payload tanpa menebak dari flags.
+        firScope,
+        firScopeSource: usingDbMap ? 'airport_firs' : 'fallback',
         flags: {
             firMapped: candidateLocs.size > 0,
             routeMapped: routeTokens.length > 0,
@@ -2197,6 +2274,7 @@ function firParseBulkNotamText(rawText) {
     if (!rawText || !String(rawText).trim()) return { ok: false, error: 'No text provided.' };
     const text = String(rawText);
     const rows = [];
+    const warnings = [];
 
     const parseTsv = (str) => {
         // Tahan quote multiline: sel Condition DINS berisi newline di dalam "...",
@@ -2258,19 +2336,50 @@ function firParseBulkNotamText(rawText) {
         }
     } else {
         const t = text;
-        const headerPattern = /(?:^|\n)[ \t]*\(?[A-Z]\d{4}\/\d{2}[ \t]+NOTAM[NRC]\b/gi;
+        // Header bisa berbentuk "WIIF A9102/26" + baris "NOTAMN" (prefiks lokasi +
+        // header terbelah wrap AFTN 69 karakter). Pola lama menuntut nomor di awal
+        // baris dengan pemisah [ \t]+, sehingga NOTAM kedua tergabung ke NOTAM
+        // sebelumnya dan hilang tanpa jejak.
+        const headerPattern = /(?:^|\n)[ \t]*(?:[A-Z]{4}[ \t]+)?\(?[A-Z]\d{4}\/\d{2}\s+NOTAM[NRC]\b/gi;
         const headers = Array.from(t.matchAll(headerPattern));
-        const parts = headers.length
-            ? headers.map((header, index) => t.slice(header.index, headers[index + 1]?.index ?? t.length))
-            : t.split(/(?=Q\))/gi).filter(part => part.trim() !== '');
+        let parts;
+        if (headers.length) {
+            parts = headers.map((header, index) => t.slice(header.index, headers[index + 1]?.index ?? t.length));
+        } else {
+            const chunks = t.split(/(?=Q\))/gi).filter(part => part.trim() !== '');
+            const firstQ = chunks.findIndex(chunk => /Q\)/i.test(chunk));
+            // Teks sebelum Q) pertama (mis. "(A9201/26 SNOWTAM") bukan NOTAM tersendiri,
+            // tapi memuat nomor dan TIPE. Kalau dibuang, kata SNOWTAM/ASHTAM hilang dan
+            // barisnya cuma divalidasi sebagai "NOTAM tidak valid" tanpa penjelasan.
+            parts = firstQ > 0
+                ? [chunks.slice(0, firstQ).join(' ').trim() + ' ' + chunks[firstQ].trim(), ...chunks.slice(firstQ + 1)]
+                : chunks;
+        }
+        let multiQualifier = 0;
         for (const nt of parts) {
             if (!nt || !nt.includes('Q)')) continue;
+            // Sabuk pengaman: satu potongan dengan >1 Q) berarti dua NOTAM tergabung
+            // (header terbelah / format tak terduga). Jangan diam — laporkan.
+            if ((nt.match(/(?:^|\n)[ \t]*Q\)/g) || []).length > 1) multiQualifier++;
             const loc = ((nt.match(/Q\)\s*([^ \/]+)/) || [])[1] || 'UNKNOWN').toUpperCase();
             const no = ((nt.match(/[A-Z]\d{4}\/\d{2}/i) || [])[0] || 'N/A').toUpperCase();
             rows.push([loc, no, nt.trim()]);
         }
+        if (multiQualifier > 0) {
+            warnings.push(`${multiQualifier} potongan memuat lebih dari satu Q) — sebagian NOTAM bisa tergabung. Pisahkan manual sebelum import.`);
+        }
     }
-    return { ok: true, rows, isTSV: text.indexOf('\t') !== -1 };
+    // SNOWTAM/ASHTAM bukan NOTAM biasa (RWYCC/kontaminan, ash cloud) dan tidak punya
+    // parser sendiri di sini. Kalau tidak dilaporkan, teksnya cuma "menghasilkan 0 baris"
+    // tanpa alasan apa pun — user tidak tahu kenapa import-nya kosong.
+    if (rows.length === 0 && text.trim() !== '') {
+        const special = (text.match(/\b(SNOWTAM|ASHTAM)\b/i) || [])[1];
+        if (special) {
+            return { ok: false, error: `${special.toUpperCase()} terdeteksi, bukan NOTAM ICAO biasa — halaman FIR belum punya parser ${special.toUpperCase()}. Verifikasi manual (RWYCC/kontaminan atau ash cloud tidak terbaca oleh parser NOTAM).` };
+        }
+        return { ok: false, error: 'Tidak ada NOTAM dengan baris Q) yang bisa dibaca. Periksa apakah teksnya memang berisi satu atau lebih NOTAM ICAO (Q) + B) + C)).' };
+    }
+    return { ok: true, rows, isTSV: text.indexOf('\t') !== -1, warnings };
 }
 
 // Dedupe & validasi baris bulk: { ok, total, valid, invalid, duplicates, preview, keySet }
@@ -2285,14 +2394,20 @@ async function firBulkValidateRows(context, parsedRows, skipDbDedup) {
         if (row.kind === 'FIR') keySet[number] = true;
         else otherKindIds.add(number);
     });
-    let valid = 0, invalid = 0, duplicates = 0;
+    let valid = 0, invalid = 0, duplicates = 0, unsupported = 0;
     const seenBatch = {};
     const preview = [];
     const validRows = [];
     for (const [loc, no, nt] of parsedRows) {
         const p = parseNotamRow({ id: no, message: nt });
         const aerodromeOnly = isAerodromeOnlyNotam(nt);
-        const rowOk = !aerodromeOnly && /^[A-Z]{4}$/.test(loc || '') && isValidNum.test(no || '') && nt && p && p.effFrom;
+        // SNOWTAM/ASHTAM memakai huruf field yang sama dengan NOTAM tapi artinya beda
+        // (C) = designator runway, bukan akhir validitas). Jangan divalidasi sebagai
+        // NOTAM biasa tanpa penjelasan — parser khusus belum ada di halaman FIR.
+        const special = (String(nt || '').match(/(?:^|[\s(])(SNOWTAM|ASHTAM)\b/i) || [])[1];
+        const specialType = special ? special.toUpperCase() : '';
+        if (specialType) unsupported++;
+        const rowOk = !aerodromeOnly && !specialType && /^[A-Z]{4}$/.test(loc || '') && isValidNum.test(no || '') && nt && p && p.effFrom;
         let isDup = null;
         if (rowOk) {
             const key = no.toUpperCase();
@@ -2302,9 +2417,14 @@ async function firBulkValidateRows(context, parsedRows, skipDbDedup) {
             if (isDup) duplicates++; else preview.push({ Location: loc, 'NOTAM #': no, ok: true, textPreview: nt.slice(0, 80).replace(/\n/g, ' ') });
         } else invalid++;
         if (isDup) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: isDup });
-        else if (!rowOk) preview.push({ Location: loc, 'NOTAM #': no, ok: false, error: aerodromeOnly ? 'Aerodrome-only NOTAM (Q scope A): use UPDATE NOTAM.' : 'Invalid (needs Location ICAO, NOTAM # A1234/26, and B)/C) date)' });
+        else if (!rowOk) preview.push({
+            Location: loc, 'NOTAM #': no, ok: false,
+            error: specialType
+                ? `${specialType} belum didukung halaman FIR — parser NOTAM biasa tidak membaca RWYCC/kontaminan atau ash cloud. Verifikasi manual.`
+                : (aerodromeOnly ? 'Aerodrome-only NOTAM (Q scope A): use UPDATE NOTAM.' : 'Invalid (needs Location ICAO, NOTAM # A1234/26, and B)/C) date)')
+        });
     }
-    return { valid, invalid, duplicates, preview: preview.slice(0, 40), validRows };
+    return { valid, invalid, duplicates, unsupported, preview: preview.slice(0, 40), validRows };
 }
 
 async function handleFirBulkPreviewNotams(context, args) {
@@ -2316,7 +2436,7 @@ async function handleFirBulkPreviewNotams(context, args) {
         // Angka mode-overwrite: dedup lawan DB dilewati (overwrite hapus FIR dulu),
         // jadi tombol OVERWRITE harus ikut angka ini, bukan angka append.
         const vo = await firBulkValidateRows(context, parsed.rows, true);
-        return Response.json({ data: { ok: true, total: parsed.rows.length, valid: v.valid, invalid: v.invalid, duplicates: v.duplicates, preview: v.preview, isTSV: parsed.isTSV, validOverwrite: vo.valid, invalidOverwrite: vo.invalid } });
+        return Response.json({ data: { ok: true, total: parsed.rows.length, valid: v.valid, invalid: v.invalid, duplicates: v.duplicates, unsupported: v.unsupported, preview: v.preview, isTSV: parsed.isTSV, validOverwrite: vo.valid, invalidOverwrite: vo.invalid, warnings: parsed.warnings || [] } });
     } catch (e) {
         console.error('[RPC] firBulkPreview Error:', e);
         return Response.json({ data: { ok: false, error: e.message } });
@@ -2347,7 +2467,7 @@ async function handleFirBulkImportNotams(context, args) {
             ).bind(r.no, r.loc, r.nt, r.p.effFrom ? r.p.effFrom.toISOString() : null, r.p.isContinuous ? new Date('2099-01-01T00:00:00Z').toISOString() : (r.p.effTo ? r.p.effTo.toISOString() : null), 'FIR'));
         }
         await context.env.DB.batch(stmts);
-        return Response.json({ data: { ok: true, total: parsed.rows.length, appended: v.validRows.length, skippedInvalid: v.invalid, skippedDup: v.duplicates, mode: m, isTSV: parsed.isTSV } });
+        return Response.json({ data: { ok: true, total: parsed.rows.length, appended: v.validRows.length, skippedInvalid: v.invalid, skippedDup: v.duplicates, unsupported: v.unsupported, mode: m, isTSV: parsed.isTSV, warnings: parsed.warnings || [] } });
     } catch (e) {
         console.error('[RPC] firBulkImport Error:', e);
         return Response.json({ data: { ok: false, error: e.message } });
@@ -2358,9 +2478,19 @@ async function handleFirGetNotamEditorData(context) {
     try {
         const { results } = await context.env.DB.prepare("SELECT * FROM notams WHERE kind = 'FIR'").all();
         const firIds = await fetchFirIds(context);
+        // Baris yang dibuang isValidFirNotam tidak boleh hilang tanpa jejak: laporkan
+        // jumlah + alasannya. Sebelumnya `skipped: 0` hardcoded padahal barisnya disaring.
+        const skippedRows = results.filter(row => !isValidFirNotam(row, firIds)).map(row => ({
+            'NOTAM #': row.id,
+            Location: row.location,
+            reason: isAerodromeOnlyNotam(row.message) ? 'Q-scope A (dataset aerodrome — pakai UPDATE NOTAM)' : 'lokasi bukan FIR terdaftar'
+        }));
         const notams = results.filter(row => isValidFirNotam(row, firIds)).map(row => {
             const eff = row.valid_from ? row.valid_from.replace('T', ' ').substring(0, 16) : '';
-            const exp = row.valid_to ? row.valid_to.replace('T', ' ').substring(0, 16) : '';
+            // valid_to NULL = PERM (jalur tulis menyimpan PERM sebagai NULL). Harus
+            // dilabeli PERM seperti firGetNotamResults, bukan string kosong — kalau tidak
+            // checkbox PERM tidak tercentang saat edit dan labelnya hilang.
+            const exp = row.valid_to ? row.valid_to.replace('T', ' ').substring(0, 16) : 'PERM';
             return {
                 rowId: row.id,
                 Location: row.location,
@@ -2373,7 +2503,7 @@ async function handleFirGetNotamEditorData(context) {
                 updatedAt: row.updated_at || ''
             };
         });
-        return Response.json({ data: { ok: true, notams, count: notams.length, skipped: 0 } });
+        return Response.json({ data: { ok: true, notams, count: notams.length, skipped: skippedRows.length, skippedRows: skippedRows.slice(0, 50) } });
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
     }
@@ -2436,6 +2566,28 @@ async function fetchFirIds(context) {
     }
 }
 
+// Peta bandara -> FIR dari tabel airport_firs (sumber otoritatif — tabel yang sama
+// dipakai getFirData). Dipakai analyzeSingleFlight supaya scope FIR flight tidak lagi
+// bergantung pada daftar bandara hardcoded yang hanya menutup 13 bandara: bandara di
+// luar daftar itu tidak menyumbang FIR sama sekali, sehingga NOTAM FIR yang dilintasi
+// bisa hilang dan flight terbaca "Clear".
+async function fetchAirportFirMap(context) {
+    const map = new Map();
+    try {
+        const { results } = await context.env.DB.prepare('SELECT airport_icao, fir_code FROM airport_firs').all();
+        (results || []).forEach(r => {
+            const airport = String(r.airport_icao || '').trim().toUpperCase();
+            const fir = String(r.fir_code || '').trim().toUpperCase();
+            if (!airport || !fir) return;
+            if (!map.has(airport)) map.set(airport, []);
+            if (!map.get(airport).includes(fir)) map.get(airport).push(fir);
+        });
+    } catch (e) {
+        console.warn('[RPC] fetchAirportFirMap error: ' + e.message);
+    }
+    return map;
+}
+
 // Read-side guard: returns true if the row is a valid FIR NOTAM.
 // Checks: (1) kind='FIR' is already in the query, (2) location exists in firs table,
 // (3) content is not aerodrome-only via Q-line scope check.
@@ -2469,12 +2621,16 @@ async function handleFirGetNotamResults(context) {
             const parsed = parseNotamRow(row);
             const eff = row.valid_from ? row.valid_from.replace('T', ' ').substring(0, 16) : '';
             const exp = row.valid_to ? row.valid_to.replace('T', ' ').substring(0, 16) : 'PERM';
-            let status = 'ACTIVE';
+            let status = parsed ? 'ACTIVE' : 'UNVERIFIED';
             if (parsed && parsed.effTo && parsed.effTo < now) status = 'EXPIRED';
-            const risk = parsed ? parsed.priority : 'LOW';
+            // Baris yang gagal di-parse tidak boleh turun ke LOW: risiko konservatif yang
+            // sama dengan getActiveNotams, supaya kedua halaman sepakat untuk baris yang sama.
+            const risk = parsed ? parsed.priority : firUnverifiedRisk(row.message);
             const lifecycle = lifecycleMap[String(row.id || '').trim().toUpperCase()] || 'ACTIVE';
             if ((lifecycle === 'REPLACED' || lifecycle === 'CANCELLED') && status === 'ACTIVE') {
                 status = lifecycle;
+            } else if (lifecycle === 'CANCEL_MARKER') {
+                status = 'CANCELLED';
             }
             return {
                 rowId: row.id,

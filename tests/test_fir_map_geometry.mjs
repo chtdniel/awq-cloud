@@ -131,7 +131,10 @@ function extract(src, marker) {
   throw new Error('unbalanced braces after: ' + marker);
 }
 const client = new Function([
-  'nfield', 'normalizePolygon', 'parseRadiusPhraseFromText', 'parseNotamGeometryFromText', 'notamShapeProps', 'buildNotamGeom', 'notamRingContains'
+  'nfield', 'normalizePolygon', 'parseRadiusPhraseFromText', 'parseNotamGeometryFromText', 'notamShapeProps', 'buildNotamGeom', 'notamRingContains',
+  // notamShapeProps memakai notamIsLive untuk memutuskan `active` (status lifecycle
+  // REPLACED/CANCELLED tidak boleh tampil live) — ikut diekstrak agar bundle lengkap.
+  'notamIsLive'
 ].map(name => extract(firSource, 'function ' + name + '(')).join('\n') +
   '\nreturn { notamShapeProps, buildNotamGeom, parseNotamGeometryFromText, notamRingContains };')();
 
