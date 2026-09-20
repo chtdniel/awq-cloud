@@ -30,6 +30,10 @@ const ANCHORS = {
     dxrName: 'E48', picName: 'O48'
 };
 
+// Sentinel printed when neither the TAF registry nor the flight-board column has
+// a forecast for a station.
+const NIL_TAF = 'NIL TAF DATA IN DATABASE';
+
 // WX / NOTAM sheet layout (verified via openpyxl):
 //   Row 1: B1="WX DOM" | D1="WX INTL"  ;  B1="NOTAM DOM" | D1="NOTAM INTL"
 //   Data rows 3..17 inclusive (15 rows). Each physical row holds 2 stations:
@@ -647,17 +651,21 @@ async function buildFormFromFlights(context, flightInputs, savedNotamAnalysis, n
         const poaStn = f ? stationCode(f.dest) : '';
         const podTime = f ? compactTime(f.etd) : '';
         const poaTime = f ? compactTime(f.eta) : '';
-        const podRaw = f ? String(f.taf_dep || '').trim() : '';
-        const poaRaw = f ? String(f.taf_arr || '').trim() : '';
-        const podForecast = podStn ? (podRaw || 'NIL TAF DATA IN FLIGHT BOARD') : '';
-        const poaForecast = poaStn ? (poaRaw || 'NIL TAF DATA IN FLIGHT BOARD') : '';
+        const podBoardTaf = f ? String(f.taf_dep || '').trim() : '';
+        const poaBoardTaf = f ? String(f.taf_arr || '').trim() : '';
+        // The TAF registry (TAF Manager) is the authoritative full forecast; the
+        // flight-board column taf_dep/taf_arr is only a fallback — it is empty on
+        // most flights, and trusting it first made DEP/ARR stations print
+        // "NIL TAF DATA IN FLIGHT BOARD" while a fresh TAF existed in the registry.
+        const podForecast = podStn ? (String(tafMap[podStn]?.raw || '').trim() || podBoardTaf || NIL_TAF) : '';
+        const poaForecast = poaStn ? (String(tafMap[poaStn]?.raw || '').trim() || poaBoardTaf || NIL_TAF) : '';
         tafs.push({ slot: 'POD' + (i + 1), station: podStn, stationEntered: podStn, time: podTime || (podStn && tafMap[podStn]?.issue_time ? compactTime(tafMap[podStn].issue_time) : ''), forecast: podForecast, flight: callsign });
         tafs.push({ slot: 'POA' + (i + 1), station: poaStn, stationEntered: poaStn, time: poaTime || (poaStn && tafMap[poaStn]?.issue_time ? compactTime(tafMap[poaStn].issue_time) : ''), forecast: poaForecast, flight: callsign });
     }
     additionalTafStations.forEach(e => {
         if (tafs.some(taf => taf.station === e.station)) return;
         const raw = tafMap[e.station]?.raw || '';
-        tafs.push({ slot: e.label, station: e.station, stationEntered: e.station, time: '', forecast: raw || 'NIL TAF DATA IN DATABASE', flight: e.flight });
+        tafs.push({ slot: e.label, station: e.station, stationEntered: e.station, time: '', forecast: raw || NIL_TAF, flight: e.flight });
     });
     const notams = [];
     orderedStations.forEach(entry => {
