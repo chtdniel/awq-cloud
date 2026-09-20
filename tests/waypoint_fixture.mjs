@@ -8,9 +8,9 @@ export const { onRequestPost } = await import('data:text/javascript;base64,' + B
 export async function createWaypointFixture(role = 'admin') {
   const database = new DatabaseSync(':memory:');
   database.exec('CREATE TABLE latlong (id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT, waypoint TEXT, latitude TEXT, longitude TEXT, sequence_order INTEGER)');
-  // Registry route ikut dibuat: tabel latlong sendiri tidak cukup untuk memutuskan
-  // sebuah baris "yatim" (route_id tanpa profil), dan fixture harus mencerminkan
-  // skema produksi supaya jalur itu benar-benar teruji.
+  // The route registry is created too: the latlong table alone cannot decide
+  // whether a row is an orphan (a route_id with no profile), and the fixture has to
+  // mirror the production schema for that path to be genuinely exercised.
   database.exec(`
     CREATE TABLE routes (
       id TEXT PRIMARY KEY, dep_airport TEXT, arr_airport TEXT, dep_rwy TEXT, sid TEXT,

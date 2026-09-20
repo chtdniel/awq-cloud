@@ -1776,8 +1776,8 @@
               window.isAdmin = isAdmin;
               var wpItem = document.querySelector('#data-submenu .dropdown-item[data-tab="waypoint"]');
               if (wpItem) wpItem.style.display = isAdmin ? '' : 'none';
-              // Modul yang punya aksi admin-only (mis. pintasan waypoint di halaman
-              // ROUTE) menggambar ulang dari cache saat status aksesnya turun.
+              // Modules that own an admin-only action (e.g. the waypoint shortcut on
+              // the ROUTE page) repaint from cache once the access state lands.
               window.dispatchEvent(new CustomEvent('occ:accessResolved', { detail: { isAdmin: isAdmin, canViewSettings: canView } }));
             }).withFailureHandler(function() {
               window.isSettingsAdmin = false;

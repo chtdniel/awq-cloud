@@ -3091,9 +3091,9 @@
         if (!r) return;
         let isPrimary = String(r.ID).endsWith('10');
         let label = isPrimary ? `${r.ID} (Primary)` : `${r.ID} (Alternate)`;
-        // Penanda koordinat: peta FIR menggambar rute dari tabel LATLONG, jadi
-        // profil tanpa baris di sana akan tampil sebagai rute kosong di peta.
-        // Ditandai di titik pemilihan supaya operator tidak baru sadar di peta.
+        // Coordinate marker: the FIR map draws the route from the LATLONG table, so
+        // a profile with no rows there shows up as an empty route on the map.
+        // Marked at the point of selection so the operator does not find out on the map.
         const wpCount = Number(r.WAYPOINT_COUNT);
         if (r.WAYPOINT_COUNT !== null && r.WAYPOINT_COUNT !== undefined && r.WAYPOINT_COUNT !== '' && Number.isFinite(wpCount)) {
           label += wpCount > 0 ? ` · ${wpCount} WP` : ' · NO WP';

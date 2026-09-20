@@ -12,22 +12,22 @@ try {
   const save = (mode, routeId, text = rawText) => rpc('latlongSaveBulk', [{ rawText: text, mode, routeId, orderMode: 'column' }]);
   const knownSave = await save('replace', 'route-a');
   assert.equal(knownSave.data.inserted, 2);
-  assert.equal(knownSave.data.routeKnown, true, 'ROUTE-A punya profil di registry (perbandingan tidak case-sensitive)');
+  assert.equal(knownSave.data.routeKnown, true, 'ROUTE-A has a profile in the registry (the comparison is not case-sensitive)');
   const orphanSave = await save('append', 'route-b');
   assert.equal(orphanSave.data.inserted, 2);
-  assert.equal(orphanSave.data.routeKnown, false, 'ROUTE-B belum ada di registry, koordinatnya harus ditandai belum dikenal');
+  assert.equal(orphanSave.data.routeKnown, false, 'ROUTE-B is not in the registry yet, so its coordinates must be flagged as unknown');
   const merged = await save('merge', 'route-a', 'WADD S 08 40.0 E 115 10.2\nVTK N 01 24.9 E 104 01.3');
   assert.equal(merged.data.updated, 1);
   assert.equal(merged.data.inserted, 1);
   const rows = (await rpc('latlongGetEditorData')).data.rows;
   assert.equal(rows.length, 5);
   assert.equal(rows.find(row => row.ID === 'ROUTE-B' && row.Waypoint === 'WADD').Latitude, 'S 08 44.8');
-  // Baris yatim: route_id tanpa profil di registry. Hanya ROUTE-A yang punya
-  // profil di fixture, jadi ROUTE-B (dan ID yang tidak dikenal) harus ditandai.
+  // Orphan rows: a route_id with no profile in the registry. Only ROUTE-A has a
+  // profile in this fixture, so ROUTE-B (and any unknown ID) must be flagged.
   const editor = (await rpc('latlongGetEditorData')).data;
-  assert.equal(editor.orphanCount, 2, 'hanya baris yang Route ID-nya tidak ada di registry yang dihitung yatim');
+  assert.equal(editor.orphanCount, 2, 'only rows whose Route ID is absent from the registry count as orphans');
   assert.deepEqual([...new Set(editor.rows.filter(row => row.orphan).map(row => row.ID))], ['ROUTE-B']);
-  assert.equal(editor.rows.filter(row => row.ID === 'ROUTE-A').every(row => row.orphan === false), true, 'ROUTE-A punya profil, jadi bukan yatim');
+  assert.equal(editor.rows.filter(row => row.ID === 'ROUTE-A').every(row => row.orphan === false), true, 'ROUTE-A has a profile, so it is not an orphan');
   for (const [mode, routeId, text] of [['invalid', 'A', rawText], ['replace', '', rawText], ['replace', 'A', 'invalid text'], ['replace', 'A', 'WADD S 91 00.0 E 115 10.2']]) {
     assert.equal((await save(mode, routeId, text)).status, 400);
     assert.equal((await rpc('latlongGetEditorData')).data.count, 5);
@@ -50,7 +50,7 @@ try {
   assert.equal((await rpc('latlongSaveBulk', [], {})).status, 401);
   const lastSave = await save('replace', 'route-c');
   assert.equal(lastSave.data.inserted, 2);
-  assert.equal(lastSave.data.routeKnown, false, 'route-c tidak punya profil di registry');
+  assert.equal(lastSave.data.routeKnown, false, 'route-c has no profile in the registry');
   assert.equal((await rpc('latlongClearAll')).data.cleared, 2);
   assert.equal((await rpc('latlongGetEditorData')).data.count, 0);
 } finally { database.close(); }

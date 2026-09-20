@@ -95,14 +95,14 @@ try {
   );
   assert.equal(byId.WIIIWADD01.WAYPOINT_SEQ, 'DOLTA A585', 'the new count must not disturb existing route fields');
 
-  // Selector route di Flight Board membaca route dari dashboard payload. Angkanya
-  // harus sama persis dengan halaman ROUTE — dua sumber, satu kebenaran.
+  // The Flight Board route selector reads routes from the dashboard payload. The
+  // number has to match the ROUTE page exactly — two sources, one truth.
   const dashboard = await scenario.rpc('getFlightDashboardData');
   assert.equal(dashboard.status, 200, JSON.stringify(dashboard));
   const withWaypoints = dashboard.data.flights.find(f => f.FLIGHT === 'QZ647').ROUTES.find(r => r.ID === 'WIIIWADD01');
   const withoutWaypoints = dashboard.data.flights.find(f => f.FLIGHT === 'QZ646').ROUTES.find(r => r.ID === 'WADDWSSS01');
-  assert.equal(withWaypoints.WAYPOINT_COUNT, byId.WIIIWADD01.WAYPOINT_COUNT, 'dashboard dan getAllRoutes harus sepakat');
-  assert.equal(withoutWaypoints.WAYPOINT_COUNT, 0, 'route tanpa koordinat harus terbaca 0 di selector, bukan undefined');
+  assert.equal(withWaypoints.WAYPOINT_COUNT, byId.WIIIWADD01.WAYPOINT_COUNT, 'the dashboard and getAllRoutes must agree');
+  assert.equal(withoutWaypoints.WAYPOINT_COUNT, 0, 'a route without coordinates must read 0 in the selector, not undefined');
 } finally {
   scenario.database.close();
 }

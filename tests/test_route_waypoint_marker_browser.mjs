@@ -6,13 +6,13 @@ import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
 
-// Halaman ROUTE menandai tiap profil dengan status waypoint-nya di database
-// (tabel latlong), dan — untuk admin — menyediakan pintasan ke WAYPOINT MANAGER
-// yang Route ID-nya sudah terisi. Test ini menjalankan klien sungguhan
-// (public/index.html) di Chromium supaya rantainya terbukti sampai DOM + DB:
-// penanda per profil, KPI cakupan, filter "NO WAYPOINTS", satu klik = satu aksi,
-// lalu alur lengkap gap -> pintasan -> isi koordinat -> SAVE -> penanda berubah.
-// Non-admin harus tetap melihat penandanya tanpa tombol yang pasti ditolak.
+// The ROUTE page marks every profile with its waypoint state in the database
+// (latlong table) and — for admins — offers a shortcut into WAYPOINT MANAGER with
+// the Route ID already filled in. This test drives the real client
+// (public/index.html) in Chromium so the chain is proven down to DOM + DB:
+// per-profile marker, coverage KPI, "NO WAYPOINTS" filter, one click = one action,
+// then the full flow gap -> shortcut -> enter coordinates -> SAVE -> marker flips.
+// A non-admin must still see the markers, without a button that is certain to fail.
 
 const playwrightModule = process.env.PLAYWRIGHT_MODULE;
 const { chromium } = await import(playwrightModule ? pathToFileURL(playwrightModule).href : 'playwright');
@@ -46,11 +46,11 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS airport_notes (icao_code TEXT, day_range TEXT, start_time TEXT, end_time TEXT, note_text TEXT, type TEXT);
 `);
 
-// Tiga profil: satu sudah punya koordinat, satu belum, dan satu lagi pasangan
-// kota yang sama dengan yang belum (Primary/Alternate) supaya selector route
-// Flight bisa diuji memuat kedua keadaan sekaligus. Baris pertama sengaja
-// ditulis dengan huruf kecil + spasi di route_id-nya — WAYPOINT MANAGER diketik
-// manual, jadi normalisasi itu bagian dari perilaku yang diuji.
+// Three profiles: one already has coordinates, one has none, and one shares the
+// city pair of the one that has none (Primary/Alternate) so the Flight route
+// selector can be exercised on both states at once. The first row is deliberately
+// written with lowercase letters and padding in route_id — WAYPOINT MANAGER is
+// typed by hand, so that normalization is part of the behaviour under test.
 database.exec(`
   INSERT INTO routes (id, dep_airport, arr_airport, dep_rwy, sid, waypoint_seq, star, arr_rwy, route_string) VALUES
     ('WIIIWADD01', 'WIII', 'WADD', '07L', 'DOLTA', 'DOLTA A585', 'MAMAD', '09', 'WIII RWY-07L DOLTA DOLTA A585 MAMAD RWY-09 WADD'),
@@ -98,13 +98,13 @@ async function createUser(email, role) {
 
 const adminHeaders = await createUser('dispatcher@example.com', 'admin');
 const viewerHeaders = await createUser('viewer@example.com', 'readonly');
-// Sesi yang dipaksa ke setiap request /api/rpc — pengganti login lewat UI.
+// Session forced onto every /api/rpc request — stands in for logging in via the UI.
 let sessionHeaders = adminHeaders;
 
 const publicDirectory = resolve('public');
-// charset=utf-8 disengaja: public/index.html tidak punya <meta charset>, jadi
-// halaman ini bergantung pada header server (Cloudflare Pages mengirimnya).
-// Tanpa itu em-dash/panah di UI terbaca mojibake dan asersi teks jadi menyesatkan.
+// charset=utf-8 is deliberate: public/index.html carries a <meta charset> now, and
+// this keeps the harness faithful to Cloudflare Pages, which also sends it. Without
+// it the em-dashes/arrows in the UI read as mojibake and text assertions mislead.
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png' };
 async function asset(request) {
   const pathname = decodeURIComponent(new URL(request.url).pathname);
@@ -143,12 +143,12 @@ async function waitForValue(fn, label, timeout = 8000) {
   for (;;) {
     const value = fn();
     if (value) return value;
-    if (Date.now() - start > timeout) throw new Error(`timeout menunggu ${label}`);
+    if (Date.now() - start > timeout) throw new Error(`timeout waiting for ${label}`);
     await new Promise(resolve => setTimeout(resolve, 50));
   }
 }
-// Hitungan per route dinormalisasi seperti di server: route_id di WAYPOINT
-// MANAGER diketik manual, jadi baris seed-nya bisa berspasi/huruf kecil.
+// Per-route count is normalized like the server does it: route_id in WAYPOINT
+// MANAGER is typed by hand, so seeded rows may carry padding or lowercase.
 const latlongCount = routeId => database.prepare('SELECT COUNT(*) AS n FROM latlong WHERE UPPER(TRIM(route_id)) = ?').get(routeId).n;
 
 const browser = await chromium.launch({ headless: true });
@@ -156,9 +156,9 @@ let failures = 0;
 
 async function openRoutePage() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-  // confirm dipakai tombol delete route dan dialog SAVE waypoint. Diganti spy
-  // supaya satu klik yang menghasilkan lebih dari satu dialog (listener
-  // menumpuk) bisa terlihat, dan supaya tidak ada data yang terhapus.
+  // confirm backs the route delete button and the waypoint SAVE dialog. It is
+  // replaced by a spy so a single click that produces more than one dialog
+  // (accumulated listeners) is visible, and so nothing is really deleted.
   await context.addInitScript(() => {
     window.__confirmCalls = [];
     window.confirm = message => { window.__confirmCalls.push(String(message)); return false; };
@@ -167,15 +167,15 @@ async function openRoutePage() {
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-  // applySettingsAccessGate menulis window.isAdmin setelah sesi terselesaikan,
-  // jadi nilainya menandai boot selesai sekaligus status akses sudah diketahui.
+  // applySettingsAccessGate writes window.isAdmin once the session resolves, so its
+  // non-null value marks boot complete and the access state already known.
   await page.waitForFunction(() => window.isAdmin !== null, null, { timeout: 20000 });
   await page.evaluate(() => window.switchTab('route'));
   await page.waitForFunction(() => document.querySelectorAll('#route-manager-tbody .route-card').length === 3, null, { timeout: 10000 });
   return { context, page, pageErrors };
 }
 
-// ---------- Skenario 1: admin, lengkap dari penanda sampai gap terisi ----------
+// ---------- Scenario 1: admin, from the marker all the way to a filled gap ----------
 {
   const { context, page, pageErrors } = await openRoutePage();
   try {
@@ -188,31 +188,31 @@ async function openRoutePage() {
     })));
     const registered = cards.find(card => card.id === 'WIIIWADD01');
     const missing = cards.find(card => card.id === 'WADDWSSS01');
-    assert.equal(registered.badge, '2 WP', 'profil dengan koordinat harus menampilkan jumlah waypoint');
+    assert.equal(registered.badge, '2 WP', 'a profile with coordinates must show the waypoint count');
     assert.match(registered.badgeClass, /wp-badge-ok/);
     assert.match(registered.label, /2 waypoints registered/);
-    assert.equal(missing.badge, 'NO WP', 'profil tanpa koordinat harus ditandai belum terdaftar');
+    assert.equal(missing.badge, 'NO WP', 'a profile without coordinates must be marked as not registered');
     assert.match(missing.badgeClass, /wp-badge-gap/);
-    assert.equal(registered.actionLabel, null, 'route yang sudah punya koordinat tidak perlu tombol pintasan');
-    assert.match(missing.actionLabel || '', /WADDWSSS01/, 'pintasan hanya untuk admin dan hanya pada route yang belum punya koordinat');
+    assert.equal(registered.actionLabel, null, 'a route that already has coordinates needs no shortcut');
+    assert.match(missing.actionLabel || '', /WADDWSSS01/, 'the shortcut is admin-only and only on routes without coordinates');
 
-    assert.equal((await page.textContent('#route-kpi-wp')).trim(), '2/3', 'KPI cakupan = profil ber-waypoint / total profil');
-    assert.match(await page.getAttribute('#route-kpi-wp-card', 'class'), /warn/, 'cakupan belum penuh tidak boleh berwarna aman');
+    assert.equal((await page.textContent('#route-kpi-wp')).trim(), '2/3', 'coverage KPI = profiles with waypoints / total profiles');
+    assert.match(await page.getAttribute('#route-kpi-wp-card', 'class'), /warn/, 'partial coverage must not use the safe colour');
 
-    // Filter gap: hanya profil tanpa koordinat yang tersisa, lalu ALL memulihkan.
+    // Gap filter: only the profile without coordinates is left, then ALL restores.
     await page.click('#route-filter-wp-gap');
     await page.waitForFunction(() => document.querySelectorAll('#route-manager-tbody .route-card').length === 1, null, { timeout: 5000 });
     assert.deepEqual(
       await page.evaluate(() => [...document.querySelectorAll('#route-manager-tbody .route-id-cell')].map(el => el.textContent.trim())),
       ['WADDWSSS01'],
-      'filter NO WAYPOINTS hanya menyisakan profil yang belum punya koordinat'
+      'the NO WAYPOINTS filter leaves only profiles that have no coordinates'
     );
-    assert.equal(await page.textContent('#route-kpi-wp'), '2/3', 'KPI cakupan dihitung dari registry, bukan dari hasil filter');
-    assert.equal((await page.textContent('#route-total-count')).trim(), '1', 'counter kanan atas mengikuti hasil filter');
-    assert.equal((await page.textContent('#route-kpi-total')).trim(), '3', 'KPI tetap menggambarkan registry, tidak ikut menyusut saat difilter');
+    assert.equal(await page.textContent('#route-kpi-wp'), '2/3', 'coverage KPI comes from the registry, not from the filtered result');
+    assert.equal((await page.textContent('#route-total-count')).trim(), '1', 'the counter at the top right follows the filtered result');
+    assert.equal((await page.textContent('#route-kpi-total')).trim(), '3', 'KPIs keep describing the registry instead of shrinking with the filter');
 
-    // Dua re-render di atas dulu menumpuk listener klik di tbody. Satu klik
-    // delete harus menghasilkan tepat satu dialog konfirmasi.
+    // The two re-renders above used to stack click listeners on tbody. A single
+    // delete click has to produce exactly one confirmation dialog.
     await page.click('#route-filter-chips .filter-chip');
     await page.waitForFunction(() => document.querySelectorAll('#route-manager-tbody .route-card').length === 3, null, { timeout: 5000 });
     await page.click('#route-manager-tbody .route-card .route-delete-btn');
@@ -221,53 +221,53 @@ async function openRoutePage() {
     assert.equal(
       (await page.evaluate(() => window.__confirmCalls)).length,
       1,
-      'satu klik delete = satu dialog; listener tidak boleh menumpuk tiap re-render'
+      'one delete click = one dialog; listeners must not accumulate on every re-render'
     );
 
-    // Selector route di modal Flight memakai payload dashboard. Karena peta FIR
-    // menggambar rute dari tabel LATLONG, profil tanpa koordinat harus terbaca
-    // sebagai peringatan di titik pemilihan — bukan baru ketahuan di peta.
-    // Tunggu payload dashboard benar-benar termuat: openRouteModal membaca
-    // window.allDbFlights, bukan memanggil RPC sendiri.
+    // The route selector in the Flight modal is fed by the dashboard payload. Since
+    // the FIR map draws the route from the LATLONG table, a profile without
+    // coordinates has to read as a warning at the point of selection — not be
+    // discovered later on the map. Wait for the dashboard payload first:
+    // openRouteModal reads window.allDbFlights instead of calling RPC itself.
     await page.waitForFunction(() => Array.isArray(window.allDbFlights) && window.allDbFlights.length > 0, null, { timeout: 15000 });
     await page.evaluate(() => window.openRouteModal(1));
     await page.waitForFunction(() => document.querySelectorAll('#route-selector option').length >= 2, null, { timeout: 5000 });
     assert.deepEqual(
       await page.evaluate(() => [...document.querySelectorAll('#route-selector option')].map(option => option.textContent.trim())),
       ['WADDWSSS01 (Alternate) · NO WP', 'WADDWSSS10 (Primary) · 2 WP', '+ Add Alternate Route'],
-      'label selector route harus membawa status koordinat, primary tetap dikenali dari akhiran ID, dan opsi tambah route tetap ada'
+      'route selector labels must carry the coordinate state, primary stays recognizable from the ID suffix, and the add-route option survives'
     );
     await page.evaluate(() => window.closeRouteModal());
     await page.waitForTimeout(200);
 
-    // Fallback akses telat: kalau registry sempat digambar selagi status admin
-    // belum diketahui (boot belum selesai), tombolnya tidak boleh menunggu
-    // refresh halaman — occ:accessResolved harus memicu gambar ulang dari cache.
+    // Late access fallback: if the registry was painted while the admin state was
+    // still unknown (boot incomplete), the button must not wait for a page refresh —
+    // occ:accessResolved has to trigger a repaint from cache.
     await page.evaluate(() => { window.isAdmin = null; window.filterRouteTable(); });
-    assert.equal(await page.locator('#route-manager-tbody .route-wp-btn').count(), 0, 'status akses belum diketahui = tidak ada aksi admin (gagal-tertutup)');
+    assert.equal(await page.locator('#route-manager-tbody .route-wp-btn').count(), 0, 'unknown access state = no admin action (fails closed)');
     await page.evaluate(() => {
       window.isAdmin = true;
       window.dispatchEvent(new CustomEvent('occ:accessResolved', { detail: { isAdmin: true } }));
     });
     await page.waitForFunction(() => document.querySelectorAll('#route-manager-tbody .route-wp-btn').length === 1, null, { timeout: 5000 });
 
-    // ---- Alur inti pintasan: gap -> WAYPOINT MANAGER -> SAVE -> penanda berubah ----
+    // ---- Core shortcut flow: gap -> WAYPOINT MANAGER -> SAVE -> marker flips ----
     await page.click('#route-manager-tbody .route-card .route-wp-btn');
     await page.waitForFunction(() => document.getElementById('view-waypoint').classList.contains('active'), null, { timeout: 5000 });
-    assert.equal(await page.inputValue('#ll-routeId'), 'WADDWSSS01', 'Route ID harus sudah terisi di WAYPOINT MANAGER');
-    assert.equal(await page.inputValue('#ll-search'), 'WADDWSSS01', 'daftar waypoint difilter ke route ini supaya konteksnya jelas');
-    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'll-paste', 'fokus langsung ke kotak paste');
+    assert.equal(await page.inputValue('#ll-routeId'), 'WADDWSSS01', 'the Route ID must already be filled in inside WAYPOINT MANAGER');
+    assert.equal(await page.inputValue('#ll-search'), 'WADDWSSS01', 'the waypoint list is filtered to this route so the context is obvious');
+    assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'll-paste', 'focus lands straight in the paste box');
 
-    // Baris yatim (Route ID tanpa profil, mis. salah ketik) tidak boleh hilang
-    // diam-diam: dia tidak dipakai peta FIR dan tidak dihitung di halaman ROUTE.
-    assert.equal((await page.textContent('#ll-orphan-btn')).trim(), 'UNTRACKED (1)', 'jumlah baris yatim harus terlihat');
-    assert.match(await page.textContent('#ll-list-status'), /UNTRACKED/, 'status daftar menyebut baris yatim');
+    // Orphan rows (a Route ID with no profile, a typo for instance) must not vanish
+    // silently: the FIR map never reads them and the ROUTE page never counts them.
+    assert.equal((await page.textContent('#ll-orphan-btn')).trim(), 'UNTRACKED (1)', 'the number of orphan rows has to be visible');
+    assert.match(await page.textContent('#ll-list-status'), /UNTRACKED/, 'the list status mentions orphan rows');
     await page.fill('#ll-search', 'WADDWSSS9');
     await page.waitForFunction(() => document.querySelector('#ll-list .ll-orphan') !== null, null, { timeout: 5000 });
-    assert.match(await page.textContent('#ll-list'), /UNTRACKED/, 'baris yatim ditandai di daftar');
+    assert.match(await page.textContent('#ll-list'), /UNTRACKED/, 'an orphan row is tagged in the list');
     await page.click('#ll-orphan-btn');
     await page.waitForFunction(() => document.querySelectorAll('#ll-list .ll-item').length === 1, null, { timeout: 5000 });
-    assert.match(await page.textContent('#ll-list'), /WADDWSSS9/, 'filter UNTRACKED menyisakan hanya baris yatim');
+    assert.match(await page.textContent('#ll-list'), /WADDWSSS9/, 'the UNTRACKED filter leaves only orphan rows');
     await page.click('#ll-orphan-btn');
     await page.fill('#ll-search', 'WADDWSSS01');
     await page.waitForTimeout(150);
@@ -276,13 +276,13 @@ async function openRoutePage() {
     await page.fill('#ll-paste', 'SBR02 S 08 45.0 E 115 20.0\nBITAK S 02 30.0 E 106 00.0');
     await page.evaluate(() => { window.confirm = () => true; });
     await page.click('#ll-save-btn');
-    await waitForValue(() => latlongCount('WADDWSSS01') === 2, 'dua baris latlong tersimpan untuk WADDWSSS01');
-    assert.equal(latlongCount('WADDWSSS01'), 2, 'efek samping DB: koordinat tersimpan untuk route yang diisi lewat pintasan');
-    assert.equal(latlongCount('WIIIWADD01'), 2, 'mode MERGE tidak boleh menyentuh route lain');
+    await waitForValue(() => latlongCount('WADDWSSS01') === 2, 'two latlong rows stored for WADDWSSS01');
+    assert.equal(latlongCount('WADDWSSS01'), 2, 'DB side effect: coordinates were stored for the route filled in through the shortcut');
+    assert.equal(latlongCount('WIIIWADD01'), 2, 'MERGE mode must not touch any other route');
 
-    // Salah ketik Route ID: koordinatnya tetap tersimpan (alur kerja boleh mengisi
-    // lebih dulu), tapi operator harus diberi tahu sekarang bahwa route itu belum
-    // ada di registry dan koordinatnya tidak akan muncul di peta FIR.
+    // Typo in the Route ID: the coordinates are still stored (a workflow may load
+    // them first), but the operator has to be told now that the route is not in the
+    // registry and that its coordinates will never show up on the FIR map.
     await page.fill('#ll-routeId', 'WADDWSSS99');
     await page.fill('#ll-paste', 'ZZZZ N 1 01.0 E 1 01.0');
     await page.click('#ll-save-btn');
@@ -290,13 +290,13 @@ async function openRoutePage() {
       const el = document.querySelector('.ll-toast');
       return el && /not in the ROUTE registry/.test(el.textContent);
     }, null, { timeout: 8000 });
-    assert.equal(latlongCount('WADDWSSS99'), 1, 'efek samping DB: baris tersimpan walau Route ID belum dikenal');
+    assert.equal(latlongCount('WADDWSSS99'), 1, 'DB side effect: the row is stored even though the Route ID is unknown');
     await page.waitForFunction(() => {
       const btn = document.getElementById('ll-orphan-btn');
       return btn && btn.textContent.trim() === 'UNTRACKED (2)';
     }, null, { timeout: 8000 });
 
-    // Kembali ke registry: penanda gap harus berubah, tombolnya hilang.
+    // Back to the registry: the gap marker has to change and the button disappear.
     await page.evaluate(() => window.switchTab('route'));
     await page.waitForFunction(() => {
       const card = [...document.querySelectorAll('#route-manager-tbody .route-card')]
@@ -312,21 +312,21 @@ async function openRoutePage() {
         cardClass: document.getElementById('route-kpi-wp-card').className
       };
     });
-    assert.equal(afterFill.action, false, 'setelah gap terisi, pintasannya hilang');
-    assert.equal(afterFill.coverage, '3/3', 'cakupan ikut naik setelah koordinat tersimpan');
-    assert.match(afterFill.cardClass, /safe/, 'cakupan penuh jadi hijau');
+    assert.equal(afterFill.action, false, 'once the gap is filled the shortcut is gone');
+    assert.equal(afterFill.coverage, '3/3', 'coverage rises after the coordinates are stored');
+    assert.match(afterFill.cardClass, /safe/, 'full coverage turns safe-coloured');
 
-    assert.deepEqual(pageErrors, [], 'tidak boleh ada JS error di halaman route maupun waypoint');
-    console.log('PASS penanda waypoint route (badge, KPI, filter gap, satu klik satu aksi, pintasan sampai gap terisi)');
+    assert.deepEqual(pageErrors, [], 'no JS error is allowed on the route or waypoint page');
+    console.log('PASS route waypoint marker (badge, KPI, gap filter, one click one action, shortcut until the gap is filled)');
   } catch (error) {
     failures += 1;
-    console.error(`FAIL penanda waypoint route: ${error.message}`);
+    console.error(`FAIL route waypoint marker: ${error.message}`);
   } finally {
     await context.close();
   }
 }
 
-// ---------- Skenario 2: non-admin tetap melihat penanda, tanpa aksi admin ----------
+// ---------- Scenario 2: a non-admin keeps the markers, without the admin action ----------
 {
   sessionHeaders = viewerHeaders;
   const { context, page, pageErrors } = await openRoutePage();
@@ -335,23 +335,23 @@ async function openRoutePage() {
       badges: document.querySelectorAll('#route-manager-tbody .wp-badge').length,
       gapActions: document.querySelectorAll('#route-manager-tbody .route-wp-btn').length
     }));
-    assert.equal(viewer.badges, 3, 'penanda waypoint tetap informatif untuk non-admin');
-    assert.equal(viewer.gapActions, 0, 'non-admin tidak boleh diberi tombol yang pasti ditolak');
+    assert.equal(viewer.badges, 3, 'waypoint markers stay informative for a non-admin');
+    assert.equal(viewer.gapActions, 0, 'a non-admin must not be given a button that is certain to fail');
 
-    // Pintasan juga tidak boleh menembus gate tab WAYPOINT.
+    // The shortcut must not punch through the WAYPOINT tab gate either.
     await page.evaluate(() => window.openWaypointsForRoute('WADDWSSS01'));
     await page.waitForTimeout(300);
     assert.equal(
       await page.evaluate(() => document.getElementById('view-waypoint').classList.contains('active')),
       false,
-      'switchTab menolak WAYPOINT MANAGER untuk non-admin'
+      'switchTab refuses WAYPOINT MANAGER for a non-admin'
     );
-    assert.equal(await page.inputValue('#ll-routeId'), '', 'penolakan akses tidak boleh ikut mengisi field waypoint');
-    assert.deepEqual(pageErrors, [], 'tidak boleh ada JS error untuk non-admin');
-    console.log('PASS penanda waypoint route untuk non-admin (penanda tampil, aksi admin tertutup)');
+    assert.equal(await page.inputValue('#ll-routeId'), '', 'a refused access must not fill in the waypoint field either');
+    assert.deepEqual(pageErrors, [], 'no JS error is allowed for a non-admin');
+    console.log('PASS route waypoint marker for a non-admin (markers visible, admin action closed)');
   } catch (error) {
     failures += 1;
-    console.error(`FAIL penanda waypoint route non-admin: ${error.message}`);
+    console.error(`FAIL route waypoint marker (non-admin): ${error.message}`);
   } finally {
     await context.close();
   }

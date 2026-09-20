@@ -141,8 +141,8 @@
       display: inline-flex; align-items: center; justify-content: center;
     }
     .action-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); background: var(--status-info-bg); }
-    /* Shortcut ke WAYPOINT MANAGER: hanya untuk admin, dan hanya pada route yang
-       koordinatnya belum terdaftar. Begitu gap-nya terisi, tombolnya hilang. */
+    /* Shortcut into WAYPOINT MANAGER: admin only, and only on a route whose
+       coordinates are not registered yet. Once the gap is filled the button is gone. */
     .action-btn.btn-wp-gap { border-color: var(--status-warning); color: var(--status-warning); }
     .action-btn.btn-wp-gap:hover { border-color: var(--status-warning); color: #fff; background: var(--status-warning); }
     .action-btn:focus-visible, .filter-chip:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
@@ -177,10 +177,10 @@
     window.allRoutesCache = [];
     window.routeShowMissingWpOnly = false;
 
-    // Penanda "waypoint sudah terdaftar di database" untuk kartu route.
-    // WAYPOINT_COUNT dihitung server-side dari tabel latlong. Nilai yang tidak
-    // terbaca sengaja jadi badge netral, bukan "NO WP" — salah tampil "belum ada"
-    // lebih berbahaya daripada tampil "tidak diketahui".
+    // "Waypoint registered in the database" marker for a route card.
+    // WAYPOINT_COUNT is computed server-side from the latlong table. An unreadable
+    // value deliberately renders a neutral badge instead of "NO WP": wrongly saying
+    // "none" is worse than saying "unknown".
     window.routeWpBadgeMarkup = function(route) {
       const esc = window.escapeHtml || (v => String(v == null ? '' : v));
       const raw = route.WAYPOINT_COUNT;
@@ -194,10 +194,11 @@
       return '<span class="wp-badge wp-badge-gap" title="No waypoints registered for this route in the WAYPOINT database" aria-label="No waypoints registered in the waypoint database"><svg class="ic ic-sm" aria-hidden="true"><use href="#i-warn"/></svg>NO WP</span>';
     }
 
-    // Tombol pintasan ke WAYPOINT MANAGER. Gagal-tertutup: WAYPOINT MANAGER
-    // admin-only, jadi non-admin tidak diberi tombol yang pasti ditolak. Selama
-    // status akses belum diketahui (isAdmin masih null saat boot), tombol juga
-    // belum muncul — dan digambar ulang saat occ:accessResolved tiba.
+    // Shortcut button into WAYPOINT MANAGER. Fails closed: WAYPOINT MANAGER is
+    // admin-only, so a non-admin is never handed a button that is certain to be
+    // refused. While the access state is still unknown (isAdmin is null during
+    // boot) the button is withheld too — and repainted when occ:accessResolved
+    // arrives.
     window.routeWpActionMarkup = function(route) {
       if (window.isAdmin !== true) return '';
       if (Number(route.WAYPOINT_COUNT) > 0) return '';
@@ -206,9 +207,9 @@
       return `<button class="action-btn btn-wp-gap route-wp-btn" data-route-id="${id}" title="No coordinates yet — add waypoints in WAYPOINT MANAGER" aria-label="Add waypoints for route ${id} in WAYPOINT MANAGER"><svg class="ic"><use href="#i-stack"/></svg></button>`;
     }
 
-    // Pindah ke WAYPOINT MANAGER lalu isikan Route ID-nya. Kalau akses ditolak
-    // (switchTab menolak non-admin tanpa mengaktifkan view), tidak ada yang
-    // diisi — jangan sampai field terisi di halaman yang tidak boleh dibuka.
+    // Switch to WAYPOINT MANAGER and fill in its Route ID. If access is refused
+    // (switchTab rejects a non-admin without activating the view) nothing is
+    // filled in — a page that may not be opened must not end up with data in it.
     window.openWaypointsForRoute = function(routeId) {
       if (typeof window.switchTab !== 'function') return;
       window.switchTab('waypoint');
@@ -217,8 +218,8 @@
       if (typeof window.latlongPrefillRoute === 'function') window.latlongPrefillRoute(routeId);
     }
 
-    // Status admin baru turun setelah boot (getSettingsAccessInfo). Kalau halaman
-    // route sempat digambar sebelum itu, tombolnya belum ikut ter-render.
+    // The admin state only lands after boot (getSettingsAccessInfo). If the route
+    // page was painted before that, the button was not part of the render.
     window.addEventListener('occ:accessResolved', function() {
       if (Array.isArray(window.allRoutesCache) && window.allRoutesCache.length && document.getElementById('route-manager-tbody')) {
         window.filterRouteTable();
@@ -227,9 +228,9 @@
 
     window.initRouteManager = function() {
       // Event delegation: route card action buttons (C1 fix — no inline handlers).
-      // Dipasang sekali di sini, bukan di dalam render: tbody tidak pernah diganti
-      // (hanya innerHTML-nya), jadi listener yang dipasang saat render menumpuk dan
-      // satu klik jadi beberapa kali aksi.
+      // Bound once here rather than inside render: tbody itself is never replaced
+      // (only its innerHTML), so a listener bound during render accumulates and one
+      // click ends up firing several actions.
       const tbody = document.getElementById('route-manager-tbody');
       if (tbody && !tbody.dataset.actionsBound) {
         tbody.dataset.actionsBound = '1';
@@ -263,10 +264,10 @@
       const esc = window.escapeHtml;
       document.getElementById('route-total-count').innerText = routes.length;
 
-      // Cakupan dihitung dari registry penuh, bukan dari hasil filter, supaya
-      // angka KPI tidak berubah saat operator mengetik pencarian. KPI lain ikut
-      // registry supaya satu baris kartu tidak mencampur dua definisi; jumlah
-      // baris yang sedang tampil tetap ada di counter kanan atas.
+      // Coverage is computed from the full registry, not from the filtered result,
+      // so the KPI does not move while the operator types a search. The other KPIs
+      // follow the registry too, so one row of cards never mixes two definitions;
+      // the number of rows currently shown stays in the counter at the top right.
       const registry = (Array.isArray(window.allRoutesCache) && window.allRoutesCache.length) ? window.allRoutesCache : routes;
       const kpiTotal = document.getElementById('route-kpi-total');
       if (kpiTotal) kpiTotal.innerText = registry.length;
@@ -316,8 +317,8 @@
     }
 
     window.setRouteFilter = function(chipEl, val) {
-      // Chip bandara dan chip gap waypoint saling eksklusif — operator memilih
-      // satu sudut pandang, bukan menumpuk filter diam-diam.
+      // Airport chips and the waypoint-gap chip are mutually exclusive: the
+      // operator picks one point of view instead of silently stacking filters.
       window.routeShowMissingWpOnly = false;
       const input = document.getElementById('route-search-input');
       if (input) input.value = val;

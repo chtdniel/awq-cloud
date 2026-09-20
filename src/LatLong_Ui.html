@@ -46,8 +46,8 @@
   .latlong-ui .ll-wpt{ font-family:var(--font-mono); font-weight:800; color:var(--text-primary); font-size:12px; }
   .latlong-ui .ll-coord{ font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); }
   .latlong-ui .ll-empty{ padding:20px; text-align:center; color:var(--text-muted); font-size:12px; font-family:var(--font-mono); }
-  /* Baris yatim: Route ID-nya tidak ada di registry, jadi koordinatnya tidak
-     pernah terbaca peta FIR. Teks + warna, bukan warna saja. */
+  /* Orphan row: its Route ID has no profile in the registry, so the coordinates
+     never reach the FIR map. Text + colour, not colour alone. */
   .latlong-ui .ll-orphan{ display:inline-block; margin-left:4px; padding:0 6px; border-radius:var(--radius-pill); border:1px solid var(--status-warning); background:var(--status-warning-bg); color:var(--status-warning); font-size:9px; font-weight:800; letter-spacing:.05em; }
   .latlong-ui .ll-toast{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); box-shadow:0 8px 24px rgba(0,0,0,.18); }
 </style>
@@ -205,7 +205,7 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     list.slice(0,500).forEach(function(r){
       h+='<div class="ll-item">'
         +'<div><div class="ll-wpt">'+esc(r.Waypoint)+(hasId && r.ID? ' <span style="color:var(--text-muted); font-weight:600; font-size:10px;">('+esc(r.ID)+')</span>':'')
-        +(r.orphan? ' <span class="ll-orphan" title="Route ID ini tidak punya profil di ROUTE registry — koordinatnya tidak akan muncul di peta FIR">UNTRACKED</span>':'')+'</div>'
+        +(r.orphan? ' <span class="ll-orphan" title="This Route ID has no profile in the ROUTE registry — its coordinates will not appear on the FIR map">UNTRACKED</span>':'')+'</div>'
         +'<div class="ll-coord">'+esc(r.Latitude)+' &nbsp; '+esc(r.Longitude)+'</div></div>'
         +'<button class="ll-btn ll-delete-btn" style="padding:4px 8px; font-size:9px;" data-row-id="'+esc(r.rowId)+'" data-waypoint="'+esc(r.Waypoint)+'" title="Delete '+esc(r.Waypoint)+'" aria-label="Delete waypoint '+esc(r.Waypoint)+'"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>'
         +'</div>';
@@ -250,11 +250,11 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       state.rows = data.rows||[];
       state.header = data.header||[];
       state.colMap = data.colMap||null;
-      // Kalau baris yatim habis, filter "UNTRACKED" tidak boleh tertinggal aktif
-      // tanpa tombol yang bisa mematikannya.
+      // Once the orphan rows are gone, the UNTRACKED filter must not stay active
+      // with no button left to turn it off.
       if(!data.orphanCount) state.orphanOnly = false;
       status.textContent = 'Sheet "'+esc(data.sheetName||'LATLONG')+'" — Variant B header: '+esc((data.header||[]).join(' | '))+' — '+data.count+' FIXes'
-        + (data.orphanCount ? ' — '+data.orphanCount+' UNTRACKED (Route ID tanpa profil di ROUTE registry)' : '');
+        + (data.orphanCount ? ' — '+data.orphanCount+' UNTRACKED (Route ID with no profile in the ROUTE registry)' : '');
       renderKpi(); renderList();
     } else {
       status.textContent='Error: '+esc((data&&data.error)||'unknown');
@@ -262,10 +262,10 @@ VTK N 01 24.9 E 104 01.3"></textarea>
     }
   };
 
-  // Dipanggil dari halaman ROUTE (tombol "belum ada koordinat"). Pemilik field
-  // tetap di sini supaya route page tidak menulis langsung ke DOM waypoint.
-  // Daftar di kanan ikut difilter ke route ini: operator langsung melihat apakah
-  // route-nya memang kosong atau sudah punya baris yang akan ditimpa.
+  // Called from the ROUTE page (its "no coordinates yet" button). The fields stay
+  // owned here so the route page never writes into the waypoint DOM directly.
+  // The list on the right is filtered to this route as well: the operator sees
+  // immediately whether it really is empty or holds rows that will be overwritten.
   window.latlongPrefillRoute = function(routeId){
     var id = String(routeId==null?'':routeId).trim().toUpperCase();
     if(!id) return false;
@@ -326,9 +326,9 @@ VTK N 01 24.9 E 104 01.3"></textarea>
       if(!confirm(msg)) return;
       var res = await run('latlongSaveBulk', { rawText: raw, mode: mode, routeId: routeId, orderMode: order });
       if(res && res.ok){
-        // Route ID yang tidak ada di registry tetap tersimpan, tapi koordinatnya
-        // tidak akan terbaca peta FIR — peringatkan sekarang, di titik salah
-        // ketiknya, bukan menunggu ketahuan di peta.
+        // A Route ID that is not in the registry is still saved, but its
+        // coordinates never reach the FIR map — warn now, at the point of the typo,
+        // instead of letting it surface later on the map.
         var warn = res.routeKnown === false
           ? ' — WARNING: route "'+routeId+'" is not in the ROUTE registry; these coordinates will not show on the FIR map.'
           : '';

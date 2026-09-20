@@ -321,8 +321,8 @@ async function handleGetFlightDashboardData(context) {
     try {
         const { results: flights } = await context.env.DB.prepare('SELECT * FROM flights').all();
         const { results: aircraft } = await context.env.DB.prepare('SELECT registration FROM aircraft').all();
-        // Sumber route yang sama dengan halaman ROUTE, supaya penanda waypoint di
-        // selector route Flight tidak bisa berbeda dari badge di halaman ROUTE.
+        // Same route source as the ROUTE page, so the waypoint marker in the
+        // Flight route selector can never disagree with the badge there.
         const allRoutes = await fetchRoutesWithWaypointCount(context.env.DB);
 
         // Group routes by DEP+ARR key, as expected by the frontend
@@ -551,12 +551,12 @@ async function handleSaveFlightRoute(context, args) {
     }
 }
 
-// WAYPOINT_COUNT = jumlah baris LATLONG yang route_id-nya cocok dengan id profil
-// ini. Kunci dinormalisasi UPPER+TRIM karena route_id di WAYPOINT MANAGER diketik
-// manual sementara routes.id datang dari profil route — tanpa normalisasi, beda
-// spasi/huruf kecil terbaca sebagai "belum ada waypoint".
-// Halaman ROUTE dan Flight Board (selector route) membaca dari sini, jadi kedua
-// penanda itu tidak mungkin berbeda.
+// WAYPOINT_COUNT = number of LATLONG rows whose route_id matches this profile id.
+// The key is normalized with UPPER+TRIM because route_id is typed by hand in
+// WAYPOINT MANAGER while routes.id comes from the route profile — without
+// normalization, a stray space or lowercase letter reads as "no waypoints yet".
+// The ROUTE page and the Flight Board (route selector) both read from here, so
+// the two markers cannot drift apart.
 async function fetchRoutesWithWaypointCount(DB) {
     const { results } = await DB.prepare(`
         SELECT r.*, COALESCE(w.waypoint_count, 0) AS waypoint_count
@@ -1725,10 +1725,10 @@ async function handleGetActiveFlightList(context) {
 async function handleLatlongGetEditorData(context) {
     try {
         const { results: rows } = await context.env.DB.prepare('SELECT * FROM latlong ORDER BY route_id COLLATE NOCASE ASC, sequence_order ASC, id ASC').all();
-        // Baris yatim = route_id yang tidak punya profil di tabel routes (mis. ID
-        // salah ketik) atau kosong. Baris seperti ini tidak pernah dipakai peta FIR
-        // dan tidak muncul sebagai cakupan di halaman ROUTE, jadi harus kelihatan
-        // di sini — kalau tidak, koordinatnya hilang diam-diam.
+        // Orphan rows = route_id with no profile in the routes table (a typo, for
+        // instance) or an empty route_id. They are never read by the FIR map and
+        // never count towards coverage on the ROUTE page, so they have to be
+        // visible here — otherwise those coordinates disappear silently.
         const { results: routeRows } = await context.env.DB.prepare('SELECT id FROM routes').all();
         const knownRoutes = new Set(routeRows.map(r => String(r.id == null ? '' : r.id).trim().toUpperCase()).filter(Boolean));
         const formatted = rows.map(r => {

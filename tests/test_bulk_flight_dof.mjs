@@ -36,8 +36,8 @@ function createScenario() {
       waypoint_seq TEXT, star TEXT, arr_rwy TEXT, route_string TEXT
     );
     CREATE TABLE aircraft (id INTEGER PRIMARY KEY AUTOINCREMENT, registration TEXT UNIQUE NOT NULL);
-    -- Dashboard route payload ikut menghitung waypoint terdaftar, jadi tabel
-    -- latlong bagian dari skema yang harus ada di fixture (lihat schema.sql).
+    -- The dashboard route payload counts registered waypoints, so latlong is part
+    -- of the schema the fixture has to provide (see schema.sql).
     CREATE TABLE latlong (
       id INTEGER PRIMARY KEY AUTOINCREMENT, route_id TEXT, waypoint TEXT,
       latitude TEXT, longitude TEXT, sequence_order INTEGER

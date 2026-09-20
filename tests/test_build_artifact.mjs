@@ -1,48 +1,48 @@
 import assert from 'node:assert/strict';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 
-// Gerbang artefak build. public/index.html yang di-commit adalah halaman yang
-// benar-benar disajikan, dan build.js menyusunnya dari src/*.html tanpa
-// memvalidasi apa pun. Tiga kegagalan senyap yang pernah/lazim terjadi:
-//   1. src diubah tapi lupa `node build.js` -> halaman produksi ketinggalan;
-//   2. satu file include hilang -> build.js hanya memperingatkan, lalu
-//      meninggalkan placeholder <?!= include(...) ?> di HTML jadi;
-//   3. tidak ada deklarasi charset -> halaman bergantung penuh pada header
-//      server; kalau header itu hilang, semua em-dash/panah di UI jadi mojibake.
+// Build artifact gate. The committed public/index.html is the page that is actually
+// served, and build.js assembles it from src/*.html without validating anything.
+// Three silent failures that have happened or are easy to hit:
+//   1. src edited but `node build.js` forgotten -> the production page lags behind;
+//   2. an include file missing -> build.js only warns, then leaves the
+//      <?!= include(...) ?> placeholder inside the finished HTML;
+//   3. no charset declaration -> the page depends entirely on the server header;
+//      lose that header and every em-dash/arrow in the UI becomes mojibake.
 
 const artifactPath = 'public/index.html';
-assert.ok(existsSync(artifactPath), `${artifactPath} belum ada — jalankan: node build.js`);
+assert.ok(existsSync(artifactPath), `${artifactPath} does not exist — run: node build.js`);
 const artifact = readFileSync(artifactPath, 'utf8');
 const source = readFileSync('src/Index.html', 'utf8');
 
-// 3. <meta charset> harus ada di 1024 byte pertama; browser mengabaikannya
-// setelah itu, jadi posisinya bagian dari kontrak, bukan sekadar keberadaannya.
+// 3. <meta charset> must sit inside the first 1024 bytes; browsers ignore it after
+// that, so its position is part of the contract, not just its presence.
 for (const [label, html] of [['src/Index.html', source], [artifactPath, artifact]]) {
   const offset = html.search(/<meta[^>]*charset\s*=/i);
-  assert.ok(offset >= 0, `${label}: tidak ada <meta charset>`);
-  assert.ok(offset < 1024, `${label}: <meta charset> ada di byte ${offset}, browser hanya membacanya di 1024 byte pertama`);
+  assert.ok(offset >= 0, `${label}: no <meta charset> found`);
+  assert.ok(offset < 1024, `${label}: <meta charset> sits at byte ${offset}, but browsers only read it within the first 1024 bytes`);
 }
 
-// 2. Tidak boleh ada include yang belum diproses, dan setiap file yang
-// di-include harus benar-benar ada (kalau tidak, build meninggalkan placeholder).
+// 2. No include may be left unprocessed, and every included file has to exist
+// (otherwise the build leaves the placeholder behind).
 const included = [...source.matchAll(/include\(['"]([^'"]+)['"]\)/g)].map(match => match[1]);
-assert.ok(included.length > 0, 'src/Index.html tidak meng-include satu file pun — regex include berubah?');
+assert.ok(included.length > 0, 'src/Index.html includes no file at all — did the include regex change?');
 for (const name of included) {
-  assert.ok(existsSync(`src/${name}.html`), `src/${name}.html tidak ada, tapi di-include oleh src/Index.html`);
+  assert.ok(existsSync(`src/${name}.html`), `src/${name}.html is missing but is included by src/Index.html`);
 }
 const leftovers = artifact.match(/<\?!=?\s*include\(/g) || [];
-assert.equal(leftovers.length, 0, `${artifactPath} masih menyimpan ${leftovers.length} placeholder include yang belum diproses`);
+assert.equal(leftovers.length, 0, `${artifactPath} still holds ${leftovers.length} unprocessed include placeholder(s)`);
 
-// Shim google.script.run disuntik build.js; tanpa itu halaman tidak bisa bicara
-// ke RPC sama sekali.
-assert.match(artifact, /<script src="\/cloudflare-shim\.js"><\/script>/, 'shim cloudflare-shim.js tidak tersuntik');
+// build.js injects the google.script.run shim; without it the page cannot talk to
+// RPC at all.
+assert.match(artifact, /<script src="\/cloudflare-shim\.js"><\/script>/, 'the cloudflare-shim.js script tag was not injected');
 
-// 1. Artefak tidak boleh lebih tua dari file src yang ikut disusun.
+// 1. The artifact must not be older than any src file it was assembled from.
 const artifactTime = statSync(artifactPath).mtimeMs;
 const stale = included
   .map(name => ({ name, mtime: statSync(`src/${name}.html`).mtimeMs }))
   .filter(entry => entry.mtime > artifactTime)
   .map(entry => entry.name);
-assert.deepEqual(stale, [], `src lebih baru dari ${artifactPath} — jalankan: node build.js (${stale.join(', ')})`);
+assert.deepEqual(stale, [], `src is newer than ${artifactPath} — run: node build.js (${stale.join(', ')})`);
 
-console.log(`Artefak build utuh: charset dini, ${included.length} include terproses, shim tersuntik, tidak ada src yang lebih baru.`);
+console.log(`Build artifact intact: early charset, ${included.length} includes processed, shim injected, no src file newer than the artifact.`);
