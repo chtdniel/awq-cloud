@@ -139,9 +139,20 @@ function pushCgoPlan() {
   return { ok: ok, status: status, detail: text, sheetName: read.sheetName, rows: read.values.length };
 }
 
+/**
+ * Editor-friendly wrapper. pushCgoPlan() returns an object, which Apps Script
+ * refuses to display when a function is run from the editor ("the script
+ * completed but the returned value is not a supported return type"). The push
+ * itself has already succeeded at that point — this returns a string so the
+ * result is readable instead of confusing.
+ */
+function pushCgoPlanNow() {
+  var result = pushCgoPlan();
+  return (result.ok ? 'OK ' : 'FAILED ') + (result.status === null ? '(no HTTP response) ' : 'HTTP ' + result.status + ' ') + result.detail;
+}
+
 /** Menu wrapper: the sheet has no console, so the result has to be shown. */
-function pushCgoPlanFromMenu() {
-  var ui = SpreadsheetApp.getUi();
+function pushCgoPlanFromMenu() {  var ui = SpreadsheetApp.getUi();
   var result = pushCgoPlan();
   if (result.ok) {
     ui.alert('CGO plan pushed', 'The board can now sync.\n\n' + result.detail, ui.ButtonSet.OK);
@@ -257,7 +268,12 @@ function doGet(event) {
     if (!expected) return respond({ ok: false, error: TOKEN_PROPERTY + ' is not set in this script\'s properties' });
     if (!constantTimeEquals(String(parameters.token || ''), expected)) return respond({ ok: false, error: 'unauthorized' });
     if (String(parameters.ping || '') === '1') return respond({ ok: true, pong: true });
-    if (String(parameters.action || '') === 'push') return pushResultPage_();
+    // A web app may only answer with HtmlOutput or TextOutput, and ContentService
+    // has no HTML mime type — so the confirmation page must go through
+    // HtmlService. Returning the string directly fails with "the script completed
+    // but the returned value is not a supported return type", even though the
+    // push has already run by then.
+    if (String(parameters.action || '') === 'push') return HtmlService.createHtmlOutput(pushResultPage_());
 
     var read = readPlanSheet_();
     if (read.error) return respond({ ok: false, error: read.error });
