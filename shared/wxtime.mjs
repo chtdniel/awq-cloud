@@ -142,6 +142,11 @@ export function dayHourNear(day, hour, minute, referenceMs) {
 
 const TAF_VALIDITY = /^TAF\s+(?:(?:AMD|COR)\s+)?([A-Z]{4})\s+(?:(\d{2})(\d{2})(\d{2})Z\s+)?(\d{2})(\d{2})\/(\d{2})(\d{2})/;
 
+// Change groups inside a TAF. Kept identical to the split in the inline script of
+// src/Weather_Warning_Ui.html so both layers read the same groups.
+const TAF_GROUP_SPLIT = /\s+(?=TEMPO|BECMG|FM|PROB|INTER)/;
+const TAF_TEMPORARY_GROUP = /(?:TEMPO|PROB|INTER)/;
+
 /**
  * Validity period of a raw TAF, read from the "DDHH/DDHH" group that follows the
  * issue time. Day numbers are anchored to the month nearest `issueMs`.
@@ -173,6 +178,69 @@ export function validityCoversWindow(validity, windowStartMs, windowEndMs) {
     const end = Number.isFinite(windowEndMs) ? windowEndMs : windowStartMs;
     if (end < windowStartMs) return null;
     return validity.endMs > windowStartMs && validity.startMs <= end;
+}
+
+/**
+ * Does one TAF change group apply during a leg window?
+ *
+ * TEMPO/PROB/INTER describe temporary fluctuations, so the group counts when it
+ * OVERLAPS the window, not only when the window's first instant falls inside the
+ * group. That distinction is what the ALT window exposes: it is two hours wide
+ * (STA+1h..STA+3h), so a "TEMPO 0902/0905" group must be seen by an alternate
+ * window of 08:50Z–10:50Z even though 08:50Z sits before the group's start.
+ *
+ * BECMG/FM are permanent: once begun they hold for the rest of the window. For a
+ * point window (DEP = STD, ARR = STA, where startMs === endMs) this degenerates
+ * exactly to the previous "flight instant inside the group" rule.
+ *
+ * @returns {boolean} true when the group applies to [startMs, endMs].
+ */
+function groupActiveForWindow(block, startMs, endMs, anchorMs) {
+    const group = block.match(/(\d{2})(\d{2})\/(\d{2})(\d{2})/);
+    const fm = block.match(/FM(\d{2})(\d{2})(\d{2})/);
+    const temporary = TAF_TEMPORARY_GROUP.test(block);
+
+    if (group) {
+        const groupStart = dayHourNear(Number(group[1]), Number(group[2]), 0, anchorMs);
+        let groupEnd = dayHourNear(Number(group[3]), Number(group[4]), 0, anchorMs);
+        if (groupEnd <= groupStart) groupEnd += DAY_MS;   // group melewati tengah malam
+        if (temporary) return groupStart <= endMs && groupEnd >= startMs;
+        return groupStart <= endMs;
+    }
+    if (fm) {
+        return dayHourNear(Number(fm[1]), Number(fm[2]), Number(fm[3]), anchorMs) <= endMs;
+    }
+    return false;
+}
+
+/**
+ * The TAF blocks that apply to one leg window: the base group plus every change
+ * group active during that window.
+ *
+ * Day numbers are anchored to `anchorMs` — the TAF ISSUE time, the same reference
+ * parseTafValidity() uses. Anchoring to the flight instant instead used to move a
+ * group to a different month whenever the flight fell outside the validity.
+ *
+ * When no absolute window is known (for example an unreadable dof) every block is
+ * returned: that is the previous behaviour, and guessing is worse than reporting
+ * the whole forecast.
+ *
+ * @returns {string[]} uppercased blocks; [0] is always the base group.
+ */
+export function tafActiveBlocks(raw, options) {
+    const text = String(raw === null || raw === undefined ? '' : raw).toUpperCase();
+    if (!text) return [];
+    const parts = text.split(TAF_GROUP_SPLIT);
+    const opts = options || {};
+    const startMs = Number.isFinite(opts.startMs) ? opts.startMs : NaN;
+    const endMs = Number.isFinite(opts.endMs) ? opts.endMs : startMs;
+    if (!Number.isFinite(startMs)) return parts;
+    const anchorMs = Number.isFinite(opts.anchorMs) ? opts.anchorMs : startMs;
+    const active = [parts[0]];
+    for (let i = 1; i < parts.length; i += 1) {
+        if (groupActiveForWindow(parts[i], startMs, endMs, anchorMs)) active.push(parts[i]);
+    }
+    return active;
 }
 
 /**

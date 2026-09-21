@@ -56,6 +56,7 @@
     .wx-pill-warning { color: var(--status-warning); border-color: var(--status-warning); background: var(--status-warning-bg); }
     .wx-pill-clear { color: var(--status-safe); border-color: var(--status-safe); background: var(--status-safe-bg); }
     .wx-pill-nodata { color: var(--text-muted); border-color: var(--border-medium); background: var(--bg-panel-sunken); border-style: dashed; }
+    .wx-pill-outwindow { color: var(--status-warning); border-color: var(--status-warning); background: var(--status-warning-bg); border-style: dashed; }
 
     .flight-info-group {
       display: flex;
@@ -123,6 +124,9 @@
     .status-warning { background: var(--status-warning-bg); color: var(--status-warning); border: 1px solid var(--status-warning); border-left: 3px solid var(--status-warning); }
     .status-danger { background: var(--status-critical-bg); color: var(--status-critical); border: 1px solid var(--status-critical); border-left: 3px solid var(--status-critical); }
     .status-nodata { background: var(--bg-panel-sunken); color: var(--text-muted); border: 1px dashed var(--border-medium); border-left: 3px solid var(--border-medium); }
+    /* TAF ada tetapi masa berlakunya tidak menutupi window leg: bukan hijau
+       (verdict-nya tidak berlaku untuk flight ini), bukan pula "tidak ada TAF". */
+    .status-outofwindow { background: var(--status-warning-bg); color: var(--status-warning); border: 1px dashed var(--status-warning); border-left: 3px solid var(--status-warning); }
 
     .taf-details-btn {
       background: var(--text-primary);
@@ -357,7 +361,7 @@
     <div class="kpi-card crit"><span class="kpi-label">Restricted</span><span class="kpi-val" id="wx-kpi-danger">0</span><span class="kpi-sub">visibility / severe</span></div>
     <div class="kpi-card warn"><span class="kpi-label">Monitor</span><span class="kpi-val" id="wx-kpi-warn">0</span><span class="kpi-sub">ts / reduced</span></div>
     <div class="kpi-card safe"><span class="kpi-label">Operational</span><span class="kpi-val" id="wx-kpi-clear">0</span><span class="kpi-sub">no impact</span></div>
-    <div class="kpi-card"><span class="kpi-label">No TAF</span><span class="kpi-val" id="wx-kpi-nodata">0</span><span class="kpi-sub">unverified — check source</span></div>
+    <div class="kpi-card"><span class="kpi-label">No TAF</span><span class="kpi-val" id="wx-kpi-nodata">0</span><span class="kpi-sub">missing / out of window</span></div>
   </div>
 
   <div id="wx-ai-bar" style="margin:12px 0;display:flex;align-items:center;gap:8px;font-size:12px;">
@@ -474,15 +478,68 @@
   // arrival-nya di hari berikutnya (dof + 1) — aturan yang sama dengan bar
   // timeline Flight Board (`sta > std ? sta : sta + 1440`). Tanpa ini flight
   // overnight dapat window ARR yang mendahului keberangkatannya sendiri.
+  //
+  // Setiap window adalah RENTANG: DEP dan ARR satu titik (STD / STA), ALT rentang
+  // dua jam STA+1h..STA+3h. Karena itu `endHour`/`endInstant` wajib ikut — dulu ALT
+  // hanya membawa titik awalnya, sehingga blok TEMPO/BECMG yang mulai di dalam
+  // window tidak pernah aktif. Angka offset sama dengan ALT_WINDOW_* di
+  // shared/wxtime.mjs.
+  const WX_ALT_OFFSET_H = 1;
+  const WX_ALT_LENGTH_H = 2;
   function wxFlightWindows(f) {
     const std = wxLegWindow(f.std, f.dof, 0);
     const sta = wxLegWindow(f.sta, f.dof, 0);
     if (std.instant !== null && sta.instant !== null && sta.instant < std.instant) sta.instant += 86400000;
+    std.endHour = std.hour;
+    std.endInstant = std.instant;
+    sta.endHour = sta.hour;
+    sta.endInstant = sta.instant;
     const alt = {
-      hour: sta.hour === null ? null : (sta.hour + 1) % 24,
-      instant: sta.instant === null ? null : sta.instant + 3600000
+      hour: sta.hour === null ? null : (sta.hour + WX_ALT_OFFSET_H) % 24,
+      endHour: sta.hour === null ? null : (sta.hour + WX_ALT_OFFSET_H + WX_ALT_LENGTH_H) % 24,
+      instant: sta.instant === null ? null : sta.instant + WX_ALT_OFFSET_H * 3600000,
+      endInstant: sta.instant === null ? null : sta.instant + (WX_ALT_OFFSET_H + WX_ALT_LENGTH_H) * 3600000
     };
     return { std: std, sta: sta, alt: alt };
+  }
+
+  // Rentang window untuk server: { window:[startMs,endMs]|null, anchorMs }.
+  // Nilai server (windowDep/Arr/Alt) menang atas hitungan klien; hitungan klien
+  // tetap dipakai bila field itu absen (cache lama / payload pra-perbaikan).
+  function wxWindowPayload(serverWindow, clientWindow, anchorMs) {
+    const s = (Array.isArray(serverWindow) && isFinite(serverWindow[0])) ? serverWindow : null;
+    const start = s ? s[0] : clientWindow.instant;
+    const end = s ? (isFinite(s[1]) ? s[1] : s[0]) : clientWindow.endInstant;
+    return {
+      window: (typeof start === 'number' && isFinite(start))
+        ? [start, (typeof end === 'number' && isFinite(end)) ? end : start]
+        : null,
+      anchorMs: (typeof anchorMs === 'number' && isFinite(anchorMs)) ? anchorMs : null
+    };
+  }
+
+  // Gabungan keduanya untuk evaluateWeather: jam (fallback), rentang instant, dan
+  // anchor hari TAF = waktu TERBIT TAF.
+  function wxClientWindow(clientWindow, payloadWindow) {
+    return {
+      hour: clientWindow.hour,
+      endHour: clientWindow.endHour,
+      instant: payloadWindow.window ? payloadWindow.window[0] : clientWindow.instant,
+      endInstant: payloadWindow.window ? payloadWindow.window[1] : clientWindow.endInstant,
+      anchorMs: payloadWindow.anchorMs
+    };
+  }
+
+  // Rentang jam-of-day bisa melewati tengah malam; uji irisan pada 0..24, ±24.
+  function wxHourSpan(start, end) {
+    return end < start ? [start, end + 24] : [start, end];
+  }
+  function wxHourOverlap(gStart, gEnd, wStart, wEnd) {
+    const g = wxHourSpan(gStart, gEnd);
+    const w = wxHourSpan(wStart, wEnd);
+    return [0, -24, 24].some(function(shift) {
+      return g[0] + shift <= w[1] && g[1] + shift >= w[0];
+    });
   }
 
   // Catatan cakupan TAF: hanya muncul saat masa berlaku TAF terbaca TAPI tidak
@@ -625,6 +682,17 @@
         const wxWin = (win && typeof win === 'object') ? win : { hour: win, instant: null };
         const flightHour = parseInt(wxWin.hour, 10);
         const flightMs = (typeof wxWin.instant === 'number' && isFinite(wxWin.instant)) ? wxWin.instant : null;
+        // Window leg adalah rentang: ALT = STA+1h..STA+3h. Tanpa endInstant, blok yang
+        // MULAI di dalam window (mis. TEMPO 0902/0905 vs ALT 08:50Z-10:50Z) tidak
+        // pernah aktif dan alternate terbaca CLEAR padahal tidak.
+        const flightEndMs = (flightMs !== null && typeof wxWin.endInstant === 'number' && isFinite(wxWin.endInstant))
+          ? Math.max(flightMs, wxWin.endInstant)
+          : flightMs;
+        const flightEndHour = (typeof wxWin.endHour === 'number' && isFinite(wxWin.endHour)) ? wxWin.endHour : flightHour;
+        // Hari pada grup TAF di-anchor ke WAKTU TERBIT TAF (referensi yang sama dengan
+        // parseTafValidity() di server), bukan ke instant penerbangan: instant
+        // penerbangan bisa berada di luar masa berlaku dan menyeret grup ke bulan lain.
+        const anchorMs = (typeof wxWin.anchorMs === 'number' && isFinite(wxWin.anchorMs)) ? wxWin.anchorMs : flightMs;
         let worstStatus = baseStatus;
 
         // 3. Analyze change blocks
@@ -634,6 +702,10 @@
           const timeMatch = block.match(/(\d{2})(\d{2})\/(\d{2})(\d{2})/);
           const fmMatch = block.match(/FM(\d{2})(\d{2})(\d{2})/);
 
+          // TEMPO/PROB/INTER = fluktuasi sementara → berlaku bila grup BERIRISAN
+          // dengan window leg. BECMG/FM = permanen → berlaku begitu grup mulai
+          // (dan bertahan sesudahnya), jadi cukup `mulai <= akhir window`.
+          const isTemporary = /TEMPO|PROB|INTER/.test(block);
           let isActive = false;
           let isPermanent = block.includes('BECMG') || block.includes('FM');
 
@@ -646,15 +718,19 @@
             if (flightMs !== null) {
               // Date-aware: bandingkan instant absolut, bukan jam-of-day saja.
               // Tanpa ini blok TAF hari lain ikut aktif hanya karena jamnya sama.
-              const startMs = wxDayHourNear(startDay, startH, 0, flightMs);
-              let endMs = wxDayHourNear(endDay, endH, 0, flightMs);
+              const startMs = wxDayHourNear(startDay, startH, 0, anchorMs);
+              let endMs = wxDayHourNear(endDay, endH, 0, anchorMs);
               if (endMs <= startMs) endMs += 86400000;   // grup melewati tengah malam
-              isActive = flightMs >= startMs && flightMs <= endMs;
-              // Persistence for BECMG/FM: kondisi permanen bertahan setelah grupnya.
-              if (!isActive && isPermanent && flightMs > endMs) isActive = true;
+              isActive = isTemporary
+                ? (startMs <= flightEndMs && endMs >= flightMs)   // irisan dengan window
+                : (startMs <= flightEndMs);                       // permanen: sudah mulai
             } else if (!isNaN(flightHour)) {
               // Fallback hour-of-day bila tanggal flight tidak bisa ditentukan.
-              if (startH <= endH) {
+              const endHour = isNaN(flightEndHour) ? flightHour : flightEndHour;
+              if (isTemporary && endHour !== flightHour) {
+                // Window ALT: irisan jam, termasuk rentang yang lewat tengah malam.
+                isActive = wxHourOverlap(startH, endH, flightHour, endHour);
+              } else if (startH <= endH) {
                 // Inclusive window for safety (e.g. 08/12 covers hour 12)
                 if (flightHour >= startH && flightHour <= endH) isActive = true;
                 // Persistence for BECMG/FM
@@ -670,7 +746,7 @@
             const fmH = parseInt(fmMatch[2], 10);
             const fmM = parseInt(fmMatch[3], 10);
             if (flightMs !== null) {
-              isActive = flightMs >= wxDayHourNear(fmDay, fmH, fmM, flightMs);
+              isActive = wxDayHourNear(fmDay, fmH, fmM, anchorMs) <= flightEndMs;
             } else if (!isNaN(flightHour)) {
               isActive = flightHour >= fmH;
             }
@@ -686,9 +762,21 @@
         return worstStatus;
       }
 
+      // Verdict satu leg, dengan gerbang coverage.
+      //
+      // TAF ada, masa berlakunya terbaca, TAPI tidak menutupi window leg: verdict dari
+      // prakiraan hari lain bukan CLEAR. Dulu statusnya tetap dihitung dari teks itu
+      // dan kartu tampil hijau OPERATIONAL hanya dengan catatan kecil — false-clear.
+      // Teks TAF tetap ditampilkan di drawer (tidak diblank), statusnya yang jujur.
+      function wxLegStatus(icao, coverage, win, rawTaf) {
+        if (coverage === 'OUT') return 'OUT_OF_WINDOW';
+        return evaluateWeather(icao, win, rawTaf);
+      }
+
       function getStatusClass(status) {
         if (status === 'DANGER') return 'status-danger';
         if (status === 'WARNING') return 'status-warning';
+        if (status === 'OUT_OF_WINDOW') return 'status-outofwindow';
         if (status === 'NO_DATA') return 'status-nodata';
         return 'status-clear';
       }
@@ -696,6 +784,7 @@
       function getStatusLabel(status) {
         if (status === 'DANGER') return '<svg class="ic ic-sm"><use href="#i-prohibit"/></svg> RESTRICTED';
         if (status === 'WARNING') return '<svg class="ic ic-sm"><use href="#i-warn"/></svg> MONITOR';
+        if (status === 'OUT_OF_WINDOW') return '<svg class="ic ic-sm"><use href="#i-alert"/></svg> TAF OUT OF WINDOW';
         if (status === 'NO_DATA') return '<svg class="ic ic-sm"><use href="#i-alert"/></svg> NO TAF DATA';
         return '<svg class="ic ic-sm"><use href="#i-check"/></svg> OPERATIONAL';
       }
@@ -737,6 +826,9 @@
         const ac = (leg && leg.action) || '';
         const rowCls = st === 'DANGER' ? 'st-danger' : st === 'WARNING' ? 'st-warning' : st === 'CLEAR' ? 'st-ok' : 'st-nodata';
         const bCls = st === 'DANGER' ? 'b-danger' : st === 'WARNING' ? 'b-warning' : st === 'CLEAR' ? 'b-ok' : 'b-nodata';
+        // OUT_OF_WINDOW memakai gaya "tidak terverifikasi" (b-nodata) seperti NO_DATA,
+        // tetapi labelnya harus terbaca sebagai beda: TAF ada, window-nya tidak cocok.
+        const stLabel = st === 'OUT_OF_WINDOW' ? 'OUT OF WINDOW' : st;
         const icon = st === 'DANGER'
           ? '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1 15 14H1L8 1Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="12" r=".9" fill="currentColor"/></svg>'
           : st === 'WARNING'
@@ -745,7 +837,7 @@
           ? '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="m5.5 8.2 1.8 1.8 3.2-3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
           : '';
         const phase = label === 'DEP' ? 'AI DEP · ORIGIN' : label === 'ARR' ? 'AI ARR · DEST' : 'AI ALT · ALTN';
-        return '<div class="wx-ai-row ' + rowCls + '"><div class="wx-ai-leg"><span class="wx-ai-badge ' + bCls + '">' + icon + esc(st) + '</span>'
+        return '<div class="wx-ai-row ' + rowCls + '"><div class="wx-ai-leg"><span class="wx-ai-badge ' + bCls + '">' + icon + esc(stLabel) + '</span>'
           + '<span class="wx-ai-phase">' + esc(phase) + '</span></div>'
           + '<div class="wx-ai-reason">' + esc(rs) + (ac ? '<span class="wx-ai-action">' + esc(ac) + '</span>' : '') + '</div>'
           + '<div class="wx-ai-chapter">' + (ch ? '<button class="wx-ai-src" type="button" title="' + esc(ch) + '"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4V1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>' + esc(ch) + '</span></button>' : '<span></span>') + '</div></div>';
@@ -857,11 +949,15 @@
         const orig = btn ? btn.innerText : '';
         if (btn) { btn.disabled = true; btn.innerText = 'ANALYZING...'; }
         if (box) { box.style.display = 'grid'; box.innerHTML = '<div style="font-size:12px;opacity:.65;">ANALYZING... (you may switch tabs, result will be saved)</div>'; }
-        // Window per leg dari DB (jam + instant absolut hasil wxFlightWindows).
+        // Window per leg dari DB (jam + rentang instant absolut hasil wxFlightWindows).
+        // Nilai server (windowDep/Arr/Alt + anchorMs) menang atas hitungan klien.
         const legWindows = wxFlightWindows(f);
         const stdWindow = legWindows.std;
         const staWindow = legWindows.sta;
         const altWindow = legWindows.alt;
+        const depWP = wxWindowPayload(f.windowDep, stdWindow, f.tafDepAnchorMs);
+        const arrWP = wxWindowPayload(f.windowArr, staWindow, f.tafArrAnchorMs);
+        const altWP = wxWindowPayload(f.windowAlt, altWindow, f.tafAltAnchorMs);
         const stdH = stdWindow.hour === null ? '' : wxPad2(stdWindow.hour);
         const staH = staWindow.hour === null ? '' : wxPad2(staWindow.hour);
         const altH = altWindow.hour === null ? '' : wxPad2(altWindow.hour);
@@ -933,7 +1029,13 @@
             tafDep: f.tafDep, tafArr: f.tafArr, tafAlt: f.tafAlt,
             stdH: stdH, staH: staH, altH: altH,
             // Window UTC lengkap dengan tanggal: AI tidak boleh menilai blok TAF hari lain.
-            windowLabel: wxWindowLabel(f)
+            windowLabel: wxWindowLabel(f),
+            // Rentang window + anchor (waktu terbit TAF) per leg: dipakai rule engine
+            // server untuk mengabaikan blok di luar window, bukan hanya oleh AI.
+            windows: { dep: depWP, arr: arrWP, alt: altWP },
+            // Coverage dihitung server dari masa berlaku TAF; server memakainya untuk
+            // memaksa OUT_OF_WINDOW sehingga TAF hari lain tidak pernah jadi CLEAR.
+            coverage: { dep: f.tafDepCoverage, arr: f.tafArrCoverage, alt: f.tafAltCoverage }
           }, window.wxAiChoice()));
       };
 
@@ -1105,32 +1207,40 @@
         let kpiDanger = 0, kpiWarn = 0, kpiClear = 0, kpiNoData = 0;
 
         container.innerHTML = activeFlights.map((f, idx) => {
-          // Window per leg: jam-of-day + instant absolut (date-aware, rollover tengah malam).
+          // Window per leg: jam-of-day + rentang instant absolut (date-aware,
+          // rollover tengah malam). Nilai server menang; anchor = waktu terbit TAF.
           const legWindows = wxFlightWindows(f);
           const stdWindow = legWindows.std;
           const staWindow = legWindows.sta;
           const altWindow = legWindows.alt;
+          const depWP = wxWindowPayload(f.windowDep, stdWindow, f.tafDepAnchorMs);
+          const arrWP = wxWindowPayload(f.windowArr, staWindow, f.tafArrAnchorMs);
+          const altWP = wxWindowPayload(f.windowAlt, altWindow, f.tafAltAnchorMs);
           const altWindowStart = altWindow.hour;
-          const altWindowEnd = altWindowStart === null ? null : (altWindowStart + 2) % 24;
+          const altWindowEnd = altWindow.endHour;
 
-          const depStatus = evaluateWeather(f.depApt, stdWindow, f.tafDep); const depRefs = window.wxRefs.slice(); const depTrig = wxShortTrigger(window.wxTriggerBlock);
-          const arrStatus = evaluateWeather(f.arrApt, staWindow, f.tafArr); const arrRefs = window.wxRefs.slice(); const arrTrig = wxShortTrigger(window.wxTriggerBlock);
-          const altStatus = evaluateWeather(f.altApt, altWindow, f.tafAlt); const altRefs = window.wxRefs.slice(); const altTrig = wxShortTrigger(window.wxTriggerBlock);
+          const depStatus = wxLegStatus(f.depApt, f.tafDepCoverage, wxClientWindow(stdWindow, depWP), f.tafDep); const depRefs = window.wxRefs.slice(); const depTrig = wxShortTrigger(window.wxTriggerBlock);
+          const arrStatus = wxLegStatus(f.arrApt, f.tafArrCoverage, wxClientWindow(staWindow, arrWP), f.tafArr); const arrRefs = window.wxRefs.slice(); const arrTrig = wxShortTrigger(window.wxTriggerBlock);
+          const altStatus = wxLegStatus(f.altApt, f.tafAltCoverage, wxClientWindow(altWindow, altWP), f.tafAlt); const altRefs = window.wxRefs.slice(); const altTrig = wxShortTrigger(window.wxTriggerBlock);
 
-          // Flight-level worst status: DANGER > WARNING > NO DATA > CLEAR.
+          // Flight-level worst status: DANGER > WARNING > (NO_DATA / OUT OF WINDOW) > CLEAR.
+          // Keduanya berarti "tidak terverifikasi" bagi flight ini, jadi masuk KPI yang sama.
           const statuses = [depStatus, arrStatus, altStatus];
           let flightWorst = 'CLEAR';
           if (statuses.includes('DANGER')) { kpiDanger++; flightWorst = 'DANGER'; }
           else if (statuses.includes('WARNING')) { kpiWarn++; flightWorst = 'WARNING'; }
+          else if (statuses.includes('OUT_OF_WINDOW')) { kpiNoData++; flightWorst = 'OUT_OF_WINDOW'; }
           else if (statuses.includes('NO_DATA')) { kpiNoData++; flightWorst = 'NO_DATA'; }
           else kpiClear++;
           const aggPill = flightWorst === 'DANGER'
             ? '<span class="wx-pill wx-pill-danger">1 RESTRICTED</span>'
             : flightWorst === 'WARNING'
               ? '<span class="wx-pill wx-pill-warning">1 MONITOR</span>'
-              : flightWorst === 'NO_DATA'
-                ? '<span class="wx-pill wx-pill-nodata">NO TAF — CHECK SOURCE</span>'
-                : '<span class="wx-pill wx-pill-clear">OPERATIONAL</span>';
+              : flightWorst === 'OUT_OF_WINDOW'
+                ? '<span class="wx-pill wx-pill-outwindow">TAF OUT OF WINDOW</span>'
+                : flightWorst === 'NO_DATA'
+                  ? '<span class="wx-pill wx-pill-nodata">NO TAF — CHECK SOURCE</span>'
+                  : '<span class="wx-pill wx-pill-clear">OPERATIONAL</span>';
            const altWindowLabel = altWindowStart === null
              ? '--:--'
              : wxPad2(altWindowStart) + ':00–' + wxPad2(altWindowEnd) + ':00';

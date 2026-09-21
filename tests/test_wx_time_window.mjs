@@ -1,13 +1,15 @@
 // WX page STD/STA + TAF time window regression tests.
 //
 // Covers three layers:
-//   1. shared/wxtime.mjs           — parsing, dof-derived instants, TAF validity.
-//   2. the inline client helpers   — wxHourParts/wxLegWindow/evaluateWeather, run
-//      in a vm straight out of src/Weather_Warning_Ui.html so the shipped code is
-//      what gets exercised (not a copy).
+//   1. shared/wxtime.mjs           — parsing, dof-derived instants, TAF validity,
+//      and which TAF change groups apply to a leg window.
+//   2. the inline client helpers   — wxHourParts/wxLegWindow/evaluateWeather/
+//      wxLegStatus, run in a vm straight out of src/Weather_Warning_Ui.html so the
+//      shipped code is what gets exercised (not a copy).
 //   3. functions/api/rpc.js        — getActiveFlightDataForWarning must pick the
-//      newest TAF per station and refuse a TAF whose validity does not cover the
-//      flight window.
+//      newest TAF per station and report coverage instead of substituting data;
+//      analyzeWxWithManual must gate every leg (AI or rule engine) on that coverage
+//      and must not share one cache entry across different flight windows.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -18,7 +20,7 @@ import { seedAuthUser } from './rpc_auth_fixture.mjs';
 import {
   parseTimeToken, flightInstant, dayHourNear, parseTafValidity,
   validityCoversWindow, flightLegWindows, hourOf, newestTafRows, issueClockLabel,
-  tafValidityLabel
+  tafValidityLabel, tafActiveBlocks
 } from '../shared/wxtime.mjs';
 
 // --- 1. shared/wxtime.mjs ---------------------------------------------------
@@ -139,15 +141,44 @@ test('newestTafRows keeps the newest issue_time per station regardless of row or
   assert.equal(issueClockLabel(null), '---');
 });
 
-// --- 2. Inline client helpers (run from the real source file) ---------------
+// The regression this guards: the rules used to scan the WHOLE TAF, so a TEMPO
+// group three days out was reported as weather inside the flight window.
+test('tafActiveBlocks keeps only the change groups that apply to the leg window', () => {
+  const raw = 'TAF WXXX 081700Z 0818/1000 9999 SCT016'
+    + ' TEMPO 0902/0905 TSRA BECMG 0819/0821 3000 BR FM090300 20010KT 2000 TSRA';
+  const anchor = Date.UTC(2026, 8, 8, 17, 0);   // issue time, not the flight instant
+  const at = (d, h, m = 0) => Date.UTC(2026, 8, d, h, m);
+  const pick = (start, end) => tafActiveBlocks(raw, { startMs: start, endMs: end, anchorMs: anchor });
 
+  // DEP window 08 SEP 20:00Z (a point): only the BECMG group has begun by then.
+  assert.deepEqual(pick(at(8, 20), at(8, 20)), [
+    'TAF WXXX 081700Z 0818/1000 9999 SCT016',
+    'BECMG 0819/0821 3000 BR'
+  ]);
+  // ALT window 09 SEP 02:30Z-04:30Z: the TEMPO group overlaps it even though the
+  // window starts before the group does, and the FM group has begun inside it.
+  assert.deepEqual(pick(at(9, 2, 30), at(9, 4, 30)), [
+    'TAF WXXX 081700Z 0818/1000 9999 SCT016',
+    'TEMPO 0902/0905 TSRA',
+    'BECMG 0819/0821 3000 BR',
+    'FM090300 20010KT 2000 TSRA'
+  ]);
+  // A window outside every group keeps the base forecast only.
+  assert.deepEqual(pick(at(8, 10), at(8, 10)), ['TAF WXXX 081700Z 0818/1000 9999 SCT016']);
+  // Without an absolute window every block is returned (previous behaviour): the
+  // caller gates on coverage, it does not guess.
+  assert.equal(tafActiveBlocks(raw, {}).length, 4);
+  assert.deepEqual(tafActiveBlocks('', {}), []);
+});
+
+// --- 2. Inline client helpers (run from the real source file) ---------------
 function loadWxClient() {
   const html = readFileSync(new URL('../src/Weather_Warning_Ui.html', import.meta.url), 'utf8');
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
     .filter(m => !/\bsrc\s*=/i.test(m[1]) && m[2].trim());
   assert.equal(scripts.length, 1, 'expected exactly one inline script block in the WX page');
   const block = scripts[0][2];
-  const exportLine = '\n  globalThis.__wx = { wxPad2, wxParseTime, wxHourParts, wxFlightInstant, wxDayHourNear, wxLegWindow, wxFlightWindows, wxCoverageNote, wxWindowLabel, evaluateWeather };\n';
+  const exportLine = '\n  globalThis.__wx = { wxPad2, wxParseTime, wxHourParts, wxFlightInstant, wxDayHourNear, wxLegWindow, wxFlightWindows, wxWindowPayload, wxClientWindow, wxHourOverlap, wxCoverageNote, wxWindowLabel, wxLegStatus, getStatusClass, getStatusLabel, evaluateWeather };\n';
   const instrumented = block.replace(/\}\)\(\);\s*$/, exportLine + '})();');
   assert.ok(instrumented.includes('globalThis.__wx'), 'could not instrument the WX script block');
 
@@ -270,6 +301,64 @@ test('client wxWindowLabel carries the flight date into the AI payload', () => {
   assert.ok(!/NaN/.test(wx.wxWindowLabel({ std: '', sta: '', dof: '' })));
 });
 
+// The ALT window is STA+1h..STA+3h — a two-hour RANGE. Collapsing it to its start
+// instant (the shipped bug) made a TEMPO group that begins inside the window
+// invisible, so the alternate read OPERATIONAL while the TAF forecast TSRA there.
+test('client ALT window is evaluated as a range, not as its start instant', () => {
+  const f = { std: '2026-09-08T05:50:00.000Z', sta: '2026-09-08T07:50:00.000Z', dof: '20260908' };
+  const w = wx.wxFlightWindows(f);
+  assert.equal(w.alt.instant, Date.UTC(2026, 8, 8, 8, 50));
+  assert.equal(w.alt.endInstant, Date.UTC(2026, 8, 8, 10, 50));
+  assert.equal(w.alt.hour, 8);
+  assert.equal(w.alt.endHour, 10);
+  // DEP/ARR stay points: their end is their own instant.
+  assert.equal(w.std.endInstant, w.std.instant);
+  assert.equal(w.sta.endInstant, w.sta.instant);
+
+  const taf = 'TAF WATO 081700Z 0818/1000 9999 SCT016 TEMPO 0809/0811 TSRA';
+  // TEMPO 09:00Z-11:00Z overlaps the 08:50Z-10:50Z window.
+  assert.equal(wx.evaluateWeather('WATO', w.alt, taf), 'WARNING');
+  // The same group still does not touch the 05:50Z DEP instant.
+  assert.equal(wx.evaluateWeather('WATO', w.std, taf), 'CLEAR');
+  // Hour-of-day fallback (no absolute instant) overlaps too: 09-11 vs 08-10.
+  assert.equal(wx.evaluateWeather('WATO', { hour: 8, endHour: 10, instant: null }, taf), 'WARNING');
+});
+
+// An out-of-window TAF used to yield a green OPERATIONAL badge with only a small
+// note; the verdict itself came from a forecast for another day.
+test('client wxLegStatus refuses a verdict from a TAF outside the flight window', () => {
+  const win = { hour: 4, endHour: 4, instant: Date.UTC(2026, 9, 20, 4, 0), endInstant: Date.UTC(2026, 9, 20, 4, 0), anchorMs: Date.UTC(2026, 8, 30, 17, 0) };
+  const taf = 'TAF WADD 301700Z 3018/0206 12011KT 9999 SCT016';
+  // The raw evaluator still reads the text (drawer keeps showing it)...
+  assert.equal(wx.evaluateWeather('WADD', win, taf), 'CLEAR');
+  // ...but the verdict shown on the card is "TAF OUT OF WINDOW", not CLEAR.
+  assert.equal(wx.wxLegStatus('WADD', 'OUT', win, taf), 'OUT_OF_WINDOW');
+  assert.equal(wx.getStatusClass('OUT_OF_WINDOW'), 'status-outofwindow');
+  assert.match(wx.getStatusLabel('OUT_OF_WINDOW'), /TAF OUT OF WINDOW/);
+  // IN / UNKNOWN / MISSING keep the normal path (fail-closed stays in evaluateWeather).
+  assert.equal(wx.wxLegStatus('WADD', 'IN', win, taf), 'CLEAR');
+  assert.equal(wx.wxLegStatus('WADD', 'UNKNOWN', win, 'TAF WADD NIL='), 'NO_DATA');
+  assert.equal(wx.wxLegStatus('WADD', 'MISSING', win, 'No TAF data in database'), 'NO_DATA');
+});
+
+test('client wxWindowPayload prefers server windows and keeps the TAF issue anchor', () => {
+  const client = { hour: 8, endHour: 10, instant: Date.UTC(2026, 8, 8, 8, 50), endInstant: Date.UTC(2026, 8, 8, 10, 50) };
+  const server = wx.wxWindowPayload([Date.UTC(2026, 8, 8, 8, 50), Date.UTC(2026, 8, 8, 10, 50)], client, Date.UTC(2026, 8, 8, 17, 0));
+  assert.deepEqual([...server.window], [Date.UTC(2026, 8, 8, 8, 50), Date.UTC(2026, 8, 8, 10, 50)]);
+  assert.equal(server.anchorMs, Date.UTC(2026, 8, 8, 17, 0));
+  // Without a server window the client derivation is sent instead.
+  const fallback = wx.wxWindowPayload(null, client, null);
+  assert.deepEqual([...fallback.window], [client.instant, client.endInstant]);
+  assert.equal(fallback.anchorMs, null);
+  // No absolute instant at all -> null, never a NaN window.
+  assert.equal(wx.wxWindowPayload(null, { hour: 4, endHour: 4, instant: null, endInstant: null }, null).window, null);
+  // prepare a client-side window from the payload round trip
+  const merged = wx.wxClientWindow(client, server);
+  assert.equal(merged.instant, server.window[0]);
+  assert.equal(merged.endInstant, server.window[1]);
+  assert.equal(merged.anchorMs, server.anchorMs);
+});
+
 // --- 3. functions/api/rpc.js: getActiveFlightDataForWarning -----------------
 
 const bundle = await build({
@@ -303,6 +392,7 @@ function createScenario() {
     CREATE TABLE tafs (
       id INTEGER PRIMARY KEY AUTOINCREMENT, station TEXT, raw_text TEXT, issue_time TEXT
     );
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     -- Flight 1: ISO timestamps, DOF 08 SEP.
     INSERT INTO flights (callsign, dep, dest, alt, dof, etd, eta)
       VALUES ('100', 'WADD', 'WATO', '', '20260908', '2026-09-08T04:00:00.000Z', '2026-09-08T07:50:00.000Z');
@@ -366,6 +456,19 @@ test('getActiveFlightDataForWarning picks the newest TAF and reports coverage se
   // dof travels to the client so the browser can date the STD/STA window.
   assert.equal(flight1.dof, '20260908');
   assert.equal(flight1.std, '2026-09-08T04:00:00.000Z');
+  // The window RANGES travel too, so the browser never has to re-derive the ALT
+  // end from an hour (which wraps across midnight) and the rule engine on the
+  // server can judge only the groups that fall inside the window.
+  assert.deepEqual(flight1.windowDep, [Date.UTC(2026, 8, 8, 4, 0), Date.UTC(2026, 8, 8, 4, 0)]);
+  assert.deepEqual(flight1.windowArr, [Date.UTC(2026, 8, 8, 7, 50), Date.UTC(2026, 8, 8, 7, 50)]);
+  assert.deepEqual(flight1.windowAlt, [Date.UTC(2026, 8, 8, 8, 50), Date.UTC(2026, 8, 8, 10, 50)]);
+  // TAF validity instants + issue anchor: the browser anchors TAF day numbers to
+  // the issue time exactly like parseTafValidity() does on the server.
+  assert.equal(flight1.tafDepValidFrom, Date.UTC(2026, 8, 8, 0, 0));
+  assert.equal(flight1.tafDepValidTo, Date.UTC(2026, 8, 9, 6, 0));
+  assert.equal(flight1.tafDepAnchorMs, Date.UTC(2026, 8, 7, 23, 0));
+  assert.equal(flight1.tafArrValidFrom, Date.UTC(2026, 8, 10, 18, 0));
+  assert.equal(flight1.tafArrAnchorMs, Date.UTC(2026, 8, 10, 17, 0));
   // Legacy clock-only row resolves the same window through dof.
   assert.equal(flight2.std, '04:00');
   assert.equal(flight2.tafDepCoverage, 'IN');
@@ -412,6 +515,197 @@ test('an unreadable TAF validity keeps the displayed text instead of rejecting i
   database.close();
   const flight1 = flights.find(f => f.flightNo === '100');
   assert.equal(flight1.tafArr, 'TAF WATO NIL=');
+});
+
+// --- 4. analyzeWxWithManual: window + coverage gating on every path ---------
+
+const LEG_ANCHOR = Date.UTC(2026, 8, 8, 17, 0);          // issue time of the TAF below
+const legWindow = (startMs, endMs) => ({ window: [startMs, endMs], anchorMs: LEG_ANCHOR });
+const at = (day, hour, minute = 0) => Date.UTC(2026, 8, day, hour, minute);
+// A TAF whose only adverse group (TEMPO TSRA) belongs to 10 SEP, not to 08 SEP.
+const TAF_OTHER_DAY = 'TAF WXXX 081700Z 0818/1000 9999 SCT016 TEMPO 1002/1005 TSRA';
+
+async function analyzePayload(payload, env) {
+  const { database, DB } = createScenario();
+  const authHeaders = await seedAuthUser(database, DB, 'registered');
+  const response = await onRequestPost({
+    request: new Request('http://localhost/api/rpc', {
+      method: 'POST',
+      headers: { Origin: 'http://localhost', 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ method: 'analyzeWxWithManual', args: [payload] })
+    }),
+    env: { DB, ...env },
+    waitUntil: () => {}
+  });
+  const body = await response.json();
+  database.close();
+  return body.data;
+}
+
+// Stub Gemini + the Workers Cache API. `respond(prompt, nth)` returns the parsed
+// JSON body the fake model "answers"; the prompt is echoed back so a cache hit is
+// unmistakable.
+function stubGemini(respond) {
+  const store = new Map();
+  const originalFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.caches = {
+    default: {
+      async match(request) {
+        const hit = store.get(request.url);
+        return hit ? new Response(hit, { headers: { 'Content-Type': 'application/json' } }) : undefined;
+      },
+      async put(request, response) { store.set(request.url, await response.clone().text()); }
+    }
+  };
+  globalThis.fetch = async (url, init) => {
+    fetches += 1;
+    const prompt = JSON.parse(init.body).contents[0].parts[0].text;
+    const answer = JSON.stringify(respond(prompt, fetches));
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: answer }] } }] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  return {
+    store,
+    fetchCount: () => fetches,
+    restore() {
+      delete globalThis.caches;
+      globalThis.fetch = originalFetch;
+    }
+  };
+}
+
+test('analyzeWxWithManual rule fallback judges only the groups inside the flight window', async () => {
+  const data = await analyzePayload({
+    tafDep: TAF_OTHER_DAY, tafArr: TAF_OTHER_DAY, tafAlt: TAF_OTHER_DAY,
+    stdH: '20', staH: '20', altH: '20',
+    windowLabel: '08SEP DEP 20:00Z · ARR 20:00Z · ALT 21:00Z–23:00Z',
+    // DEP/ARR are the point 08 SEP 20:00Z; the TEMPO group is 10 SEP 02:00-05:00Z.
+    windows: {
+      dep: legWindow(at(8, 20), at(8, 20)),
+      arr: legWindow(at(8, 20), at(8, 20)),
+      alt: legWindow(at(8, 21), at(8, 23))
+    },
+    coverage: { dep: 'IN', arr: 'IN', alt: 'IN' }
+  }, {});   // no GEMINI_API_KEY -> heuristic rule engine
+
+  assert.equal(data.source, 'heuristic-rules');
+  // Without the window the rule engine scanned the whole TAF and answered DANGER
+  // "reported during DEP window" for a thunderstorm forecast two days later.
+  assert.equal(data.dep.status, 'CLEAR');
+  assert.equal(data.arr.status, 'CLEAR');
+  assert.equal(data.alt.status, 'CLEAR');
+});
+
+test('analyzeWxWithManual coverage OUT overrides whatever the forecast text says', async () => {
+  const data = await analyzePayload({
+    tafDep: TAF_OTHER_DAY, tafArr: TAF_OTHER_DAY, tafAlt: TAF_OTHER_DAY,
+    stdH: '04', staH: '07', altH: '08',
+    windows: {
+      dep: legWindow(at(20, 4), at(20, 4)),
+      arr: legWindow(at(20, 7), at(20, 7)),
+      alt: legWindow(at(20, 8), at(20, 10))
+    },
+    coverage: { dep: 'OUT', arr: 'IN', alt: 'OUT' }
+  }, {});
+
+  assert.equal(data.dep.status, 'OUT_OF_WINDOW');
+  assert.match(data.dep.reason, /does not cover the DEP flight window/);
+  assert.equal(data.alt.status, 'OUT_OF_WINDOW');
+  assert.match(data.alt.reason, /does not cover the ALT flight window/);
+  // The leg whose validity does cover its window is still judged normally.
+  assert.equal(data.arr.status, 'CLEAR');
+});
+
+test('analyzeWxWithManual forces OUT_OF_WINDOW even when the AI answers CLEAR', async () => {
+  const gemini = stubGemini(() => ({
+    dep: { status: 'CLEAR', reason: 'AI says clear', chapter: '', action: '' },
+    arr: { status: 'CLEAR', reason: 'AI says clear', chapter: '', action: '' },
+    alt: { status: 'CLEAR', reason: 'AI says clear', chapter: '', action: '' }
+  }));
+  try {
+    const data = await analyzePayload({
+      tafDep: TAF_OTHER_DAY, tafArr: TAF_OTHER_DAY, tafAlt: TAF_OTHER_DAY,
+      stdH: '04', staH: '07', altH: '08',
+      windows: {
+        dep: legWindow(at(20, 4), at(20, 4)),
+        arr: legWindow(at(8, 20), at(8, 20)),
+        alt: legWindow(at(8, 21), at(8, 23))
+      },
+      coverage: { dep: 'OUT', arr: 'IN', alt: 'IN' }
+    }, { GEMINI_API_KEY: 'test-key' });
+
+    assert.equal(data.source, 'gemini');
+    assert.equal(data.dep.status, 'OUT_OF_WINDOW');
+    assert.ok(!/AI says clear/.test(data.dep.reason), 'coverage must replace the AI reason');
+    assert.equal(data.arr.status, 'CLEAR');
+  } finally {
+    gemini.restore();
+  }
+});
+
+test('analyzeWxWithManual caches per prompt, so windows cannot share a verdict', async () => {
+  const gemini = stubGemini((prompt, nth) => {
+    const window = (prompt.match(/WINDOW UTC[^\n]*/) || [''])[0];
+    return {
+      dep: { status: 'CLEAR', reason: 'FETCH#' + nth + ' ' + window, chapter: '', action: '' },
+      arr: { status: 'CLEAR', reason: 'FETCH#' + nth + ' ' + window, chapter: '', action: '' },
+      alt: { status: 'CLEAR', reason: 'FETCH#' + nth + ' ' + window, chapter: '', action: '' }
+    };
+  });
+  const base = {
+    tafDep: 'TAF WADD 080500Z 0806/0906 12011KT 9999 SCT016',
+    tafArr: 'TAF WATO 080500Z 0806/0906 12011KT 9999 SCT016',
+    tafAlt: 'TAF WIII 080500Z 0806/0906 12011KT 9999 SCT016'
+  };
+  try {
+    const first = await analyzePayload({
+      ...base, stdH: '04', staH: '07', altH: '08',
+      windowLabel: '08SEP DEP 04:00Z · ARR 07:50Z · ALT 08:50Z–10:50Z',
+      windows: {
+        dep: legWindow(at(8, 4), at(8, 4)),
+        arr: legWindow(at(8, 7, 50), at(8, 7, 50)),
+        alt: legWindow(at(8, 8, 50), at(8, 10, 50))
+      },
+      coverage: { dep: 'IN', arr: 'IN', alt: 'IN' }
+    }, { GEMINI_API_KEY: 'test-key' });
+    const second = await analyzePayload({
+      ...base, stdH: '19', staH: '22', altH: '23',
+      windowLabel: '08SEP DEP 19:00Z · ARR 22:50Z · ALT 23:50Z–01:50Z',
+      windows: {
+        dep: legWindow(at(8, 19), at(8, 19)),
+        arr: legWindow(at(8, 22, 50), at(8, 22, 50)),
+        alt: legWindow(at(8, 23, 50), at(9, 1, 50))
+      },
+      coverage: { dep: 'IN', arr: 'IN', alt: 'IN' }
+    }, { GEMINI_API_KEY: 'test-key' });
+
+    // Two distinct prompts must be two cache entries and two upstream calls. The
+    // old key (model + prompt length + the first 120 chars after "TAF ") collided
+    // here and served flight B the verdict computed for flight A's window.
+    assert.equal(gemini.store.size, 2);
+    assert.equal(gemini.fetchCount(), 2);
+    assert.notEqual(first.dep.reason, second.dep.reason);
+    assert.match(first.dep.reason, /DEP 04:00Z/);
+    assert.match(second.dep.reason, /DEP 19:00Z/);
+
+    // The identical request is still served from cache.
+    const repeat = await analyzePayload({
+      ...base, stdH: '19', staH: '22', altH: '23',
+      windowLabel: '08SEP DEP 19:00Z · ARR 22:50Z · ALT 23:50Z–01:50Z',
+      windows: {
+        dep: legWindow(at(8, 19), at(8, 19)),
+        arr: legWindow(at(8, 22, 50), at(8, 22, 50)),
+        alt: legWindow(at(8, 23, 50), at(9, 1, 50))
+      },
+      coverage: { dep: 'IN', arr: 'IN', alt: 'IN' }
+    }, { GEMINI_API_KEY: 'test-key' });
+    assert.equal(gemini.fetchCount(), 2, 'an identical prompt must not call Gemini again');
+    assert.equal(repeat.dep.reason, second.dep.reason);
+  } finally {
+    gemini.restore();
+  }
 });
 
 console.log('WX STD/STA + TAF time window regression tests defined.');
