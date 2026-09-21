@@ -1724,6 +1724,10 @@
             }
          } else if (tabName === 'waypoint' && typeof window.initLatlongManager === 'function') {
            window.initLatlongManager();
+         } else if (tabName === 'update-notam' && typeof window.initUpdateNotamDashboard === 'function') {
+           // Only the LAST UPDATE panel is refreshed here: the registry table keeps
+           // whatever the operator pasted/previewed until they reload the page.
+           window.initUpdateNotamDashboard();
          } else if (tabName === 'fir-update' && typeof window.initFirUpdateDashboard === 'function') {
            window.initFirUpdateDashboard();
          } else if (tabName === 'wx-warning' && typeof window.initWxWarning === 'function') {

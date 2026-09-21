@@ -183,22 +183,22 @@ export async function onRequestPost(context) {
         return await handleFirGetNotamResults(context);
 
       case 'firSaveNotam':
-        return await handleFirSaveNotam(context, args);
+        return await handleFirSaveNotam(context, args, access);
 
       case 'firUpdateNotam':
-        return await handleFirUpdateNotam(context, args);
+        return await handleFirUpdateNotam(context, args, access);
 
       case 'firDeleteNotam':
-        return await handleFirDeleteNotam(context, args);
+        return await handleFirDeleteNotam(context, args, access);
 
       case 'firBulkPreviewNotams':
         return await handleFirBulkPreviewNotams(context, args);
 
       case 'firBulkImportNotams':
-        return await handleFirBulkImportNotams(context, args);
+        return await handleFirBulkImportNotams(context, args, access);
 
       case 'saveNotamData':
-        return await handleSaveNotamData(context, args);
+        return await handleSaveNotamData(context, args, access);
         
       case 'getTafData':
         return await handleGetTafData(context);
@@ -294,11 +294,7 @@ export async function onRequestPost(context) {
         return await handleGetOperationalReadiness(context);
 
       case 'getNotamUpdateHistory':
-        return Response.json({
-          data: [
-            { timestamp: new Date().toISOString(), source: 'AIRAC / D1', count: 829, user: 'SYSTEM' }
-          ]
-        });
+        return await handleGetNotamUpdateHistory(context);
 
       case 'getNotamData':
         return await handleGetNotamData(context);
@@ -921,7 +917,134 @@ async function handleAnalyzeNotams(context, args) {
     }
 }
 
-async function handleSaveNotamData(context, args) {
+/* ---------- NOTAM dataset update log ----------
+ * Every write path that changes the aerodrome ('AD') or FIR ('FIR') dataset
+ * appends one row here, so both dataset pages can show who last changed what:
+ * timestamp (UTC), account, action, row count and the airports/FIRs touched.
+ * Schema: migrations/014_notam_update_log.sql.
+ */
+const NOTAM_UPDATE_LOG_MAX_LOCATIONS = 200; // stored per row; the panel shows the head of the list
+const NOTAM_UPDATE_LOG_RECENT = 10;         // rows the panels read per dataset kind
+const NOTAM_UPDATE_LOG_KEEP = 200;          // rows kept per dataset kind (pruning bound)
+
+// Actor identity for a history row: the account email is always kept, the profile
+// full name only when the account has filled it in.
+function notamUpdateActor(access) {
+    const user = (access && access.requestUser) || null;
+    return {
+        id: user ? user.id : null,
+        email: String((user && user.email) || '').trim(),
+        fullName: String((access && access.profile && access.profile.fullName) || '').trim()
+    };
+}
+
+// Normalize the written airport/FIR codes: trimmed, upper case, deduped, sorted.
+// The list must reflect rows that were actually written, never the pasted ones
+// that were skipped as duplicates/invalid.
+function notamUpdateLocations(locations) {
+    const seen = new Set();
+    const out = [];
+    for (const raw of locations || []) {
+        const code = String(raw == null ? '' : raw).trim().toUpperCase();
+        if (!code || seen.has(code)) continue;
+        seen.add(code);
+        out.push(code);
+    }
+    out.sort();
+    return out;
+}
+
+// The panel only ever reads the newest rows of its own kind, so older rows are
+// dead weight. Opportunistic prune right after a write (same doctrine as
+// auditPrune): bounded PER KIND, so a long FIR bulk-import history can never
+// evict the aerodrome history, and vice versa. Non-fatal — the dataset write is
+// already committed, and a database without migration 014 just logs and moves on.
+async function pruneNotamUpdateLog(context, kind) {
+    try {
+        await context.env.DB.prepare(
+            'DELETE FROM notam_update_log WHERE kind = ? AND id NOT IN (SELECT id FROM notam_update_log WHERE kind = ? ORDER BY id DESC LIMIT ?)'
+        ).bind(kind, kind, NOTAM_UPDATE_LOG_KEEP).run();
+    } catch (error) {
+        console.warn('[RPC] notam_update_log prune skipped:', error.message);
+    }
+}
+
+// Non-fatal by design (same doctrine as auth.js audit()): a dataset write must
+// never fail because its history row could not be stored — e.g. on a database
+// where migration 014 has not been applied yet. Returns true when the row landed
+// so the caller can report `historyLogged` instead of failing silently.
+async function logNotamUpdate(context, access, entry) {
+    const kind = String((entry && entry.kind) || '');
+    try {
+        const actor = notamUpdateActor(access);
+        const locations = notamUpdateLocations(entry && entry.locations);
+        await context.env.DB.prepare(
+            'INSERT INTO notam_update_log (kind, action, actor_user_id, actor_email, actor_name, row_count, locations, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        ).bind(
+            kind,
+            String((entry && entry.action) || ''),
+            actor.id,
+            actor.email || null,
+            actor.fullName || null,
+            Number((entry && entry.rowCount) || 0),
+            JSON.stringify(locations.slice(0, NOTAM_UPDATE_LOG_MAX_LOCATIONS)),
+            entry && entry.detail ? String(entry.detail).slice(0, 500) : null
+        ).run();
+    } catch (error) {
+        console.error('[RPC] notam_update_log write failed:', error.message);
+        return false;
+    }
+    await pruneNotamUpdateLog(context, kind);
+    return true;
+}
+
+const NOTAM_UPDATE_LOG_COLUMNS = 'kind, action, actor_email, actor_name, row_count, locations, detail, created_at';
+
+function notamUpdateLogRow(row) {
+    if (!row) return null;
+    let locations = [];
+    try {
+        const parsed = JSON.parse(row.locations || '[]');
+        if (Array.isArray(parsed)) locations = parsed.map(value => String(value));
+    } catch (error) {
+        locations = [];
+    }
+    return {
+        at: String(row.created_at || ''),
+        kind: String(row.kind || ''),
+        action: String(row.action || ''),
+        user: { name: String(row.actor_name || ''), email: String(row.actor_email || '') },
+        rowCount: Number(row.row_count) || 0,
+        locations,
+        detail: String(row.detail || '')
+    };
+}
+
+// Contract consumed by Update_Notam_Ui (latest.AD, recent.AD) and Fir_Update_Ui
+// (latest.FIR, recent.FIR): each dataset page sees its own history only — a FIR
+// bulk import must never show up in the aerodrome page's list, and vice versa.
+async function handleGetNotamUpdateHistory(context) {
+    try {
+        const rowsOf = async (kind) => {
+            const result = await context.env.DB.prepare(
+                `SELECT ${NOTAM_UPDATE_LOG_COLUMNS} FROM notam_update_log WHERE kind = ? ORDER BY id DESC LIMIT ?`
+            ).bind(kind, NOTAM_UPDATE_LOG_RECENT).all();
+            return ((result && result.results) || []).map(notamUpdateLogRow);
+        };
+        const ad = await rowsOf('AD');
+        const fir = await rowsOf('FIR');
+        return Response.json({
+            data: { ok: true, latest: { AD: ad[0] || null, FIR: fir[0] || null }, recent: { AD: ad, FIR: fir } }
+        });
+    } catch (error) {
+        // A database without migration 014 (or a locked table) must degrade to
+        // "history unavailable" in the UI — never to a broken page.
+        console.error('[RPC] getNotamUpdateHistory failed:', error.message);
+        return Response.json({ data: { ok: false, latest: { AD: null, FIR: null }, recent: { AD: [], FIR: [] }, error: error.message } });
+    }
+}
+
+async function handleSaveNotamData(context, args, access) {
     try {
         const [dataMatrix, queryStr] = args;
         
@@ -971,6 +1094,7 @@ async function handleSaveNotamData(context, args) {
         const stmts = [deleteAllStmt];
         let rowsInserted = 0;
         let rowsSkippedProtected = 0;
+        const writtenAirports = [];
         
         for (const row of dataRows) {
             const location = (locIdx >= 0 ? String(row[locIdx]) : String(row[0])).trim().toUpperCase();
@@ -1005,20 +1129,30 @@ async function handleSaveNotamData(context, args) {
             
             stmts.push(stmt);
             rowsInserted++;
+            writtenAirports.push(location);
         }
         
         if (stmts.length > 0) {
             await context.env.DB.batch(stmts);
         }
-        
-        // We could also implement the NOTAM_HISTORY log in D1 if needed.
-        
+
+        // History is written after the dataset commit and never blocks it.
+        const historyLogged = await logNotamUpdate(context, access, {
+            kind: 'AD',
+            action: 'IMPORT',
+            rowCount: rowsInserted,
+            locations: writtenAirports,
+            detail: queryStr
+        });
+
         return Response.json({ 
             data: { 
                 status: 'success', 
                 message: 'Saved Successfully', 
                 rowsInserted: rowsInserted,
-                rowsSkippedProtected: rowsSkippedProtected
+                rowsSkippedProtected: rowsSkippedProtected,
+                airports: notamUpdateLocations(writtenAirports),
+                historyLogged: historyLogged
             }
         });
         
@@ -2445,7 +2579,7 @@ async function handleFirBulkPreviewNotams(context, args) {
 
 // Overwrite hanya menimpan baris kind='FIR' (aerodrome insap dari DELETE);
 // kind ditentukan WRITER di sini bukan tebakan content — doktrin setelah migration 005/006.
-async function handleFirBulkImportNotams(context, args) {
+async function handleFirBulkImportNotams(context, args, access) {
     try {
         const [rawText, mode] = args || [];
         const m = mode || 'append';
@@ -2467,7 +2601,14 @@ async function handleFirBulkImportNotams(context, args) {
             ).bind(r.no, r.loc, r.nt, r.p.effFrom ? r.p.effFrom.toISOString() : null, r.p.isContinuous ? new Date('2099-01-01T00:00:00Z').toISOString() : (r.p.effTo ? r.p.effTo.toISOString() : null), 'FIR'));
         }
         await context.env.DB.batch(stmts);
-        return Response.json({ data: { ok: true, total: parsed.rows.length, appended: v.validRows.length, skippedInvalid: v.invalid, skippedDup: v.duplicates, unsupported: v.unsupported, mode: m, isTSV: parsed.isTSV, warnings: parsed.warnings || [] } });
+        const historyLogged = await logNotamUpdate(context, access, {
+            kind: 'FIR',
+            action: m === 'overwrite' ? 'OVERWRITE' : 'APPEND',
+            rowCount: v.validRows.length,
+            locations: v.validRows.map(r => r.loc),
+            detail: (parsed.isTSV ? 'TSV (DINS)' : 'Raw ICAO') + ' · ' + (m === 'overwrite' ? 'replace dataset' : 'append')
+        });
+        return Response.json({ data: { ok: true, total: parsed.rows.length, appended: v.validRows.length, skippedInvalid: v.invalid, skippedDup: v.duplicates, unsupported: v.unsupported, mode: m, isTSV: parsed.isTSV, warnings: parsed.warnings || [], historyLogged: historyLogged } });
     } catch (e) {
         console.error('[RPC] firBulkImport Error:', e);
         return Response.json({ data: { ok: false, error: e.message } });
@@ -2751,7 +2892,7 @@ function firNotamStaleError(rowId, dbUpdatedAt, clientUpdatedAt) {
 }
 
 // Archive firSaveNotam (:69-102). INSERT id=NOTAM#, q_code=Class, kind='FIR', updated_at.
-async function handleFirSaveNotam(context, args) {
+async function handleFirSaveNotam(context, args, access) {
     try {
         const [payload] = args || [];
         const clean = firValidateNotamPayload(payload);
@@ -2773,7 +2914,14 @@ async function handleFirSaveNotam(context, args) {
             'FIR'
         ).run();
 
-        return Response.json({ data: { ok: true, message: 'NOTAM ' + clean['NOTAM #'] + ' added.' } });
+        const historyLogged = await logNotamUpdate(context, access, {
+            kind: 'FIR',
+            action: 'NEW',
+            rowCount: 1,
+            locations: [clean.Location],
+            detail: 'NOTAM ' + clean['NOTAM #']
+        });
+        return Response.json({ data: { ok: true, message: 'NOTAM ' + clean['NOTAM #'] + ' added.', historyLogged: historyLogged } });
     } catch (e) {
         console.error('[RPC] firSaveNotam Error:', e);
         return Response.json({ data: { ok: false, error: e.message } });
@@ -2782,7 +2930,7 @@ async function handleFirSaveNotam(context, args) {
 
 // Archive firUpdateNotam (:109-159). LockService 5s → downgrade: satu SELECT updated_at
 // lalu UPDATE (tanpa lock lintas-isolate); dilaporkan jujur via `lockDowngraded`.
-async function handleFirUpdateNotam(context, args) {
+async function handleFirUpdateNotam(context, args, access) {
     try {
         const [payload] = args || [];
         const rowId = payload && payload.rowId;
@@ -2813,11 +2961,19 @@ async function handleFirUpdateNotam(context, args) {
         ).run();
 
         const fresh = await context.env.DB.prepare('SELECT updated_at FROM notams WHERE id = ? LIMIT 1').bind(clean['NOTAM #']).first();
+        const historyLogged = await logNotamUpdate(context, access, {
+            kind: 'FIR',
+            action: 'EDIT',
+            rowCount: 1,
+            locations: [clean.Location],
+            detail: 'NOTAM ' + clean['NOTAM #'] + (String(rowId) === String(clean['NOTAM #']) ? '' : ' (was ' + rowId + ')')
+        });
         return Response.json({
             data: {
                 ok: true,
                 message: 'NOTAM ' + clean['NOTAM #'] + ' updated.',
                 updatedAt: fresh ? String(fresh.updated_at || '') : '',
+                historyLogged: historyLogged,
                 lockDowngraded: true,
                 lockNote: 'GAS LockService 5s is unavailable on Workers; replaced by a staleness check (SELECT+UPDATE). A small race window between SELECT and UPDATE is still possible with two perfectly concurrent tabs.'
             }
@@ -2830,20 +2986,23 @@ async function handleFirUpdateNotam(context, args) {
 
 // Archive firDeleteNotam (:166-188). Argumen: rowId (string) ATAU { rowId, updatedAt }
 // (UI kirim objek). Stale-delete protection via updatedAt, lalu DELETE.
-async function handleFirDeleteNotam(context, args) {
+async function handleFirDeleteNotam(context, args, access) {
     try {
         const [rowIdArg] = args || [];
         const payload = (rowIdArg && typeof rowIdArg === 'object') ? rowIdArg : { rowId: rowIdArg };
         const rowId = payload.rowId;
         if (!rowId) return Response.json({ data: { ok: false, error: 'Invalid rowId.' } });
 
-        const current = await context.env.DB.prepare("SELECT updated_at FROM notams WHERE id = ? AND kind = 'FIR' LIMIT 1").bind(rowId).first();
+        // The location is read before the DELETE: the history row must name the FIR
+        // the removed NOTAM belonged to, and after the delete it is gone.
+        const current = await context.env.DB.prepare("SELECT updated_at, location FROM notams WHERE id = ? AND kind = 'FIR' LIMIT 1").bind(rowId).first();
         if (!current) return Response.json({ data: { ok: false, error: 'Row ' + rowId + ' no longer exists. Reload.' } });
         const staleErr = firNotamStaleError(rowId, current.updated_at, payload.updatedAt);
         if (staleErr) return Response.json({ data: { ok: false, error: 'Row changed by another user. Reload the list first.' } });
 
         await context.env.DB.prepare("DELETE FROM notams WHERE id = ? AND kind = 'FIR'").bind(rowId).run();
-        return Response.json({ data: { ok: true, message: 'NOTAM row deleted.' } });
+        const historyLogged = await logNotamUpdate(context, access, { kind: 'FIR', action: 'DELETE', rowCount: 1, locations: [current.location], detail: 'NOTAM ' + rowId });
+        return Response.json({ data: { ok: true, message: 'NOTAM row deleted.', historyLogged: historyLogged } });
     } catch (e) {
         console.error('[RPC] firDeleteNotam Error:', e);
         return Response.json({ data: { ok: false, error: e.message } });

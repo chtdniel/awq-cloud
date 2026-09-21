@@ -82,6 +82,45 @@
     box-shadow: inset 0 0 20px rgba(0, 163, 255, 0.05);
   }
 
+  /* =========================================================
+     LAST DATASET UPDATE PANEL
+     Backed by getNotamUpdateHistory (notam_update_log):
+     timestamp, account, action and the airports that were written.
+     Named "dataset update" so it cannot be read as the FIR NOTAM
+     page's "LAST UPDATE" (which is the NOTAM list load time).
+     ========================================================= */
+  .update-history {
+    min-width: 250px; max-width: 380px;
+    text-align: left;
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.65;
+    color: var(--text-muted);
+    background: var(--bg-panel-raised);
+    border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+    padding: 10px 12px;
+  }
+  .update-history-title {
+    font-family: var(--font-ui); font-size: 9px; font-weight: 900; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--accent-primary); margin-bottom: 6px;
+  }
+  .update-history-stamp { font-weight: 700; color: var(--text-primary); }
+  .update-history-line { color: var(--text-secondary); }
+  .update-history-line b { color: var(--text-primary); font-weight: 700; }
+  .update-history-codes { color: var(--text-primary); word-break: break-word; }
+  .update-history-muted { color: var(--text-muted); }
+  .update-history-error { color: var(--status-critical); }
+  .update-history details { margin-top: 8px; border-top: 1px solid var(--border-subtle); padding-top: 6px; }
+  .update-history summary {
+    cursor: pointer; font-family: var(--font-ui); font-size: 9px; font-weight: 800;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary);
+  }
+  .update-history summary:focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 2px; }
+  .update-history ul { list-style: none; margin: 6px 0 0; padding: 0; }
+  .update-history li { padding: 3px 0; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); }
+  @media (max-width: 720px) {
+    #view-update-notam .update-header { flex-direction: column; gap: 16px; }
+    .update-history { max-width: none; width: 100%; box-sizing: border-box; }
+  }
+
 </style>
 
 <div id="view-update-notam" class="view-section">
@@ -90,8 +129,9 @@
       <h2 class="header-title">NOTAM UPDATE</h2>
       <p class="header-sub">Upload raw FNS NOTAM strings to update the global registry</p>
     </div>
-    <div id="latest-history-container" style="text-align: right; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); background: var(--bg-panel-raised); padding: 8px 12px; border: 1px solid var(--border-light); border-radius: var(--radius-sm);">
-      Loading history...
+    <div id="latest-history-container" class="update-history" aria-live="polite">
+      <div class="update-history-title">Last dataset update</div>
+      <div class="update-history-body">Loading history…</div>
     </div>
   </div>
 
@@ -135,7 +175,7 @@
         statusBadge: container.querySelector('.status-badge'),
         tableHead: container.querySelector('.update-grid thead'),
         tableBody: container.querySelector('.update-grid tbody'),
-        latestHistory: container.querySelector('#latest-history-container')
+        latestHistory: container.querySelector('#latest-history-container .update-history-body')
       };
 
       let pendingData2DArray = null;
@@ -164,24 +204,87 @@
           })
           .withFailureHandler(function(error) {
             if (dom.latestHistory) {
-               dom.latestHistory.innerHTML = '<span style="color: var(--status-critical);">Failed to load history</span>';
+               dom.latestHistory.innerHTML = '<span class="update-history-error">Update history unavailable</span>';
             }
           })
           .getNotamUpdateHistory();
       }
 
+      // Timestamps are stored as SQLite UTC (YYYY-MM-DD HH:MM:SS); the panel labels
+      // the zone explicitly (same convention as the FIR pages).
+      function formatStamp(value, withSeconds) {
+        const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?/);
+        if (!match) return String(value || '');
+        return match[1] + ' ' + match[2] + (withSeconds && match[3] ? ':' + match[3] : '') + ' UTC';
+      }
+
+      function esc(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function actorLabel(user) {
+        const name = String((user && user.name) || '').trim();
+        const email = String((user && user.email) || '').trim();
+        if (name && email && name !== email) return name + ' · ' + email;
+        return name || email || 'Unknown account';
+      }
+
+      function countLabel(count, singular, plural) {
+        return count + ' ' + (count === 1 ? singular : plural);
+      }
+
+      // Codes are listed up to `limit`; the full list stays reachable in the title
+      // attribute so a 30-airport import does not push the panel off screen.
+      function codesHtml(locations) {
+        const codes = Array.isArray(locations) ? locations : [];
+        if (codes.length === 0) return '';
+        const limit = 12;
+        const head = codes.slice(0, limit).map(esc).join(', ');
+        const rest = codes.length > limit ? ' +' + (codes.length - limit) + ' more' : '';
+        return '<div class="update-history-codes" title="' + esc(codes.join(', ')) + '">' + head + rest + '</div>';
+      }
+
+      function recentHtml(recent) {
+        const rows = Array.isArray(recent) ? recent : [];
+        // The newest row is already shown as LAST DATASET UPDATE; the list holds the rest.
+        const earlier = rows.slice(1);
+        if (earlier.length === 0) return '';
+        const items = earlier.map(function(row) {
+          const codes = (Array.isArray(row.locations) ? row.locations : []).slice(0, 6).join(', ');
+          return '<li>' + esc(formatStamp(row.at, false)) + ' · ' + esc(actorLabel(row.user)) +
+            ' · <b>' + esc(row.action) + '</b> · ' + esc(countLabel(row.rowCount, 'NOTAM', 'NOTAMs')) +
+            (codes ? ' · ' + esc(codes) : '') + '</li>';
+        }).join('');
+        return '<details><summary>Recent updates (' + earlier.length + ')</summary><ul>' + items + '</ul></details>';
+      }
+
+      // Contract: { ok, latest: { AD, FIR }, recent: { AD, FIR } } from getNotamUpdateHistory.
       function renderHistory(historyData) {
         if (!dom.latestHistory) return;
-        if (!historyData || historyData.length === 0) {
-          dom.latestHistory.innerHTML = 'No update history found';
+
+        if (!historyData || historyData.ok === false) {
+          dom.latestHistory.innerHTML = '<span class="update-history-error">Update history unavailable</span>';
           return;
         }
-        
-        const latest = historyData[0];
-        let queryText = latest.queryStr || "N/A";
-        
-        const historyText = `${latest.timestamp} | ${latest.user} | ${latest.rowCount} NOTAM | ${queryText}`;
-        dom.latestHistory.innerHTML = `<span style="color: var(--accent-primary); font-weight: 700;">LAST UPDATE:</span><br/>${historyText}`;
+
+        const latest = historyData.latest ? historyData.latest.AD : null;
+        if (!latest) {
+          dom.latestHistory.innerHTML = '<span class="update-history-muted">No update history yet</span>';
+          return;
+        }
+
+        const detail = String(latest.detail || '').trim();
+        dom.latestHistory.innerHTML =
+          '<div class="update-history-stamp">' + esc(formatStamp(latest.at, true)) + '</div>' +
+          '<div class="update-history-line">by <b>' + esc(actorLabel(latest.user)) + '</b></div>' +
+          '<div class="update-history-line">Action: <b>' + esc(latest.action) + '</b></div>' +
+          (detail ? '<div class="update-history-line">Source: ' + esc(detail) + '</div>' : '') +
+          '<div class="update-history-line">' + esc(countLabel(latest.locations.length, 'airport', 'airports')) +
+          ' · ' + esc(countLabel(latest.rowCount, 'NOTAM', 'NOTAMs')) + '</div>' +
+          codesHtml(latest.locations) +
+          recentHtml(historyData.recent ? historyData.recent.AD : null);
       }
 
       function handlePreview() {
@@ -315,11 +418,13 @@
         dom.pasteArea.disabled = true;
         showStatus("Saving...", "loading");
 
+        // Audit detail is the DINS query line ("Query ran at UTC ..."). Anything else
+        // sitting in row 0 (a column header row, a sheet name) is not a source and
+        // would only wrap noisily across the LAST DATASET UPDATE panel.
         let queryStr = "";
         if (pendingData2DArray.length > 0 && pendingData2DArray[0]) {
-           const rawFirstRow = pendingData2DArray[0].join(" ");
-           const match = rawFirstRow.match(/(Query ran at UTC.*)/i);
-           queryStr = match ? match[1].trim() : rawFirstRow.trim();
+           const match = pendingData2DArray[0].join(" ").match(/(Query ran at UTC.*)/i);
+           queryStr = match ? match[1].trim() : "";
         }
 
         google.script.run
@@ -327,7 +432,10 @@
             dom.btnPreview.disabled = false;
             dom.pasteArea.disabled = false;
             if (response.status === 'success') {
-              showStatus("Saved Successfully", "success");
+              // The rows are committed; only the audit row may have failed (e.g. the
+              // update log table is missing). Say so instead of showing a clean save.
+              const historyWarning = response.historyLogged === false ? ' — update history was not recorded' : '';
+              showStatus("Saved " + response.rowsInserted + " NOTAMs" + historyWarning, historyWarning ? "error" : "success");
               dom.btnSave.disabled = true; 
               dom.pasteArea.value = ""; 
               loadHistory(); // Reload history after save
@@ -355,6 +463,10 @@
       }
 
       init();
+
+      // The page can be re-opened long after load, so the tab switch refreshes the
+      // panel: it must show an update another operator committed in the meantime.
+      window.initUpdateNotamDashboard = loadHistory;
     });
   })();
 </script>

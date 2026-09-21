@@ -33,9 +33,46 @@
   .fir-update-ui .firn-btn:disabled { opacity:.5; cursor:not-allowed; }
   .fir-update-ui .firn-hint { font-size:10px; color:var(--text-muted); font-family:var(--font-mono); line-height:1.5; }
   .fir-update-ui .firn-toast, .firn-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--bg-panel-raised); border:1px solid var(--border-medium); color:var(--text-primary); padding:10px 16px; border-radius:var(--radius-sm); font-size:12px; z-index:var(--z-tooltip); box-shadow:0 8px 24px rgba(0,0,0,.18); }
+
+  /* LAST DATASET UPDATE panel — backed by getNotamUpdateHistory (notam_update_log):
+     timestamp, account, action and the FIRs that were written. Named "dataset
+     update" so it cannot be read as the neighbouring FIR NOTAM page's "LAST UPDATE"
+     (that one is the NOTAM list load time). */
+  .fir-update-ui .firn-page-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+  .fir-update-ui .firn-history {
+    min-width:250px; max-width:380px;
+    font:11px/1.65 var(--font-mono); color:var(--text-muted);
+    background:var(--bg-panel-raised); border:1px solid var(--border-light); border-radius:var(--radius-sm);
+    padding:10px 12px;
+  }
+  .fir-update-ui .firn-history-title { font-family:var(--font-ui); font-size:9px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; color:var(--accent-primary); margin-bottom:6px; }
+  .fir-update-ui .firn-history-stamp { font-weight:700; color:var(--text-primary); }
+  .fir-update-ui .firn-history-line { color:var(--text-secondary); }
+  .fir-update-ui .firn-history-line b { color:var(--text-primary); font-weight:700; }
+  .fir-update-ui .firn-history-codes { color:var(--text-primary); word-break:break-word; }
+  .fir-update-ui .firn-history-error { color:var(--status-critical); }
+  .fir-update-ui .firn-history details { margin-top:8px; border-top:1px solid var(--border-subtle); padding-top:6px; }
+  .fir-update-ui .firn-history summary { cursor:pointer; font-family:var(--font-ui); font-size:9px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--text-secondary); }
+  .fir-update-ui .firn-history summary:focus-visible { outline:3px solid var(--accent-primary); outline-offset:2px; }
+  .fir-update-ui .firn-history ul { list-style:none; margin:6px 0 0; padding:0; }
+  .fir-update-ui .firn-history li { padding:3px 0; border-top:1px solid var(--border-subtle); color:var(--text-secondary); }
+  @media (max-width:720px) {
+    .fir-update-ui .firn-page-head { flex-direction:column; }
+    .fir-update-ui .firn-history { max-width:none; width:100%; box-sizing:border-box; }
+  }
 </style>
 
 <div class="fir-update-ui" id="fir-update-ui-root">
+  <div class="firn-page-head">
+    <div>
+      <h2 class="header-title">FIR Update</h2>
+      <p class="header-sub">Paste FIR / enroute NOTAMs to append or replace the FIR dataset</p>
+    </div>
+    <div class="firn-history" id="firn-history" aria-live="polite">
+      <div class="firn-history-title">Last dataset update</div>
+      <div class="firn-history-body" id="firn-history-body">Loading history…</div>
+    </div>
+  </div>
   <div class="firn-panel">
     <div class="firn-panel-head">
       <span class="firn-panel-title">Bulk Import FIR NOTAM</span>
@@ -130,6 +167,75 @@
     });
   }
 
+  // ---- LAST DATASET UPDATE panel ----
+  // Fed by getNotamUpdateHistory (notam_update_log). Timestamps are stored as
+  // SQLite UTC (YYYY-MM-DD HH:MM:SS); the panel labels the zone explicitly.
+  function formatStamp(value, withSeconds) {
+    var match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?/);
+    if (!match) return String(value || '');
+    return match[1] + ' ' + match[2] + (withSeconds && match[3] ? ':' + match[3] : '') + ' UTC';
+  }
+  function actorLabel(user) {
+    var name = String((user && user.name) || '').trim();
+    var email = String((user && user.email) || '').trim();
+    if (name && email && name !== email) return name + ' · ' + email;
+    return name || email || 'Unknown account';
+  }
+  function countLabel(count, singular, plural) {
+    return count + ' ' + (count === 1 ? singular : plural);
+  }
+  // Codes are listed up to a limit; the full list stays reachable in the title
+  // attribute so a wide import does not push the panel off screen.
+  function codesHtml(locations) {
+    var codes = Array.isArray(locations) ? locations : [];
+    if (codes.length === 0) return '';
+    var limit = 12;
+    var head = codes.slice(0, limit).map(esc).join(', ');
+    var rest = codes.length > limit ? ' +' + (codes.length - limit) + ' more' : '';
+    return '<div class="firn-history-codes" title="' + esc(codes.join(', ')) + '">' + head + rest + '</div>';
+  }
+  function recentHtml(recent) {
+    var rows = Array.isArray(recent) ? recent : [];
+    // The newest row is already shown as LAST DATASET UPDATE; the list holds the rest.
+    var earlier = rows.slice(1);
+    if (earlier.length === 0) return '';
+    var items = earlier.map(function (row) {
+      var codes = (Array.isArray(row.locations) ? row.locations : []).slice(0, 6).join(', ');
+      return '<li>' + esc(formatStamp(row.at, false)) + ' · ' + esc(actorLabel(row.user)) +
+        ' · <b>' + esc(row.action) + '</b> · ' + esc(countLabel(row.rowCount, 'NOTAM', 'NOTAMs')) +
+        (codes ? ' · ' + esc(codes) : '') + '</li>';
+    }).join('');
+    return '<details><summary>Recent updates (' + earlier.length + ')</summary><ul>' + items + '</ul></details>';
+  }
+  // Contract: { ok, latest: { AD, FIR }, recent: { AD, FIR } } from getNotamUpdateHistory.
+  function renderHistory(data) {
+    var el = $('firn-history-body');
+    if (!el) return;
+    if (!data || data.ok === false || data.error) {
+      el.innerHTML = '<span class="firn-history-error">Update history unavailable</span>';
+      return;
+    }
+    var latest = data.latest ? data.latest.FIR : null;
+    if (!latest) {
+      el.innerHTML = '<span style="color:var(--text-muted);">No update history yet</span>';
+      return;
+    }
+    var detail = String(latest.detail || '').trim();
+    el.innerHTML =
+      '<div class="firn-history-stamp">' + esc(formatStamp(latest.at, true)) + '</div>' +
+      '<div class="firn-history-line">by <b>' + esc(actorLabel(latest.user)) + '</b></div>' +
+      '<div class="firn-history-line">Action: <b>' + esc(latest.action) + '</b></div>' +
+      (detail ? '<div class="firn-history-line">Source: ' + esc(detail) + '</div>' : '') +
+      '<div class="firn-history-line">' + esc(countLabel(latest.locations.length, 'FIR', 'FIRs')) +
+      ' · ' + esc(countLabel(latest.rowCount, 'NOTAM', 'NOTAMs')) + '</div>' +
+      codesHtml(latest.locations) +
+      recentHtml(data.recent ? data.recent.FIR : null);
+  }
+  async function loadHistory() {
+    var res = await run('getNotamUpdateHistory');
+    renderHistory(res);
+  }
+
   // ---- Bulk FIR helpers ----
   var bulkState = { lastPreview: null, raw: '', busy: false, initialized: false };
 
@@ -204,8 +310,10 @@
     if(btn) btn.textContent=orig;
     if(res && res.ok){
       addToast((mode==='overwrite'?'Overwritten ':'Appended ')+res.appended+' • skip dup '+res.skippedDup+' • invalid '+res.skippedInvalid);
+      if (res.historyLogged === false) addToast('Import saved, but update history was not recorded.');
       resetPreview();
       window.dispatchEvent(new CustomEvent('occ:firNotamsChanged'));
+      loadHistory();
       if($('firn-bulk-raw')) $('firn-bulk-raw').value='';
       var box=$('firn-bulk-preview-box'); if(box) box.style.display='none';
       var st=$('firn-bulk-status'); if(st) st.textContent='Done: '+res.appended+' FIR NOTAMs '+(mode==='overwrite'?'replaced the previous dataset':'appended');
@@ -217,6 +325,9 @@
   }
 
   function init() {
+    // Refresh the panel on every tab switch: it must show an update committed by
+    // another operator (or by the FIR NOTAM editor) since the page was loaded.
+    loadHistory();
     if (bulkState.initialized) return;
     bulkState.initialized = true;
     $('firn-bulk-raw').addEventListener('input', function () {

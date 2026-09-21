@@ -34,6 +34,24 @@ CREATE TABLE IF NOT EXISTS notams (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Audit of NOTAM dataset writes (see migrations/014_notam_update_log.sql).
+-- Feeds the LAST DATASET UPDATE panel on the UPDATE NOTAM (kind='AD') and FIR
+-- UPDATE (kind='FIR') pages: timestamp, account, row count and the airports/FIRs
+-- written. Rows are capped per kind by pruneNotamUpdateLog (functions/api/rpc.js).
+CREATE TABLE IF NOT EXISTS notam_update_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,               -- 'AD' | 'FIR'
+    action TEXT NOT NULL,             -- IMPORT | APPEND | OVERWRITE | NEW | EDIT | DELETE
+    actor_user_id INTEGER,
+    actor_email TEXT,
+    actor_name TEXT,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    locations TEXT,                   -- JSON array of ICAO / FIR codes
+    detail TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_notam_update_log_kind_id ON notam_update_log(kind, id DESC);
+
 CREATE TABLE IF NOT EXISTS firs (
     id TEXT PRIMARY KEY,
     name TEXT,
