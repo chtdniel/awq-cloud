@@ -283,6 +283,26 @@ describe('end to end assessment', () => {
 		expect(result.verdict).not.toBe('GO');
 	});
 
+	it('does not treat a labelled approach with no minima values as compliance', () => {
+		// Comparing against an all-null minima finds no shortfall for the wrong reason,
+		// which reads as a pass while nothing was actually checked.
+		const result = assessDispatch(
+			baseInput({ destinationMinima: { approach: 'ILS RWY 21', ceilingFt: null, visibilityM: null, references: [] } })
+		);
+		expect(codes(result.findings)).toContain('MINIMA_INCOMPLETE');
+		expect(result.verdict).not.toBe('GO');
+	});
+
+	it('does not treat a labelled alternate approach with no values as compliance', () => {
+		const result = assessDispatch(
+			baseInput({ alternateMinima: { approach: 'ILS RWY 12', ceilingFt: null, visibilityM: null, references: [] } })
+		);
+		expect(codes(result.findings)).toContain('MINIMA_INCOMPLETE');
+		expect(result.verdict).not.toBe('GO');
+		// The alternate cannot count as compliant, so it cannot satisfy the fuel rule.
+		expect(result.fuel.basis).not.toBe('compliant-alternate');
+	});
+
 	it('never returns GO when the destination TAF cannot be read', () => {
 		const result = assessDispatch(baseInput({ destinationTaf: null }));
 		expect(codes(result.findings)).toContain('TAF_UNPARSEABLE');

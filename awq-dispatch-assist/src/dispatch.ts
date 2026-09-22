@@ -71,6 +71,7 @@ export type DispatchFindingCode =
 	| 'ALT_BELOW_PLANNING_MINIMA'
 	| 'ALT_CONDITIONAL_BELOW_PLANNING_MINIMA'
 	| 'MINIMA_NOT_AVAILABLE'
+	| 'MINIMA_INCOMPLETE'
 	| 'NOTAM_UNVERIFIED'
 	| 'NOTAM_RUNWAY_CLOSURE'
 	| 'WX_ROUTE_IMPACT'
@@ -513,6 +514,19 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 					CLAUSE_REFERENCES.planningMinima
 				)
 			);
+		} else if (input.destinationMinima.ceilingFt === null && input.destinationMinima.visibilityM === null) {
+			// A labelled approach with no values is not minima. Comparing against it
+			// would find no shortfall for the wrong reason, and would silently suppress
+			// the unavailable-minima caution — a pass that means nothing.
+			findings.push(
+				finding(
+					'CAUTION',
+					'MINIMA_INCOMPLETE',
+					'Destination minima was supplied without a ceiling or visibility value, so nothing could be compared against the forecast.',
+					`approach "${input.destinationMinima.approach}" carries neither a ceiling nor a visibility value`,
+					CLAUSE_REFERENCES.planningMinima
+				)
+			);
 		} else if (prevailingComparison && (prevailingComparison.visibilityBelow || prevailingComparison.ceilingBelow)) {
 			findings.push(
 				finding(
@@ -594,7 +608,32 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 		alternate = assessTafWindow(alternateForecast, windows.primaryAlternate.from, windows.primaryAlternate.to, reference);
 		alternateCompliant = alternate.covered;
 
-		if (input.alternateMinima) {
+		if (!input.alternateMinima) {
+			alternateCompliant = false;
+			findings.push(
+				finding(
+					'CAUTION',
+					'MINIMA_NOT_AVAILABLE',
+					'No alternate planning minima is available, so alternate suitability could not be assessed.',
+					'no planning minima value supplied for the alternate',
+					CLAUSE_REFERENCES.planningMinima
+				)
+			);
+		} else if (input.alternateMinima.ceilingFt === null && input.alternateMinima.visibilityM === null) {
+			// Same trap as the destination: a labelled approach with no values cannot
+			// fail a comparison, so it would read as a compliant alternate while
+			// actually having been checked against nothing.
+			alternateCompliant = false;
+			findings.push(
+				finding(
+					'CAUTION',
+					'MINIMA_INCOMPLETE',
+					'Alternate planning minima was supplied without a ceiling or visibility value, so suitability could not be assessed.',
+					`approach "${input.alternateMinima.approach}" carries neither a ceiling nor a visibility value`,
+					CLAUSE_REFERENCES.planningMinima
+				)
+			);
+		} else {
 			const prevailing = compareToMinima(
 				effectiveVisibilityM(alternate.prevailing),
 				alternate.prevailing.ceilingFt,
@@ -631,17 +670,6 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 					)
 				);
 			}
-		} else {
-			alternateCompliant = false;
-			findings.push(
-				finding(
-					'CAUTION',
-					'MINIMA_NOT_AVAILABLE',
-					'No alternate planning minima is available, so alternate suitability could not be assessed.',
-					'no planning minima value supplied for the alternate',
-					CLAUSE_REFERENCES.planningMinima
-				)
-			);
 		}
 	}
 

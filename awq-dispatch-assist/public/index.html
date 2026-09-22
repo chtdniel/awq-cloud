@@ -943,7 +943,10 @@
 				row.className = 'assessment-row';
 				const meta = document.createElement('div');
 				meta.className = 'assessment-row-meta';
-				meta.textContent = `#${item.id} · ${item.status.replaceAll('_', ' ')} · ${item.decision} · ${item.created_at}`;
+				// Contract 3 carries the real verdict; older rows only have the coarse
+				// readiness value that the status column is constrained to.
+				const label = String(item.verdict || item.status || '').replaceAll('_', ' ');
+				meta.textContent = `#${item.id} · ${label} · ${item.decision} · ${item.created_at}`;
 				const actions = document.createElement('div');
 				const report = document.createElement('button');
 				report.className = 'button button-secondary';

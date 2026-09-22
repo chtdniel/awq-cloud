@@ -1,6 +1,6 @@
 import { env, createExecutionContext, waitOnExecutionContext, SELF } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
-import worker from "../src";
+import worker, { legacyStatusFor } from "../src";
 
 /**
  * Integration tests for the Dispatch Assist worker.
@@ -90,12 +90,22 @@ describe("handler contract", () => {
 	it("exposes a fetch handler", () => {
 		expect(typeof worker.fetch).toBe("function");
 	});
-
 	it("accepts an execution context without throwing", async () => {
 		const request = new Request<unknown, IncomingRequestCfProperties>("http://example.com/api/health");
 		const ctx = createExecutionContext();
 		const response = await worker.fetch(request, env, ctx);
 		await waitOnExecutionContext(ctx);
 		expect(response.status).toBe(200);
+	});
+});
+
+describe("assessment status mapping", () => {
+	// `dispatch_assessments.status` is constrained to the original vocabulary, so the
+	// finer verdict has to be mapped onto it. Writing the verdict straight in is what
+	// produced SQLITE_CONSTRAINT_CHECK and an opaque 500.
+	it("never reports READY unless the verdict was GO", () => {
+		expect(legacyStatusFor("GO")).toBe("READY");
+		expect(legacyStatusFor("MARGINAL")).toBe("REVIEW_REQUIRED");
+		expect(legacyStatusFor("NO-GO")).toBe("REVIEW_REQUIRED");
 	});
 });

@@ -334,6 +334,26 @@ function toExplanationRecord(result: ExplainerResult): ExplanationRecord {
 }
 
 /**
+ * Coarse readiness for the `status` column.
+ *
+ * `dispatch_assessments.status` is constrained to the original engine's vocabulary
+ * (`READY`, `REVIEW_REQUIRED`, `NO_DATA`) by a CHECK constraint, so the finer verdict
+ * cannot be stored there without rebuilding the table. The verdict is kept in full
+ * inside the snapshot — which is the record of authority — and mapped here:
+ *
+ *   GO                 -> READY
+ *   MARGINAL, NO-GO    -> REVIEW_REQUIRED
+ *
+ * The mapping is deliberately conservative in one direction only: the column never
+ * reports READY unless the verdict was GO, so a collapsed value can understate
+ * readiness but cannot overstate it. `json_extract` recovers the true verdict for
+ * the history list.
+ */
+export function legacyStatusFor(verdict: DispatchVerdict): 'READY' | 'REVIEW_REQUIRED' {
+	return verdict === 'GO' ? 'READY' : 'REVIEW_REQUIRED';
+}
+
+/**
  * Read an operator-supplied instant.
  *
  * Anything unparseable is ignored rather than rejected, so a malformed override
@@ -475,7 +495,7 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 	const result = await env.DB.prepare(
 		`INSERT INTO dispatch_assessments (flight_id, user_id, status, decision, contract_version, snapshot_json, context_hash)
 		 VALUES (?, ?, ?, 'OPEN', '3', ?, ?)`
-	).bind(flightId, userId, evaluation.verdict, JSON.stringify(snapshot), contextHash).run();
+	).bind(flightId, userId, legacyStatusFor(evaluation.verdict), JSON.stringify(snapshot), contextHash).run();
 	const assessmentId = Number(result.meta.last_row_id);
 	await audit(
 		env,
@@ -508,7 +528,13 @@ async function listAssessments(request: Request, env: Env, url: URL): Promise<Re
 	if (!Number.isInteger(flightId) || flightId <= 0) return documentResponse({ error: 'A valid flight_id is required.' }, 400);
 	if (!await authorizeFlight(request, env, flightId)) return documentResponse({ error: 'SSO is required for this flight.' }, 401);
 	const { results } = await env.DB.prepare(
-		`SELECT id, flight_id, status, decision, contract_version, context_hash, created_at, reviewed_at, review_note
+		// `verdict` is lifted out of the snapshot in SQL rather than parsed in JS: the
+		// column only holds the coarse readiness value, and parsing up to twenty full
+		// snapshots (each carrying the raw upstream payload) to read one field would be
+		// wasteful. It is null for contract-2 rows, where the caller falls back to
+		// `status`.
+		`SELECT id, flight_id, status, decision, contract_version, context_hash, created_at, reviewed_at, review_note,
+		        json_extract(snapshot_json, '$.dispatch.verdict') AS verdict
 		   FROM dispatch_assessments WHERE flight_id = ? ORDER BY created_at DESC, id DESC LIMIT 20`
 	).bind(flightId).all();
 	return documentResponse({ ok: true, data: { assessments: results || [] } });
@@ -1115,6 +1141,21 @@ async function proxyFlightWeather(request: Request, env: Env, url: URL): Promise
 
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
+		try {
+			return await handleRequest(request, env, ctx);
+		} catch (error) {
+			// Without this, an uncaught exception leaves the browser with a non-JSON 500
+			// and no reason — which is exactly how the status-constraint failure presented
+			// itself: the UI could only say "Assessment creation failed." The detail goes
+			// to the log (visible in `wrangler tail`); the client gets a stable JSON shape.
+			console.error('[DISPATCH] unhandled request failure', error);
+			return jsonResponse({ ok: false, code: 'INTERNAL', error: 'The request could not be completed.' }, 500);
+		}
+	},
+} satisfies ExportedHandler<Env>;
+
+async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	{
 		const url = new URL(request.url);
 		if (url.pathname === '/auth/start') {
 			const redirect = new URL('/api/assist', env.AWQ_CLOUD_BROWSER_ORIGIN);
@@ -1172,5 +1213,5 @@ export default {
 		if (url.pathname === '/api/health') return jsonResponse({ ok: true, service: 'awq-dispatch-assist', version: 'phase-9' });
 
 		return env.ASSETS.fetch(request);
-	},
-} satisfies ExportedHandler<Env>;
+	}
+}
