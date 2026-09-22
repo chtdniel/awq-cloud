@@ -89,6 +89,10 @@
 			.brand-name { font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 			.brand-subtitle { margin-block-start: 2px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
 			.header-actions { justify-content: flex-end; gap: var(--space-4); }
+			.primary-nav { display: flex; align-items: center; gap: 4px; margin-inline: auto; }
+			.nav-link { min-block-size: 34px; padding: 0 var(--space-3); border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; color: var(--text-tertiary); font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.06em; text-decoration: none; text-transform: uppercase; transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out; }
+			.nav-link:hover { border-color: var(--border-default); background: var(--surface-secondary); color: var(--text-primary); }
+			.nav-link[aria-current="page"] { border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-default)); background: color-mix(in srgb, var(--accent-primary) 12%, transparent); color: var(--accent-primary); }
 			/* The clock is the one value on this screen that is always current. */
 			.ops-clock { gap: var(--space-2); padding: var(--space-1) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-secondary); }
 			.ops-clock-label { color: var(--text-tertiary); font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.08em; }
@@ -137,6 +141,22 @@
 			/* One decision column. The two-pane grid put a 477px board beside a
 			   3,516px stack and left 3,039px of the left column empty. */
 			.workspace-stack { display: grid; gap: var(--space-4); }
+			/* View routing keeps the operational workflow in one shell while giving
+			   documents and manuals their own focused work surfaces. */
+			.workspace[data-active-view="documents"] .workspace-stack,
+			.workspace[data-active-view="reference-manuals"] .workspace-stack { grid-template-columns: minmax(0, 1fr); max-inline-size: 980px; margin-inline: auto; }
+			.workspace[data-active-view="documents"] .workspace-stack > .panel,
+			.workspace[data-active-view="reference-manuals"] .workspace-stack > .panel { display: none; }
+			.workspace[data-active-view="documents"] .workspace-stack > .workspace-context,
+			.workspace[data-active-view="documents"] .workspace-stack > .workspace-documents,
+			.workspace[data-active-view="reference-manuals"] .workspace-stack > .workspace-context,
+			.workspace[data-active-view="reference-manuals"] .workspace-stack > .workspace-reference { display: block; grid-column: auto; grid-row: auto; position: static; }
+			.workspace[data-active-view="documents"] .workspace-stack > .workspace-context,
+			.workspace[data-active-view="reference-manuals"] .workspace-stack > .workspace-context { order: 1; }
+			.workspace[data-active-view="documents"] .workspace-stack > .workspace-documents,
+			.workspace[data-active-view="reference-manuals"] .workspace-stack > .workspace-reference { order: 2; }
+			.workspace[data-active-view="documents"] .workspace-documents .panel-body,
+			.workspace[data-active-view="reference-manuals"] .workspace-reference .panel-body { min-block-size: 320px; }
 			/* Flight Decision Workspace: evidence stays left, analysis stays central,
 			   and the decision rail remains visible while the operator reviews context. */
 			@media (min-width: 1024px) {
@@ -297,6 +317,7 @@
 
 			@media (max-width: 767px) {
 				.app-header { align-items: flex-start; flex-direction: column; }
+				.primary-nav { order: 3; inline-size: 100%; overflow-x: auto; }
 				.header-actions { justify-content: space-between; inline-size: 100%; }
 				.document-form { grid-template-columns: 1fr; }
 				.document-row { align-items: flex-start; flex-direction: column; }
@@ -330,6 +351,11 @@
 						<div class="brand-subtitle">Operational flight context</div>
 					</div>
 				</div>
+				<nav class="primary-nav" aria-label="Primary navigation">
+					<a class="nav-link" href="#workspace" data-view-link="workspace" aria-current="page">Decision workspace</a>
+					<a class="nav-link" href="#flight-documents" data-view-link="documents">Flight documents</a>
+					<a class="nav-link" href="#reference-manuals" data-view-link="reference-manuals">Reference manuals</a>
+				</nav>
 				<div class="header-actions">
 					<div class="ops-clock">
 						<span class="ops-clock-label">UTC</span>
@@ -341,7 +367,7 @@
 			</header>
 
 			<div class="workspace-scroll">
-				<main class="workspace">
+				<main class="workspace" id="workspace" data-active-view="workspace">
 					<!-- Survives scrolling: the verdict is read while its findings are. -->
 					<div class="verdict-strip" id="verdict-strip" hidden>
 						<div class="verdict-strip-main" role="status" aria-live="polite">
@@ -486,7 +512,7 @@
 							</div>
 						</section>
 
-						<section class="panel workspace-documents" aria-labelledby="documents-title">
+						<section class="panel workspace-documents" id="flight-documents" aria-labelledby="documents-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="documents-title">Flight documents</h2>
 								<div class="panel-tools"><span class="panel-count" id="documents-count">No selection</span></div>
@@ -521,7 +547,7 @@
 							</div>
 						</section>
 
-						<section class="panel workspace-reference" aria-labelledby="reference-documents-title">
+						<section class="panel workspace-reference" id="reference-manuals" aria-labelledby="reference-documents-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="reference-documents-title">Reference manuals</h2>
 								<div class="panel-tools"><span class="panel-count" id="reference-documents-count">0 documents</span></div>
@@ -574,6 +600,11 @@
 			const weatherStatus = document.getElementById('weather-status');
 			const weatherList = document.getElementById('weather-list');
 			const weatherRefreshButton = document.getElementById('weather-refresh-button');
+			const workspace = document.getElementById('workspace');
+			const workspaceScroll = document.querySelector('.workspace-scroll');
+			const pageTitle = document.getElementById('page-title');
+			const pageCopy = document.querySelector('.page-copy');
+			const viewLinks = [...document.querySelectorAll('[data-view-link]')];
 			const assistantForm = document.getElementById('assistant-form');
 			const assistantQuestion = document.getElementById('assistant-question');
 			const assistantResult = document.getElementById('assistant-result');
@@ -595,6 +626,36 @@
 			const MINIMA_DESTINATION_FIELDS = ['dest-approach', 'dest-ceiling', 'dest-visibility'];
 			const MINIMA_ALTERNATE_FIELDS = ['alt-approach', 'alt-ceiling', 'alt-visibility'];
 			const NOTAM_FIELD = 'notam-remarks';
+			const VIEW_COPY = {
+				workspace: {
+					title: 'Flight decision workspace',
+					copy: 'Review evidence, complete dispatch inputs, and make a traceable operational decision for the selected flight.'
+				},
+				documents: {
+					title: 'Flight documents',
+					copy: 'Keep flight plan, weather, NOTAM, loadsheet, and operational documents together with the selected flight context.'
+				},
+				'reference-manuals': {
+					title: 'Reference manuals',
+					copy: 'Manage the manuals and regulations that ground dispatch analysis, assistant answers, and assessment evidence.'
+				}
+			};
+			const VIEW_ALIASES = { 'flight-documents': 'documents' };
+
+			function setActiveView(view, updateHash = true) {
+				const requestedView = VIEW_ALIASES[view] || view;
+				const nextView = VIEW_COPY[requestedView] ? requestedView : 'workspace';
+				const copy = VIEW_COPY[nextView];
+				workspace.dataset.activeView = nextView;
+				workspaceScroll.scrollTo({ top: 0, behavior: 'auto' });
+				pageTitle.textContent = copy.title;
+				pageCopy.textContent = copy.copy;
+				viewLinks.forEach(link => link.setAttribute('aria-current', link.dataset.viewLink === nextView ? 'page' : 'false'));
+				if (updateHash && window.location.hash !== `#${nextView}`) window.history.replaceState(null, '', `#${nextView}`);
+			}
+
+			viewLinks.forEach(link => link.addEventListener('click', () => setActiveView(link.dataset.viewLink)));
+			window.addEventListener('hashchange', () => setActiveView(window.location.hash.slice(1), false));
 
 			const pad2 = value => String(value).padStart(2, '0');
 
@@ -1567,6 +1628,7 @@
 				if (selectedFlightId) void loadFlightWeather(selectedFlightId);
 			});
 
+			setActiveView(window.location.hash.slice(1), false);
 			updateOpsClock();
 			// Ticks on the minute boundary rather than every second, so the only
 			// animation on the page is the value that actually changes.
