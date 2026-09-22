@@ -114,6 +114,15 @@ describe('prompt composition', () => {
 		expect(prompt).not.toContain('CONFIDENTIAL');
 	});
 
+	it('does not expose the engine-internal release flag', () => {
+		// A live run turned the old `incompatible with release: no` line into "Not
+		// incompatible with release", which reads as a release statement. The model is
+		// not told about release at all beyond the instruction not to authorise one.
+		const prompt = composeExplainerPrompt(explainerInput()).map(message => message.content).join('\n');
+		expect(prompt).not.toContain('incompatible with release');
+		expect(prompt).not.toContain('blocksRelease');
+	});
+
 	it('is deterministic for the same input', async () => {
 		const input = explainerInput();
 		expect(await hashPrompt(composeExplainerPrompt(input))).toBe(await hashPrompt(composeExplainerPrompt(input)));

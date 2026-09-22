@@ -173,7 +173,11 @@ export function composeExplainerPrompt(input: ExplainerInput): ExplainerMessage[
 		lines.push(`  [${finding.severity}] ${finding.code}: ${finding.message}`);
 		lines.push(`    evidence: ${finding.evidence}`);
 		lines.push(`    references: ${finding.references.length ? finding.references.join(', ') : 'none'}`);
-		lines.push(`    incompatible with release: ${finding.blocksRelease ? 'yes' : 'no'}`);
+		// `blocksRelease` is deliberately NOT sent. It is engine-internal bookkeeping,
+		// and exposing it invited the model to editorialise — a live run produced
+		// "Not incompatible with release", which reads as a release statement. The
+		// verdict already summarises the outcome, and the boundary is that the model
+		// never discusses release at all.
 	}
 
 	lines.push('');
