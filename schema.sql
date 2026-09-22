@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS aircraft (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     registration TEXT UNIQUE NOT NULL,
     ac_type TEXT,
+    type_code TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
