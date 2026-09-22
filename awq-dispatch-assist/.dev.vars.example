@@ -1,0 +1,14 @@
+# Local development secrets for `npx wrangler dev`.
+#
+# Copy this file to `.dev.vars` (which is gitignored) and fill in real values.
+# Never commit a real key, and never put one in `wrangler.jsonc` `vars` — that
+# file is tracked.
+#
+# Production uses Wrangler secrets instead of this file:
+#   npx wrangler secret put DEEPSEEK_API_KEY
+#
+# Read by src/explainer.ts. The key is only ever sent as an Authorization
+# header to the configured endpoint; it is never written to a snapshot, a
+# report, an audit event or a log line.
+
+DEEPSEEK_API_KEY=

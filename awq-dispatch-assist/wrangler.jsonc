@@ -1,0 +1,82 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "awq-dispatch-assist",
+	"main": "src/index.ts",
+	"workers_dev": true,
+	"vars": {
+		"AWQ_CLOUD_BROWSER_ORIGIN": "https://awq.christiandaniel.my.id",
+		"AWQ_CLOUD_API_ORIGIN": "https://awq-cloud.pages.dev"
+	},
+	"compatibility_date": "2026-09-16",
+	"compatibility_flags": [
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		// The path to the directory containing the `index.html` file to be served at `/`
+		"directory": "./public"
+	},
+	"r2_buckets": [
+		{
+			"binding": "DOCUMENTS",
+			"bucket_name": "awq-dispatch-documents"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "awq-db",
+			"database_id": "470bf61d-b694-4d4d-a716-0b74f56a5a8a"
+		}
+	],
+	// Workers AI provides the embedding model used to index the reference corpus.
+	// @cf/baai/bge-m3 is multilingual, which matters because the corpus mixes
+	// English and Indonesian text. `remote: true` keeps local dev and tests on the
+	// same code path as production instead of a stubbed local model.
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+	// Vectorize index for corpus retrieval. Dimensions are fixed at creation and
+	// match the 1024-dimension output of @cf/baai/bge-m3; changing the model would
+	// require a new index. Vectorize has no local simulation, so the binding is
+	// remote in every environment.
+	"vectorize": [
+		{
+			"binding": "VECTORIZE",
+			"index_name": "awq-dispatch-corpus",
+			"remote": true
+		}
+	],
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true
+	/**
+	 * Smart Placement
+	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+	 */
+	// "placement": {  "mode": "smart" }
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	/**
+	 * Environment Variables
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	 * Note: Use secrets to store sensitive data.
+	 * https://developers.cloudflare.com/workers/configuration/secrets/
+	 */
+	// "vars": {  "MY_VARIABLE": "production_value" }
+	/**
+	 * Service Bindings (communicate between multiple Workers)
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
+	 */
+	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
+}

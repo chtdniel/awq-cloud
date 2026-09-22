@@ -1,0 +1,10 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		/* The scripts import ../src/clause.ts by its .ts path, because the ESM loader
+		   requires the explicit extension when running .mts directly. */
+		"allowImportingTsExtensions": true,
+		"types": ["../worker-configuration.d.ts", "node"]
+	},
+	"include": ["./**/*.mts", "../src/**/*.ts", "../worker-configuration.d.ts"]
+}
