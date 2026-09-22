@@ -145,6 +145,8 @@
 			   documents and manuals their own focused work surfaces. */
 			.workspace[data-active-view="documents"] .workspace-stack,
 			.workspace[data-active-view="reference-manuals"] .workspace-stack { grid-template-columns: minmax(0, 1fr); max-inline-size: 980px; margin-inline: auto; }
+			.workspace[data-active-view="workspace"] .workspace-documents,
+			.workspace[data-active-view="workspace"] .workspace-reference { display: none; }
 			.workspace[data-active-view="documents"] .workspace-stack > .panel,
 			.workspace[data-active-view="reference-manuals"] .workspace-stack > .panel { display: none; }
 			.workspace[data-active-view="documents"] .workspace-stack > .workspace-context,
