@@ -146,7 +146,16 @@
 			.workspace[data-active-view="documents"] .workspace-stack,
 			.workspace[data-active-view="reference-manuals"] .workspace-stack { grid-template-columns: minmax(0, 1fr); max-inline-size: 980px; margin-inline: auto; }
 			.workspace[data-active-view="workspace"] #flight-documents,
-			.workspace[data-active-view="workspace"] #reference-manuals { display: none; }
+			.workspace[data-active-view="workspace"] #reference-manuals,
+			.workspace[data-active-view="workspace"] .workspace-assistant { display: none; }
+			.workspace[data-active-view="assistant"] .workspace-board,
+			.workspace[data-active-view="assistant"] .workspace-documents,
+			.workspace[data-active-view="assistant"] .workspace-reference,
+			.workspace[data-active-view="assistant"] .workspace-weather,
+			.workspace[data-active-view="assistant"] .workspace-minima,
+			.workspace[data-active-view="assistant"] .workspace-assessment { display: none; }
+			.workspace[data-active-view="assistant"] .workspace-context,
+			.workspace[data-active-view="assistant"] .workspace-assistant { display: block; grid-column: auto; grid-row: auto; position: static; }
 			.workspace[data-active-view="documents"] .workspace-stack > .panel,
 			.workspace[data-active-view="reference-manuals"] .workspace-stack > .panel { display: none; }
 			.workspace[data-active-view="documents"] .workspace-stack > .workspace-context,
@@ -355,6 +364,7 @@
 				</div>
 				<nav class="primary-nav" aria-label="Primary navigation">
 					<a class="nav-link" href="#workspace" data-view-link="workspace" aria-current="page">Decision workspace</a>
+					<a class="nav-link" href="#assistant" data-view-link="assistant">Knowledge assistant</a>
 					<a class="nav-link" href="#flight-documents" data-view-link="documents">Flight documents</a>
 					<a class="nav-link" href="#reference-manuals" data-view-link="reference-manuals">Reference manuals</a>
 				</nav>
@@ -632,6 +642,10 @@
 				workspace: {
 					title: 'Flight decision workspace',
 					copy: 'Review evidence, complete dispatch inputs, and make a traceable operational decision for the selected flight.'
+				},
+				assistant: {
+					title: 'Dispatch knowledge assistant',
+					copy: 'Ask manual-grounded operational questions while keeping the selected flight context in view.'
 				},
 				documents: {
 					title: 'Flight documents',
