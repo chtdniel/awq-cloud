@@ -137,6 +137,37 @@
 			/* One decision column. The two-pane grid put a 477px board beside a
 			   3,516px stack and left 3,039px of the left column empty. */
 			.workspace-stack { display: grid; gap: var(--space-4); }
+			/* Flight Decision Workspace: evidence stays left, analysis stays central,
+			   and the decision rail remains visible while the operator reviews context. */
+			@media (min-width: 1024px) {
+				.workspace { max-inline-size: 1440px; }
+				.workspace-intro { margin-block-end: var(--space-3); }
+				.workspace-stack { grid-template-columns: minmax(230px, 280px) minmax(0, 1fr) minmax(320px, 380px); align-items: start; gap: var(--space-4); }
+				.workspace-stack > .panel { min-inline-size: 0; }
+				.workspace-board { grid-column: 1; grid-row: 1 / span 3; }
+				.workspace-context, .workspace-weather, .workspace-minima { grid-column: 2; }
+				.workspace-context { grid-row: 1; }
+				.workspace-weather { grid-row: 2; }
+				.workspace-minima { grid-row: 3; }
+				.workspace-assessment { grid-column: 3; grid-row: 1 / span 3; position: sticky; top: 0; }
+				.workspace-documents, .workspace-assistant, .workspace-reference { grid-column: 1; }
+				.workspace-documents { grid-row: 4; }
+				.workspace-assistant { grid-row: 5; }
+				.workspace-reference { grid-row: 6; }
+				.workspace-board .panel-body, .workspace-documents .panel-body, .workspace-assistant .panel-body, .workspace-reference .panel-body { padding: var(--space-3); }
+				.workspace-board .panel-heading, .workspace-documents .panel-heading, .workspace-assistant .panel-heading, .workspace-reference .panel-heading { padding: var(--space-3); }
+				.workspace-board .flight-row { grid-template-columns: auto minmax(0, 1fr); gap: var(--space-1) var(--space-2); }
+				.workspace-board .flight-row-route { grid-column: 2; grid-row: 1; }
+				.workspace-board .flight-row-time { grid-column: 2; grid-row: 2; justify-self: start; }
+				.workspace-board .flight-row-reg { display: none; }
+				.workspace-assessment .panel-heading { border-block-end-color: var(--accent-primary); }
+				.workspace-assessment .panel-title { font-size: 20px; }
+			}
+			@media (max-width: 1023px) {
+				.workspace-stack { grid-template-columns: 1fr 1fr; }
+				.workspace-board, .workspace-context, .workspace-weather, .workspace-minima, .workspace-assessment { grid-column: 1 / -1; }
+				.workspace-documents, .workspace-assistant, .workspace-reference { grid-column: span 1; }
+			}
 			.panel { min-inline-size: 0; border: 1px solid var(--border-default); border-radius: var(--radius-panel); background: var(--surface-secondary); }
 			.panel-heading { justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-block-end: 1px solid var(--border-subtle); }
 			.panel-title { margin: 0; font-size: 18px; line-height: 1.3; }
@@ -326,12 +357,12 @@
 					</div>
 
 					<section class="workspace-intro" aria-labelledby="page-title">
-						<h1 class="page-title" id="page-title">Active flight context</h1>
-						<p class="page-copy">Select a flight from the active AWQ Cloud Flight Board to review its operational context.</p>
+						<h1 class="page-title" id="page-title">Flight decision workspace</h1>
+						<p class="page-copy">Review evidence, complete dispatch inputs, and make a traceable operational decision for the selected flight.</p>
 					</section>
 
 					<div class="workspace-stack">
-						<section class="panel" aria-labelledby="board-title">
+						<section class="panel workspace-board" aria-labelledby="board-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="board-title">Active Flight Board</h2>
 								<div class="panel-tools">
@@ -349,7 +380,7 @@
 							</div>
 						</section>
 
-						<section class="panel" aria-labelledby="context-title">
+						<section class="panel workspace-context" aria-labelledby="context-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="context-title">Flight context</h2>
 								<div class="panel-tools"><span class="panel-count" id="context-count">No selection</span></div>
@@ -384,7 +415,7 @@
 							</div>
 						</section>
 
-						<section class="panel" aria-labelledby="weather-title">
+						<section class="panel workspace-weather" aria-labelledby="weather-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="weather-title">TAF and weather monitoring</h2>
 								<div class="panel-tools">
@@ -397,7 +428,7 @@
 							</div>
 						</section>
 
-						<section class="panel" aria-labelledby="minima-title">
+						<section class="panel workspace-minima" aria-labelledby="minima-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="minima-title">Dispatch minima and NOTAM</h2>
 								<div class="panel-tools"><span class="panel-count">Entered from the chart</span></div>
@@ -432,7 +463,7 @@
 							</div>
 						</section>
 
-						<section class="panel" aria-labelledby="assessment-title">
+						<section class="panel workspace-assessment" aria-labelledby="assessment-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="assessment-title">Operational assessment</h2>
 								<div class="panel-tools"><span class="weather-status" id="assessment-status">No selection</span></div>
@@ -455,7 +486,7 @@
 							</div>
 						</section>
 
-						<section class="panel" aria-labelledby="documents-title">
+						<section class="panel workspace-documents" aria-labelledby="documents-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="documents-title">Flight documents</h2>
 								<div class="panel-tools"><span class="panel-count" id="documents-count">No selection</span></div>
@@ -476,7 +507,7 @@
 							</div>
 						</section>
 
-						<section class="panel" aria-labelledby="assistant-title">
+						<section class="panel workspace-assistant" aria-labelledby="assistant-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="assistant-title">Dispatch knowledge assistant</h2>
 								<div class="panel-tools"><span class="weather-status">Manual-grounded</span></div>
@@ -490,7 +521,7 @@
 							</div>
 						</section>
 
-						<section class="panel" aria-labelledby="reference-documents-title">
+						<section class="panel workspace-reference" aria-labelledby="reference-documents-title">
 							<div class="panel-heading">
 								<h2 class="panel-title" id="reference-documents-title">Reference manuals</h2>
 								<div class="panel-tools"><span class="panel-count" id="reference-documents-count">0 documents</span></div>
