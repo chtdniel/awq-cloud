@@ -15,6 +15,7 @@ import { highestSeverity, type Finding } from './findings';
 import { ingestDocument, type IngestDocument } from './ingest';
 import { indexChunkSlice, indexStatus, refreshDocumentEmbeddingCounts } from './indexer';
 import { retrieve } from './retrieval';
+import { planningMode, planQuery } from './query-plan';
 import { buildDispatchInput, type AwqFlightWeather, type ScheduleAdjustment, type ScheduleResolution } from './awq';
 import {
 	CLAUSE_REFERENCES,
@@ -276,6 +277,15 @@ type DispatchSnapshot = {
 
 /** How long the explanation may take before it is abandoned. */
 const EXPLAIN_TIMEOUT_MS = 20_000;
+
+/**
+ * How long query planning may take before retrieval proceeds without it.
+ *
+ * Tighter than the explanation timeout on purpose: the operator is waiting on a
+ * search box, and a plan that arrives late is worth less than a result that arrives
+ * promptly. A timeout degrades to the pre-planner behaviour rather than failing.
+ */
+const ASSISTANT_PLAN_TIMEOUT_MS = 8_000;
 
 /**
  * The DeepSeek credential is a Wrangler secret, so it is not part of the
@@ -953,7 +963,21 @@ async function proxyAssistant(request: Request, env: Env, ctx: ExecutionContext)
 	const question = String(payload.question || '').trim().slice(0, 500);
 	if (question.length < 3) return documentResponse({ error: 'Enter an operational question.' }, 400);
 
-	const retrieval = await retrieve(env, CHUNK_INGEST_VERSION, question, 8);
+	/**
+	 * Plan the query before searching it.
+	 *
+	 * The planner sees the operator's question and nothing else, so no corpus text
+	 * reaches a model provider. It is skipped when the question is an exact clause
+	 * lookup, where the deterministic `clause_id` match is already the strongest
+	 * signal, and it can be switched off entirely with the `QUERY_PLAN_DISABLED`
+	 * variable. Any failure — no key, timeout, malformed body — is a no-op that
+	 * leaves retrieval behaving exactly as it did before the planner existed.
+	 */
+	const mode = planningMode(question, (env as unknown as { QUERY_PLAN_DISABLED?: string }).QUERY_PLAN_DISABLED);
+	const planned = mode === 'plan' ? await planQuery({ apiKey: deepSeekKey(env), timeoutMs: ASSISTANT_PLAN_TIMEOUT_MS }, question) : null;
+	const planTerms = planned?.ok ? planned.terms : [];
+
+	const retrieval = await retrieve(env, CHUNK_INGEST_VERSION, question, 8, planTerms);
 	const rows = retrieval.results;
 	const flightId = Number(payload.flightId || 0);
 	const answer = rows.length
@@ -961,13 +985,17 @@ async function proxyAssistant(request: Request, env: Env, ctx: ExecutionContext)
 		: 'No indexed manual excerpt matched the question. Verify the source manual directly before making an operational decision.';
 	// The method is recorded so a lexical-only answer, which happens when the query
 	// embedding fails, is distinguishable from a full hybrid answer in the audit log.
+	// The planning mode and the terms actually searched are recorded alongside it, so
+	// a result set can be explained after the fact without replaying the model call,
+	// and so a planned run can be compared against an unplanned one.
+	const planNote = planned ? (planned.ok ? `plan=model(${planned.terms.length})` : `plan=${planned.reason}`) : `plan=${mode}`;
 	await audit(
 		env,
 		userId,
 		'assistant_query',
 		'flight',
 		flightId || null,
-		`${retrieval.method}; lexical=${retrieval.candidates.lexical} vector=${retrieval.candidates.vector}`,
+		`${retrieval.method}; lexical=${retrieval.candidates.lexical} vector=${retrieval.candidates.vector}; ${planNote}; terms=${retrieval.terms.join(',')}`.slice(0, 1000),
 		ctx
 	);
 	return documentResponse({
@@ -978,6 +1006,12 @@ async function proxyAssistant(request: Request, env: Env, ctx: ExecutionContext)
 			method: retrieval.method,
 			flightId: flightId || null,
 			candidates: retrieval.candidates,
+			// Reported so an operator can see why a search widened: a degraded plan is
+			// the difference between "the manual does not say" and "the search missed".
+			plan: {
+				source: planned ? (planned.ok ? 'model' : 'degraded') : 'skipped',
+				terms: retrieval.terms
+			},
 			citations: rows.map(row => ({
 				// Stable identifier of the exact excerpt, so a citation can be traced
 				// back to a single stored chunk rather than to a whole manual.

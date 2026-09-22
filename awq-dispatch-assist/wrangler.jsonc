@@ -9,7 +9,14 @@
 	"workers_dev": true,
 	"vars": {
 		"AWQ_CLOUD_BROWSER_ORIGIN": "https://awq.christiandaniel.my.id",
-		"AWQ_CLOUD_API_ORIGIN": "https://awq-cloud.pages.dev"
+		"AWQ_CLOUD_API_ORIGIN": "https://awq-cloud.pages.dev",
+		// Query planning is built and tested but stays off in production until the
+		// measurement supports it. `npm run eval:retrieval` scored the baseline at
+		// hit@1 30% / hit@k 75% on 20 reviewed-out cases, and showed that almost every
+		// hit came from the vector ranker alone — while planning adds terms to the
+		// lexical ranker. It also adds a model round-trip in front of an operator-facing
+		// search box. Remove this to enable it once the numbers justify the latency.
+		"QUERY_PLAN_DISABLED": "1"
 	},
 	"compatibility_date": "2026-09-16",
 	"compatibility_flags": [

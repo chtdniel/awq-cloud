@@ -1,0 +1,49 @@
+/**
+ * Wrangler configuration for the retrieval evaluation harness only.
+ *
+ * Identical to `wrangler.jsonc` except that the D1 binding is remote, because the
+ * reference corpus lives in the production database and the local one is empty. That
+ * is what lets the harness measure the real corpus through the real code path.
+ *
+ * Read-only: the harness only runs SELECTs. Never point the normal test suite at this
+ * file — `vercel`/`vitest.config.mts` stays on `wrangler.jsonc`, whose D1 binding is
+ * local, so `npm test` can never touch production data.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "awq-dispatch-assist-eval",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-09-16",
+	"compatibility_flags": ["global_fetch_strictly_public"],
+	"vars": {
+		"AWQ_CLOUD_BROWSER_ORIGIN": "https://awq.christiandaniel.my.id",
+		"AWQ_CLOUD_API_ORIGIN": "https://awq-cloud.pages.dev"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "awq-db",
+			"database_id": "470bf61d-b694-4d4d-a716-0b74f56a5a8a",
+			// The corpus is remote-only. Reads only; nothing in the harness writes.
+			"remote": true
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "DOCUMENTS",
+			"bucket_name": "awq-dispatch-documents",
+			"remote": true
+		}
+	],
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+	"vectorize": [
+		{
+			"binding": "VECTORIZE",
+			"index_name": "awq-dispatch-corpus",
+			"remote": true
+		}
+	]
+}

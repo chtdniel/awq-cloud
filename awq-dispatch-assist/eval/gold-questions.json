@@ -1,0 +1,240 @@
+{
+  "$comment": "Ground truth for measuring retrieval. Clause numbers and character counts were verified against the live corpus at ingest_version 2 with metadata-only queries. Expectations trace to CLAUSE_REFERENCES in src/dispatch.ts, which records which clause JUSTIFIES a rule -- and a rule citation is not necessarily the passage that ANSWERS a question, which is why every case carries a review status. REVIEW REQUIRED: a dispatcher should move cases from unreviewed to confirmed, or to suspect with a note. Nothing here was authored by reading manual prose; clause numbers, titles and text lengths only.",
+  "version": 2,
+  "topK": 8,
+  "cases": [
+    {
+      "id": "planning-minima-id-1",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.planningMinima",
+      "question": "Kalau cuaca di bandara alternatif jelek, bagaimana menentukan bandara itu masih layak dipakai?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 },
+        { "scheme": "om", "clause": "8.1.2.2.3.1", "corpusChars": 1106 }
+      ]
+    },
+    {
+      "id": "planning-minima-id-2",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.planningMinima",
+      "question": "Apa syarat sebuah aerodrome masih bisa dipakai sebagai alternate?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 },
+        { "scheme": "om", "clause": "8.1.2.2.3.1", "corpusChars": 1106 }
+      ]
+    },
+    {
+      "id": "planning-minima-id-3",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.planningMinima",
+      "question": "Bagaimana kriteria kelayakan bandara untuk dipakai sebagai alternate?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 },
+        { "scheme": "om", "clause": "8.1.2.2.3.1", "corpusChars": 1106 }
+      ]
+    },
+    {
+      "id": "planning-minima-en-1",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.planningMinima",
+      "question": "How do I decide whether an aerodrome is still usable as a destination alternate?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 },
+        { "scheme": "om", "clause": "8.1.2.2.3.1", "corpusChars": 1106 }
+      ]
+    },
+    {
+      "id": "planning-minima-en-2",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.planningMinima",
+      "question": "What makes an aerodrome acceptable as an alternate?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 },
+        { "scheme": "om", "clause": "8.1.2.2.3.1", "corpusChars": 1106 }
+      ]
+    },
+    {
+      "id": "additional-fuel-id-1",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.additionalFuel",
+      "question": "Berapa bahan bakar tambahan yang wajib dibawa untuk penerbangan ini?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.7.1.2", "corpusChars": 5931 },
+        { "scheme": "fdm", "clause": "4.8.3.5.1", "corpusChars": 2053 },
+        { "scheme": "casr", "clause": "121.639", "corpusChars": 4979 }
+      ]
+    },
+    {
+      "id": "additional-fuel-id-2",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.additionalFuel",
+      "question": "Aturan penambahan bahan bakar untuk rute ini bagaimana?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.7.1.2", "corpusChars": 5931 },
+        { "scheme": "fdm", "clause": "4.8.3.5.1", "corpusChars": 2053 },
+        { "scheme": "casr", "clause": "121.639", "corpusChars": 4979 }
+      ]
+    },
+    {
+      "id": "additional-fuel-id-3",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.additionalFuel",
+      "question": "Apakah bahan bakar cadangan wajib ditambah di luar perhitungan normal?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.7.1.2", "corpusChars": 5931 },
+        { "scheme": "fdm", "clause": "4.8.3.5.1", "corpusChars": 2053 },
+        { "scheme": "casr", "clause": "121.639", "corpusChars": 4979 }
+      ]
+    },
+    {
+      "id": "additional-fuel-en-1",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.additionalFuel",
+      "question": "How much additional fuel has to be carried for this flight?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.7.1.2", "corpusChars": 5931 },
+        { "scheme": "fdm", "clause": "4.8.3.5.1", "corpusChars": 2053 },
+        { "scheme": "casr", "clause": "121.639", "corpusChars": 4979 }
+      ]
+    },
+    {
+      "id": "additional-fuel-en-2",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.additionalFuel",
+      "question": "What extra fuel is required beyond the normal figure?",
+      "expect": [
+        { "scheme": "om", "clause": "8.1.7.1.2", "corpusChars": 5931 },
+        { "scheme": "fdm", "clause": "4.8.3.5.1", "corpusChars": 2053 },
+        { "scheme": "casr", "clause": "121.639", "corpusChars": 4979 }
+      ]
+    },
+    {
+      "id": "holding-fuel-id-1",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.holdingFuel",
+      "question": "Kalau di bandara tujuan ada TEMPO, apakah perlu menambah bahan bakar cadangan?",
+      "expect": [{ "scheme": "om", "clause": "8.4.4.2.2.1", "corpusChars": 453 }]
+    },
+    {
+      "id": "holding-fuel-id-2",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.holdingFuel",
+      "question": "Ada TEMPO di TAF tujuan, apakah harus menambah holding?",
+      "expect": [{ "scheme": "om", "clause": "8.4.4.2.2.1", "corpusChars": 453 }]
+    },
+    {
+      "id": "holding-fuel-en-1",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.holdingFuel",
+      "question": "Does a TEMPO group at the destination require extra holding fuel?",
+      "expect": [{ "scheme": "om", "clause": "8.4.4.2.2.1", "corpusChars": 453 }]
+    },
+    {
+      "id": "holding-fuel-en-2",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.holdingFuel",
+      "question": "How much holding fuel do I add when the destination forecast is TEMPO?",
+      "expect": [{ "scheme": "om", "clause": "8.4.4.2.2.1", "corpusChars": 453 }]
+    },
+    {
+      "id": "tempo-alternate-id-1",
+      "language": "id",
+      "review": "suspect",
+      "notes": "8.1.2 was read as 'Criteria for Determining the Usability of Aerodromes' -- navigation aids, runways, curfews, PPR, field conditions, lighting, ARFF/RFFS. That is aerodrome facility adequacy, not weather-versus-alternate planning, so the answering passage is probably a weather sub-clause of 8.1.2. Needs a dispatcher to name the right clause.",
+      "provenance": "CLAUSE_REFERENCES.tempoAlternate (rule citation, disputed as a retrieval target)",
+      "question": "Kalau TAF bandara tujuan menunjukkan TEMPO, apakah alternatif masih boleh dipakai?",
+      "expect": [{ "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 }]
+    },
+    {
+      "id": "tempo-alternate-id-2",
+      "language": "id",
+      "review": "suspect",
+      "notes": "Same disputed expectation as tempo-alternate-id-1.",
+      "provenance": "CLAUSE_REFERENCES.tempoAlternate (rule citation, disputed as a retrieval target)",
+      "question": "Ada TEMPO di tujuan, alternate saya masih valid tidak?",
+      "expect": [{ "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 }]
+    },
+    {
+      "id": "tempo-alternate-en-1",
+      "language": "en",
+      "review": "suspect",
+      "notes": "Same disputed expectation as tempo-alternate-id-1.",
+      "provenance": "CLAUSE_REFERENCES.tempoAlternate (rule citation, disputed as a retrieval target)",
+      "question": "If the destination TAF shows a TEMPO group, can the alternate still be used?",
+      "expect": [{ "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 }]
+    },
+    {
+      "id": "tempo-alternate-en-2",
+      "language": "en",
+      "review": "suspect",
+      "notes": "Same disputed expectation as tempo-alternate-id-1.",
+      "provenance": "CLAUSE_REFERENCES.tempoAlternate (rule citation, disputed as a retrieval target)",
+      "question": "Is my alternate still valid when the destination has a TEMPO?",
+      "expect": [{ "scheme": "om", "clause": "8.1.2", "corpusChars": 3670 }]
+    },
+    {
+      "id": "enroute-fuel-id-1",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.enRouteFuel",
+      "question": "Bagaimana aturan bahan bakar untuk penerbangan internasional?",
+      "expect": [{ "scheme": "casr", "clause": "121.646", "corpusChars": 4315 }]
+    },
+    {
+      "id": "enroute-fuel-id-2",
+      "language": "id",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.enRouteFuel",
+      "question": "Perhitungan bahan bakar enroute untuk rute luar negeri aturannya di mana?",
+      "expect": [{ "scheme": "casr", "clause": "121.646", "corpusChars": 4315 }]
+    },
+    {
+      "id": "enroute-fuel-en-1",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.enRouteFuel",
+      "question": "What are the en-route fuel supply rules for international operations?",
+      "expect": [{ "scheme": "casr", "clause": "121.646", "corpusChars": 4315 }]
+    },
+    {
+      "id": "enroute-fuel-en-2",
+      "language": "en",
+      "review": "unreviewed",
+      "provenance": "CLAUSE_REFERENCES.enRouteFuel",
+      "question": "Which rules cover en-route fuel for international flights?",
+      "expect": [{ "scheme": "casr", "clause": "121.646", "corpusChars": 4315 }]
+    },
+    {
+      "id": "identifier-lookup-om",
+      "language": "en",
+      "review": "unreviewed",
+      "notes": "An exact clause lookup. The planner is skipped for these by design, so this case should be identical in both arms -- it is the control that proves planning is not being applied where it should not be.",
+      "provenance": "exact clause number in the question",
+      "question": "What does OM Part A 8.4.4.2.2.1 say?",
+      "expect": [{ "scheme": "om", "clause": "8.4.4.2.2.1", "corpusChars": 453 }]
+    },
+    {
+      "id": "identifier-lookup-casr",
+      "language": "en",
+      "review": "unreviewed",
+      "notes": "An exact clause lookup, used as the planning-skip control.",
+      "provenance": "exact clause number in the question",
+      "question": "Show me CASR 121.639.",
+      "expect": [{ "scheme": "casr", "clause": "121.639", "corpusChars": 4979 }]
+    }
+  ]
+}

@@ -7,6 +7,8 @@
     "dev": "wrangler dev",
     "start": "wrangler dev",
     "test": "vitest",
+    "eval:retrieval": "vitest run --config vitest.eval.config.mts eval/retrieval-eval.eval.ts",
+    "eval:inspect": "vitest run --config vitest.eval.config.mts eval/inspect.eval.ts",
     "cf-typegen": "wrangler types",
     "corpus:check": "tsx scripts/segment-corpus.mts",
     "corpus:sql": "tsx scripts/segment-corpus.mts --emit-sql",

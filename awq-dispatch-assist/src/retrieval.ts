@@ -22,6 +22,7 @@
  */
 
 import { embedQuery, EMBEDDING_MODEL } from './embeddings';
+import { normaliseTerm } from './query-plan';
 import type { ClauseScheme } from './clause';
 
 /** RRF constant. 60 is the value from the original RRF paper and is insensitive in practice. */
@@ -49,6 +50,8 @@ export type RetrievedChunk = {
 
 export type RetrievalResult = {
 	query: string;
+	/** The tokens the lexical ranker actually used, after merging and bounding. */
+	terms: string[];
 	method: 'hybrid' | 'lexical-only';
 	candidates: { lexical: number; vector: number };
 	results: RetrievedChunk[];
@@ -86,6 +89,37 @@ export function queryTokens(question: string): string[] {
 }
 
 /**
+ * Largest token set handed to the lexical ranker.
+ *
+ * Bounded by D1's limit of 100 bound parameters per query, which the lexical
+ * statement reaches three times per token (content, section title, exact clause id)
+ * plus the version and the limit: `3T + 2 <= 100`. The document-frequency probe
+ * binds each token twice plus the version: `2T + 1`. At 12 tokens that is 38 and 25
+ * respectively, both with headroom, and `%TERM%` stays far inside the 50-byte
+ * `LIKE` pattern ceiling given `MAX_TERM_CHARS`.
+ */
+export const MAX_LEXICAL_TOKENS = 12;
+
+/**
+ * Combine the pattern's tokens with any planned terms.
+ *
+ * Order matters: pattern tokens come first because an identifier the operator typed
+ * is stronger evidence than a term a model inferred. Nothing is ever removed, so a
+ * plan can only widen the candidate set — and when no plan is supplied this returns
+ * exactly what `queryTokens` produced, capped at the same effective length.
+ */
+export function mergeTokens(patternTokens: readonly string[], planTerms: readonly string[] = []): string[] {
+	const out: string[] = [];
+	for (const value of [...patternTokens, ...planTerms]) {
+		const token = normaliseTerm(value);
+		if (!token || out.includes(token)) continue;
+		if (out.length >= MAX_LEXICAL_TOKENS) break;
+		out.push(token);
+	}
+	return out;
+}
+
+/**
  * A token appearing in more than this share of chunks is treated as noise.
  *
  * Measured on the live corpus without this filter, queries returned the Operations
@@ -98,7 +132,7 @@ export function queryTokens(question: string): string[] {
 const COMMON_TOKEN_SHARE = 0.02;
 
 /** Tokens too common to be informative. Computed per query, since it needs the corpus. */
-async function commonTokens(env: Env, version: number, tokens: string[]): Promise<Set<string>> {
+async function commonTokens(env: Env, version: number, tokens: readonly string[]): Promise<Set<string>> {
 	if (!tokens.length) return new Set();
 	const totalRow = await env.DB.prepare(
 		'SELECT COUNT(*) AS total FROM reference_document_chunks WHERE ingest_version = ?'
@@ -132,8 +166,7 @@ async function commonTokens(env: Env, version: number, tokens: string[]): Promis
  * that coverage requirement a chunk matching a single common word could outrank a
  * genuinely relevant clause.
  */
-async function lexicalSearch(env: Env, version: number, question: string): Promise<ChunkRow[]> {
-	const tokens = queryTokens(question);
+async function lexicalSearch(env: Env, version: number, tokens: readonly string[]): Promise<ChunkRow[]> {
 	if (!tokens.length) return [];
 
 	const common = await commonTokens(env, version, tokens);
@@ -237,11 +270,16 @@ async function loadChunksById(env: Env, version: number, ids: number[]): Promise
  * `topK` is capped at 25 because every result is eventually placed in a model
  * prompt, and an unbounded excerpt list is the fastest way to make a prompt both
  * expensive and less accurate.
+ *
+ * `planTerms` are optional search terms supplied by the query planner. They are
+ * additive: with no plan the tokens, the ranking and the result set are identical
+ * to the behaviour before the planner existed.
  */
-export async function retrieve(env: Env, version: number, question: string, topK = 8): Promise<RetrievalResult> {
+export async function retrieve(env: Env, version: number, question: string, topK = 8, planTerms: readonly string[] = []): Promise<RetrievalResult> {
 	const limit = Math.max(1, Math.min(25, topK));
+	const terms = mergeTokens(queryTokens(question), planTerms);
 	const [lexical, vector] = await Promise.all([
-		lexicalSearch(env, version, question),
+		lexicalSearch(env, version, terms),
 		vectorSearch(env, question)
 	]);
 
@@ -316,6 +354,7 @@ export async function retrieve(env: Env, version: number, question: string, topK
 
 	return {
 		query: question,
+		terms,
 		method: vector.length ? 'hybrid' : 'lexical-only',
 		candidates: { lexical: lexical.length, vector: vector.length },
 		results

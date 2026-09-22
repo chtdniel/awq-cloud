@@ -9,11 +9,16 @@
 
 ## 1. Atmosphere & Identity
 
-AWQ Dispatch Assist feels like a quiet flight operations desk: focused, legible, and calm under pressure. The signature is a thin amber flight-line accent that marks the selected operational context while the rest of the interface stays restrained.
+AWQ Dispatch Assist feels like a quiet flight operations desk: focused, legible, and calm under pressure. The signature is a thin amber flight-line accent that marks the selected flight on the board while the rest of the interface stays restrained.
 
 Design read: internal aviation operations dashboard for dispatch operators, with a dark technical language and a low-glare control-room surface.
 
 Design dials: `DESIGN_VARIANCE 3`, `MOTION_INTENSITY 2`, `VISUAL_DENSITY 7`.
+
+The screen is a **single decision column**, read top to bottom in the order the work is done: board, context, weather, minima, verdict. Two consequences are deliberate and load-bearing:
+
+- The verdict is a **pinned strip** directly under the header. The assessment is read while its findings are on screen, so the verdict cannot scroll away from the evidence it is drawn from.
+- The **inputs sit above the output**. The minima and NOTAM that determine the verdict are entered before the assessment, not below the badge they produced.
 
 ## 2. Color
 
@@ -26,7 +31,7 @@ Design dials: `DESIGN_VARIANCE 3`, `MOTION_INTENSITY 2`, `VISUAL_DENSITY 7`.
 | Surface elevated | `--surface-elevated` | `#202a35` | Menus and selected context |
 | Text primary | `--text-primary` | `#f2f5f7` | Headings and values |
 | Text secondary | `--text-secondary` | `#aab6c2` | Supporting information |
-| Text tertiary | `--text-tertiary` | `#71808d` | Hints and unavailable values |
+| Text tertiary | `--text-tertiary` | `#94a3b0` | Hints, field labels, unavailable values |
 | Border default | `--border-default` | `#30404d` | Panel and control outlines |
 | Border subtle | `--border-subtle` | `#24313c` | Internal separation |
 | Accent primary | `--accent-primary` | `#e6a93a` | Selection, primary action, focus |
@@ -38,19 +43,36 @@ Design dials: `DESIGN_VARIANCE 3`, `MOTION_INTENSITY 2`, `VISUAL_DENSITY 7`.
 
 The page stays dark. Status colors are semantic and are not decorative accents.
 
+Measured contrast, recomputed with the WCAG 2.x relative-luminance formula. The token is declared as `rgb(148 163 176)`, which is `#94a3b0`.
+
+| Token | On canvas `#11161d` | On panel `#171e27` | On elevated `#202a35` |
+|---|---:|---:|---:|
+| `--text-primary` `#f2f5f7` | 16.59:1 | 15.33:1 | 13.28:1 |
+| `--text-secondary` `#aab6c2` | 8.80:1 | 8.13:1 | 7.05:1 |
+| `--text-tertiary` `#94a3b0` | 7.03:1 | 6.49:1 | 5.63:1 |
+| `--accent-primary` `#e6a93a` | 8.74:1 | 8.07:1 | 7.00:1 |
+| `--status-error` `#e47777` | 6.23:1 | 5.76:1 | 4.99:1 |
+
+Every text token clears 4.5:1 on all three surfaces; the lowest pair on the page is `--status-error` on `--surface-elevated` at 4.99:1. `--text-tertiary` was `#71808d`, which measured 4.47 / 4.13 / 3.58:1 and put field labels, finding evidence and metadata below the floor on all three; it was retuned to clear the floor on the highest surface it lands on, so the token is now safe anywhere.
+
+`--accent-primary` and `--status-warning` are currently the same value. That is a known defect, not an intention: it makes one amber mean both "primary action" and "caution" (§8, accepted debt).
+
 ## 3. Typography
 
 | Level | Size | Weight | Line height | Usage |
 |---|---:|---:|---:|---|
 | Display | 32px | 700 | 1.1 | Page title |
 | H1 | 24px | 700 | 1.2 | Workspace title |
-| H2 | 16px | 700 | 1.3 | Panel heading |
+| H2 | 18px | 700 | 1.3 | Panel heading |
+| H3 | 12px | 700 | 1.3 | Field-group heading, uppercase |
 | Body | 14px | 400 | 1.5 | Operational copy |
 | Body small | 12px | 400 | 1.4 | Supporting text |
 | Label | 11px | 700 | 1.3 | Uppercase field labels |
 | Data | 14px | 600 | 1.3 | Callsigns, codes, times |
 
-Primary: `ui-sans-serif`, `system-ui`, `Segoe UI`, sans-serif. Data: `ui-monospace`, `SFMono-Regular`, `Consolas`, monospace. No remote font dependency in the first slice.
+**No functional text below 11px.** The previous ramp put field labels, status chips, the verdict badge and citation provenance at 10px; the verdict badge is now 12px and every label is 11px. A 10px label is a legibility failure on a screen read under time pressure, not a density choice.
+
+Primary: `ui-sans-serif`, `system-ui`, `Segoe UI`, sans-serif. Data: `ui-monospace`, `SFMono-Regular`, `Consolas`, monospace. No remote font dependency. Monospace is for identifiers, codes, times and fixed-format text (raw TAF); prose is never set in monospace, so manual excerpts and model narratives use the sans face.
 
 ## 4. Spacing & Layout
 
@@ -66,38 +88,71 @@ Base unit: 4px.
 | `--space-6` | 24px | Major panel padding |
 | `--space-8` | 32px | Page section spacing |
 
-The app uses a fixed header and a single scroll owner: `.workspace-scroll`. The shell is bounded by `100dvb`; the main grid uses `minmax(0, 1fr)` and `min-inline-size: 0` so long operational values cannot create horizontal overflow.
+The app uses a fixed header and a single scroll owner: `.workspace-scroll`. `.app-shell` is `block-size: 100dvb` — exactly one viewport, not `min-block-size` — so the document itself never scrolls and the header cannot be scrolled away. Verified: at 1440x1000 with data loaded, `document.scrollingElement.scrollHeight` is 1000 and `.workspace-scroll` reports `clientHeight 936 / scrollHeight 4906`.
+
+The workspace is one column (`.workspace-stack`) capped at `1180px`, so a decision is read in one direction. Every panel body is a grid with `gap: var(--space-3)`; `min-inline-size: 0` on panels and tracks keeps long operational values from creating horizontal overflow, and every `auto-fit` track uses `minmax(min(Xpx, 100%), 1fr)` so a fixed minimum can never exceed a narrow container.
 
 Breakpoints: `sm 640px`, `md 768px`, `lg 1024px`, `xl 1280px`.
+
+Below `768px`: panels stack, `.flight-row` collapses to two columns, `.assessment-row` and `.document-row` stack, and `.button` plus the document form controls rise to the 44px touch floor. Desktop keeps 36px controls, because touch is not the input there.
 
 ## 5. Components
 
 ### App shell
 
-- Structure: fixed header, scrollable workspace, responsive two-pane grid.
-- Variants: desktop two-pane, mobile stacked.
+- Structure: fixed 64px header, single scrollable workspace, one decision column.
+- Variants: desktop, mobile stacked.
 - States: normal, loading, unavailable, error.
 - Accessibility: landmark header and main, visible focus, keyboard order follows reading order.
 - Motion: no automatic motion; focus and pressed states use color and transform only.
-- Layout: `scroll-body-shell`; `.workspace-scroll` owns vertical scroll.
+- Layout: `.workspace-scroll` is the only scroll owner; the document does not scroll.
+
+### Operational clock
+
+- Structure: `UTC` label plus a `<time>` value in `DDHHMMZ` form.
+- Usage: the header only. A dispatch screen with no Zulu clock makes every other time on it unverifiable.
+- Motion: the value repaints every 15 seconds, which is the only recurring update on the page.
+
+### Verdict strip
+
+- Structure: verdict badge, flight identity, ETA windows, and the printable-report action.
+- Variants: `GO`, `MARGINAL`, `NO-GO`, `NO_DATA`.
+- States: hidden until an assessment exists; cleared when the selected flight changes.
+- Accessibility: the text half is `role="status" aria-live="polite"`, so a new verdict is announced.
+- Motion: none.
+- Layout: `position: sticky; top: 0` inside `.workspace-scroll`, so it stays under the header at any scroll position. It floats, so it declares elevation with a shadow and no border.
 
 ### Flight board row
 
-- Structure: semantic button with callsign, route, schedule, and board state.
+- Structure: semantic button with four data columns — callsign, route, date of flight and scheduled time, registration.
 - Variants: selected, available, unavailable.
 - States: default, hover, active, focus, disabled.
-- Accessibility: button label contains callsign and route; selected state uses `aria-pressed`.
-- Motion: 120ms color and transform feedback.
-- Layout: row inside the board list; board list does not create a second page scrollbar.
+- Accessibility: selected state uses `aria-pressed`; a missing value renders `—` with an `aria-label` naming what is missing.
+- Motion: 120ms color feedback.
+- Layout: `auto minmax(0, 1fr) auto auto`, collapsing to two rows below `768px`. Time and registration use `tabular-nums` so rows compare without reading.
 
 ### Context panel
 
-- Structure: heading, status band, grouped operational fields, empty values.
-- Variants: no flight selected, flight selected, stale context, request error.
-- States: loading skeleton, empty, error, resolved.
-- Accessibility: field labels remain visible; unavailable values use text, never color alone.
-- Motion: none beyond status transitions.
-- Layout: panel in the detail region; content reflows to one column below `768px`.
+- Structure: panel heading with the selected callsign, status band, and two labelled field groups (`Route identity`, `Alternates`) marked up as `<dl>`.
+- Variants: no flight selected, flight selected, request error.
+- States: empty, resolved, error.
+- Accessibility: field labels remain visible; unavailable values use the word `Unavailable`, never colour alone. The heading count and the status band are written from the same value, so they cannot disagree.
+- Motion: none.
+
+### Minima panel
+
+- Structure: two `<fieldset>` groups with visible legends — `Destination minima` and `Alternate minima` — each holding approach, ceiling and visibility, plus the NOTAM field and the create action.
+- Why the fieldsets: destination and alternate minima were previously laid out by one `auto-fit` run, which wrapped the sixth field onto a second row and split the two triplets. A destination ceiling typed into the alternate field silently changes a GO/NO-GO verdict.
+- Variants: no flight selected (guidance only), flight selected (inputs).
+- Accessibility: the legend names the group, so the three fields inside it are never ambiguous.
+
+### Assessment result
+
+- Structure: verdict badge, context hash, ETA windows, fuel requirement, findings, written narrative, data-quality disclosure.
+- Not a card: the panel is the container, and the findings are the list items. A bordered box inside a bordered panel is a card in a card.
+- States: awaiting input, stale (dimmed while a new snapshot is built), resolved, and a notice line for progress or failure.
+- Accessibility: `aria-live="polite"` on the result, so a new verdict is announced; `Accept` and `Reject` are `disabled` until an assessment exists.
+- Rule: **a failed or in-flight re-assess never overwrites a rendered verdict.** Progress and errors are written to the notice line; the previous verdict is dimmed, not destroyed.
 
 ### Status band
 
@@ -117,25 +172,42 @@ Only selected-row feedback, button press, and focus transitions move. `prefers-r
 
 Strategy: tonal shift with restrained borders. Panels are separated by surface tone first, with `--border-subtle` only where grouping would otherwise be unclear. No heavy card shadows.
 
+Elevation is declared once per element: the panels carry a 1px border and no shadow; the pinned verdict strip carries a shadow and no border, because it genuinely floats above the content scrolling under it.
+
+Findings state severity with a 1px tinted border and a tinted surface, never a thick coloured edge bar — a 3px accent stripe is decoration standing in for hierarchy, and the severity word is already printed next to it.
+
 ## 8. Accessibility Constraints & Accepted Debt
 
 ### Constraints
 
-- WCAG 2.2 AA target.
-- Body text contrast minimum 4.5:1.
-- Every interactive element is keyboard reachable and has a visible focus state.
-- No operational value is communicated by color alone.
-- Primary content reflows to one column at 375px with no horizontal scroll.
+- WCAG 2.2 AA target. Every text token clears 4.5:1 on all three surfaces it can land on (see §2).
+- No functional text below 11px.
+- Every interactive element is keyboard reachable and has a visible focus state, including `[tabindex]`.
+- No operational value is communicated by color alone; every status chip also spells its state out.
+- The `hidden` attribute is authoritative: one global `[hidden] { display: none !important }` guarantees it, because an author `display` declaration otherwise outranks the user-agent rule and rendered controls the page had asked not to show.
+- The verdict and the ETA windows are live regions, so a completed assessment is announced rather than silently painted.
+- Primary content reflows to one column at 360px with no horizontal scroll, in the document or in the scroll container.
+- Touch targets: `.button` and the document-form controls are 44px below `768px`. `.dispatch-field input` and `.document-row a` are not yet covered (accepted debt).
 - Reduced motion is respected.
+- Browser surfaces are themed from the palette: selection, scrollbars, caret, focus rings, and `tabular-nums` on every data column.
 
 ### Accepted Debt
 
 | Item | Location | Why accepted | Exit |
 |---|---|---|---|
 | SSO and live flight data are not connected | First shell | AWQ Cloud authorization/API contract is not deployed yet | Implement the approved SSO and read-only API contract |
-| Aircraft `type_code` remains unavailable | Context panel | No authoritative fleet type catalog is populated | Load approved aircraft master mapping |
-| `--text-tertiary` measures 3.58–4.47:1, below the 4.5:1 target | Field labels, panel counts, document metadata | Token predates the contrast check; changing it shifts the whole palette | Retune the token and re-verify all three surfaces |
+| Aircraft `type_code` remains unavailable | Flight context panel | No authoritative fleet type catalog is populated | Load approved aircraft master mapping |
 | Section titles are extracted heuristically and can absorb a trailing table caption | Assessment report, assistant citations | The clause number is the authoritative citation key; the title is supplementary | Add a per-document title allowlist when the manuals are next revised |
+| Engineering metadata is shown in the operator's decision panel (`prompt` hash, model name, `similarity 0.842`, `FOUND BY EXACT TOKENS + SEMANTIC`) | Assessment result, assistant citations | Auditability was the intent and the printable report is the correct home for it | Move to a collapsed audit disclosure on screen |
+| Clause citations are inert text (`References: OM Part A 8.1.2`) | Findings | The assistant is the only surface that holds clause text today | Make each reference open its retrieved excerpt inline |
+| No favicon file exists; the mark is inlined as an SVG data URI | Document head | Avoids a second request and a 404, at the cost of a long `href` | Extract to `public/favicon.svg` if the mark changes |
+| `--accent-primary` and `--status-warning` are the same value `#e6a93a`, so one amber means both "act" and "caution" | Palette, MARGINAL badge, warning chips | The accent is the brand line and the status ramp was built alongside it | Give warning a distinguishably deeper amber and demote all but one primary per state |
+| `.assessment-result.is-stale { opacity: 0.45 }` measures 2.71:1 (`--text-secondary`) and 2.33:1 (`--text-tertiary`) over the panel | Assessment result, while a re-assess is in flight | The state is transient and its job is to read as superseded, which dimming communicates instantly | Raise to 0.7 (4.66:1) or mark staleness with a chip instead of opacity |
+| `.dispatch-field input` is 36px at every viewport; `.document-row a` is 17px tall, below the WCAG 2.2 AA 24×24 target floor | Minima panel, document and reference lists | The mobile 44px rule was scoped to `.button` and the document-form controls | Extend the `≤767px` rule to `.dispatch-field input` and give the row links `min-block-size: 44px` |
+| `#reference-upload-form` has no `hidden` attribute: the manual upload widget renders before authentication | Reference manuals panel | Predates this pass; the form is gated server-side by `authorizeUser` | Add `hidden` and unhide it only after a successful board fetch, as the document form already does |
+| The board carries no verdict, finding count or reviewed state per flight, and no filter or sort | Active Flight Board | The board was built as a picker for the context panel | Add a verdict column and a needs-attention sort |
+| Progress and failure notices are bare strings with no retry affordance | `#assessment-notice`, per-panel error text | The action that failed is still on screen | Put the retry on the notice |
+| `renderFlightWeather` prints the upstream `validity.label` verbatim, so TAF validity notation is whatever AWQ Cloud sends while every other time on screen is `DDHHMMZ` | TAF cards | The label is upstream data | Normalise to `DDHHMMZ` at the render boundary |
 
 ## 9. Reference Corpus
 
@@ -153,6 +225,40 @@ are applied to the live corpus by `scripts/segment-corpus.mts`.
 | Text location | Chunk text stays in D1; Vectorize holds identifiers only | Vector metadata is capped at 10 KiB with indexed fields at 64 bytes, so text cannot live in the index. Keeping it in D1 also means correcting a chunk does not require re-embedding it. |
 | Retrieval | Hybrid: lexical (D1) + vector (Vectorize), fused by reciprocal rank fusion | Dense vectors are weak on exact identifiers (`121.635`, `RVR`) while lexical search cannot match a paraphrase ("runway visual range"). RRF needs no calibration between a cosine score and a lexical rank. |
 | Lexical noise control | Tokens present in more than 2% of chunks are dropped, and a chunk must match at least two distinctive tokens | Measured on the live corpus, English function words (FOR, THE, ARE) otherwise matched nearly every chunk, and the abbreviation lists in OM clause `0.2` appeared in the top results of every question. |
+
+### Query planning
+
+The lexical noise filter above assumes the query and the corpus share a language: it
+works because English function words appear in a large share of an English corpus. An
+Indonesian question against the English corpus breaks that assumption — `APAKAH`,
+`MASIH` and `BOLEH` appear in almost no chunk, so they are never recognised as common,
+they survive as "distinctive", they consume the eight-token budget, and they match
+nothing. The vector side absorbed this by choosing a multilingual embedding model; the
+lexical side had no answer.
+
+`src/query-plan.ts` closes that gap. The model receives the operator's question and
+nothing else, and returns search terms in the manual's own English vocabulary
+(`PLANNING MINIMA`, `HOLDING FUEL`, `TEMPO`). Those are appended to the tokens the
+pattern extractor already found, so a plan can only widen the candidate set, never
+narrow it.
+
+Boundaries this holds:
+
+| Constraint | How it is held |
+|---|---|
+| No corpus text reaches a provider | The prompt carries the question only. There is no field for clause text or an excerpt, and `test/query-plan.spec.ts` asserts the prompt contains no corpus string. |
+| Retrieval never depends on a model | Every failure — no key, HTTP error, timeout, malformed body — returns `ok: false`, and the caller searches with the pattern tokens alone. |
+| D1's 100 bound-parameter limit | The merged token set is capped at `MAX_LEXICAL_TOKENS = 12`, so the lexical statement binds `3T + 2 = 38` and the frequency probe `2T + 1 = 25`. |
+| D1's 50-byte `LIKE` pattern limit | A term is capped at `MAX_TERM_CHARS = 46`, because the term is wrapped as `%TERM%`. A tighter bound would silently stop searching for a token the extractor had already accepted. |
+| Reversible without a redeploy | `QUERY_PLAN_DISABLED=1` switches planning off. The audit record stores the planning mode and the terms actually searched, so a planned run can be compared against an unplanned one. |
+
+Planning is skipped when the question contains a dotted clause number, because an exact
+`clause_id` equality is already the strongest lexical signal and a model round-trip can
+only add noise to it.
+
+The vector side is deliberately untouched. Appending the planned terms to the embedded
+text is a plausible further gain and is currently unmeasured, so it is left out until
+there is a way to measure it against the live index.
 
 Two Vectorize behaviours are handled in application code rather than at the index
 boundary, both discovered by testing against the live index: `topK` is capped at 100,

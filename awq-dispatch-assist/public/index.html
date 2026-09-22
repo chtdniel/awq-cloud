@@ -5,6 +5,8 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<meta name="description" content="AWQ Dispatch Assist flight context workspace." />
 		<meta name="theme-color" content="rgb(17 22 29)" />
+		<!-- The brand mark as an inline SVG: no extra request, no 404, no default tab icon. -->
+		<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2311161d'/%3E%3Cpath d='M16 6.5 25.5 25.5H20.9L16 15.2 11.1 25.5H6.5Z' fill='%23e6a93a'/%3E%3Crect x='11.6' y='18.2' width='8.8' height='2.6' rx='1.3' fill='%23e6a93a'/%3E%3C/svg%3E" />
 		<title>AWQ Dispatch Assist</title>
 		<style>
 			:root {
@@ -14,7 +16,11 @@
 				--surface-elevated: rgb(32 42 53);
 				--text-primary: rgb(242 245 247);
 				--text-secondary: rgb(170 182 194);
-				--text-tertiary: rgb(113 128 141);
+				/* Retuned from rgb(113 128 141), which measured 4.47:1 on the canvas
+				   4.13:1 on panels and 3.58:1 on elevated surfaces. This value clears
+				   4.5:1 on all three, so field labels, evidence lines and metadata stop
+				   being the least legible text on a screen read under time pressure. */
+				--text-tertiary: rgb(148 163 176);
 				--border-default: rgb(48 64 77);
 				--border-subtle: rgb(36 49 60);
 				--accent-primary: rgb(230 169 58);
@@ -35,22 +41,64 @@
 			}
 
 			* { box-sizing: border-box; }
-			html, body { margin: 0; min-block-size: 100%; background: var(--surface-primary); color: var(--text-primary); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+			/**
+			 * Restore the semantics of the `hidden` attribute.
+			 *
+			 * `[hidden]` is only `display: none` in the user-agent sheet, which any
+			 * author `display` declaration outranks. Four components here declare
+			 * `display` on the same element they hide, so without this rule a hidden
+			 * review control, upload form and result box all render anyway.
+			 */
+			[hidden] { display: none !important; }
+
+			html, body { margin: 0; block-size: 100%; background: var(--surface-primary); color: var(--text-primary); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
 			body { min-block-size: 100dvb; }
 			button, a { font: inherit; }
 			button { cursor: pointer; }
-			button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
+			button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; }
 
-			.app-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); min-block-size: 100dvb; }
-			.app-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-block-size: 64px; padding: var(--space-3) clamp(16px, 4vw, 48px); border-block-end: 1px solid var(--border-subtle); background: rgb(17 22 29 / 0.96); }
-			.brand-lockup, .header-actions, .status-label, .panel-heading, .data-row, .field-value, .empty-state-actions { display: flex; align-items: center; }
+			/* Browser surfaces belong to the palette too. */
+			::selection { background: color-mix(in srgb, var(--accent-primary) 32%, transparent); color: var(--text-primary); }
+			* { scrollbar-color: var(--border-default) transparent; scrollbar-width: thin; }
+			::-webkit-scrollbar { inline-size: 10px; block-size: 10px; }
+			::-webkit-scrollbar-track { background: transparent; }
+			::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: var(--border-default); background-clip: content-box; }
+			::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); background-clip: content-box; }
+			input, textarea, select { caret-color: var(--accent-primary); }
+
+			/* Data, not prose: identifiers and times line up in a column or they misread. */
+			.field-value, .flight-row-callsign, .flight-row-route, .flight-row-time, .flight-row-reg,
+			.ops-clock-value, .verdict-windows, .weather-card-header, .citation-meta, .citation-clause,
+			.assessment-row-meta, .document-row-meta, .finding-head, .weather-monitoring,
+			.weather-impact, .assessment-badge, .weather-card-status, .weather-feed-status,
+			.citation-scheme, .citation-provenance { font-variant-numeric: tabular-nums; }
+
+			/**
+			 * The shell is exactly one viewport tall and the header is a fixed row of
+			 * it, so `.workspace-scroll` really is the single scroll owner. Sizing the
+			 * shell with `min-block-size` let the document grow to 4,158px instead,
+			 * which scrolled the connection status off screen and left the sticky
+			 * context panel with no travel.
+			 */
+			.app-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); block-size: 100dvb; }
+			.app-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-block-size: 64px; padding: var(--space-3) clamp(16px, 4vw, 48px); border-block-end: 1px solid var(--border-subtle); background: var(--surface-primary); }
+			.brand-lockup, .header-actions, .status-label, .panel-heading, .data-row, .field-value, .empty-state-actions, .ops-clock { display: flex; align-items: center; }
 			.brand-lockup { gap: var(--space-3); min-inline-size: 0; }
 			.brand-mark { display: grid; place-items: center; inline-size: 32px; block-size: 32px; border: 1px solid var(--accent-primary); border-radius: var(--radius-control); color: var(--accent-primary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; }
 			.brand-name { font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 			.brand-subtitle { margin-block-start: 2px; color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
-			.header-actions { justify-content: flex-end; gap: var(--space-3); }
+			.header-actions { justify-content: flex-end; gap: var(--space-4); }
+			/* The clock is the one value on this screen that is always current. */
+			.ops-clock { gap: var(--space-2); padding: var(--space-1) var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-secondary); }
+			.ops-clock-label { color: var(--text-tertiary); font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.08em; }
+			.ops-clock-value { color: var(--text-primary); font: 700 13px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.02em; }
 			.status-label { gap: var(--space-2); color: var(--text-secondary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-			.status-label::before { content: ""; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--status-warning); }
+			.status-label::before { content: ""; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--text-tertiary); }
+			/* The dot states the connection it sits next to, instead of always reading as a warning. */
+			.status-label.is-connected::before { background: var(--status-success); }
+			.status-label.is-pending::before { background: var(--status-warning); }
+			.status-label.is-offline::before { background: var(--status-error); }
 			.button { min-block-size: 36px; padding: 0 var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-elevated); color: var(--text-primary); font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; transition: background-color 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out; }
 			.button:hover { border-color: var(--accent-primary); background: var(--surface-secondary); }
 			.button:active { transform: translateY(1px); }
@@ -60,41 +108,63 @@
 			.button-secondary:hover { border-color: var(--text-secondary); background: var(--surface-elevated); color: var(--text-primary); }
 			.button:disabled { opacity: 0.5; cursor: not-allowed; }
 			.button:disabled:hover { border-color: var(--border-default); background: var(--surface-elevated); }
+			/* Without this, a disabled primary keeps its dark label over the elevated
+			   background that `.button:disabled:hover` installs — 1.25:1, invisible. */
+			.button-primary:disabled:hover { border-color: var(--accent-primary); background: var(--accent-primary); }
 			.button-secondary:disabled:hover { background: transparent; }
 
-			.workspace-scroll { min-block-size: 0; overflow: auto; }
-			.workspace { max-inline-size: 1280px; margin-inline: auto; padding: clamp(24px, 4vw, 48px) clamp(16px, 4vw, 48px) 64px; }
-			.page-intro { max-inline-size: 700px; margin-block-end: var(--space-8); }
-			.eyebrow, .panel-kicker, .field-label { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-			.eyebrow, .panel-kicker { color: var(--accent-primary); }
-			.page-title { margin: var(--space-2) 0 var(--space-3); font-size: clamp(24px, 3vw, 32px); line-height: 1.1; letter-spacing: -0.03em; }
-			.page-copy { max-inline-size: 62ch; margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
+			/* scroll-padding keeps a keyboard-focused control clear of the pinned verdict
+			   strip when the browser scrolls it into view. */
+			.workspace-scroll { min-block-size: 0; overflow: auto; scroll-padding-block-start: 76px; }
+			.workspace { max-inline-size: 1180px; margin-inline: auto; padding: var(--space-5) clamp(16px, 4vw, 48px) 64px; }
+			.workspace-intro { margin-block-end: var(--space-4); }
+			.page-title { margin: 0 0 var(--space-2); font-size: clamp(20px, 2.4vw, 24px); line-height: 1.15; letter-spacing: -0.02em; }
+			.page-copy { max-inline-size: 72ch; margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
 
-			.workspace-grid { display: grid; grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.7fr); gap: var(--space-4); align-items: start; }
+			/**
+			 * The verdict strip is the one element that must survive scrolling, because
+			 * the decision it states is made while reading the findings underneath it.
+			 * It floats, so it carries a shadow instead of a border — one elevation
+			 * declaration, not two.
+			 */
+			.verdict-strip { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-4); margin-block-end: var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-panel); background: var(--surface-elevated); box-shadow: 0 10px 24px -8px rgb(0 0 0 / 0.65); }
+			.verdict-strip-main { display: flex; align-items: center; gap: var(--space-3); min-inline-size: 0; }
+			.verdict-identity { display: grid; gap: 2px; min-inline-size: 0; }
+			.verdict-identity strong { font: 700 14px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.02em; overflow-wrap: anywhere; }
+			.verdict-windows { color: var(--text-secondary); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+			.verdict-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+			/* One decision column. The two-pane grid put a 477px board beside a
+			   3,516px stack and left 3,039px of the left column empty. */
+			.workspace-stack { display: grid; gap: var(--space-4); }
 			.panel { min-inline-size: 0; border: 1px solid var(--border-default); border-radius: var(--radius-panel); background: var(--surface-secondary); }
 			.panel-heading { justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-block-end: 1px solid var(--border-subtle); }
-			.panel-title { margin: 0; font-size: 16px; line-height: 1.3; }
+			.panel-title { margin: 0; font-size: 18px; line-height: 1.3; }
 			.panel-count { color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-			.panel-body { padding: var(--space-5); }
+			.panel-body { display: grid; gap: var(--space-3); padding: var(--space-5); }
 			.empty-state { padding: var(--space-6) var(--space-2); text-align: center; }
 			.empty-state h2 { margin: 0 0 var(--space-2); font-size: 16px; }
-			.empty-state p { max-inline-size: 34ch; margin: 0 auto; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+			.empty-state p { max-inline-size: 46ch; margin: 0 auto; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 			.empty-state-actions { justify-content: center; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-5); }
-			.context-panel { position: sticky; top: var(--space-4); }
-			.context-status { display: grid; gap: var(--space-2); margin-block-end: var(--space-5); padding: var(--space-4); border-inline-start: 3px solid var(--status-warning); background: var(--surface-elevated); }
+			.context-status { display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--status-warning) 8%, var(--surface-elevated)); }
+			.context-status.is-selected { border-color: var(--border-default); background: var(--surface-elevated); }
 			.context-status strong { font-size: 14px; }
 			.context-status span { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-			.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: var(--space-4) var(--space-5); }
+			/* Route identity and alternates are separate decisions, so they read as
+			   separate groups instead of one `auto-fit` run that splits them. */
+			.field-groups { display: grid; gap: var(--space-5); margin-block-start: var(--space-5); }
+			.field-group { min-inline-size: 0; }
+			.field-group > h3 { margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+			.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: var(--space-4) var(--space-5); margin: 0; }
 			.field { min-inline-size: 0; }
-			.field-label { display: block; margin-block-end: var(--space-1); color: var(--text-tertiary); }
-			.field-value { min-block-size: 24px; color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+			.field-label { display: block; margin: 0 0 var(--space-1); color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+			.field-value { display: block; min-block-size: 24px; margin: 0; color: var(--text-primary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 			.field-value.is-unavailable { color: var(--text-tertiary); font-family: inherit; font-size: 13px; font-weight: 400; }
-			.documents-section { margin-block-start: var(--space-6); padding-block-start: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
-			.documents-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-block-end: var(--space-4); }
-			.documents-heading h3 { margin: 0; font-size: 15px; }
+			/* Right-hand side of a panel heading: status, count, and the panel's own actions. */
+			.panel-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2) var(--space-3); }
 			.documents-count { color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 			.document-form { display: grid; grid-template-columns: minmax(130px, 0.7fr) minmax(180px, 1fr) auto; gap: var(--space-2); align-items: end; margin-block-end: var(--space-4); }
-			.document-form label { display: grid; gap: var(--space-1); color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+			.document-form label { display: grid; gap: var(--space-1); color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 			.document-form select, .document-form input[type="file"] { min-block-size: 36px; inline-size: 100%; padding: 0 var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-primary); color: var(--text-primary); font: inherit; font-size: 12px; }
 			.document-form input[type="file"] { padding-block: 8px; }
 			.document-list { display: grid; gap: var(--space-2); }
@@ -102,32 +172,26 @@
 			.document-row a { min-inline-size: 0; color: var(--text-primary); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 			.document-row-meta { color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; text-align: end; white-space: nowrap; }
 			.document-empty { margin: 0; color: var(--text-tertiary); font-size: 12px; }
-			.weather-section { margin-block-start: var(--space-5); padding-block-start: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
-			.weather-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin-block-end: var(--space-3); }
-			.weather-heading h3 { margin: 0; font-size: 16px; }
-			.weather-status { color: var(--text-tertiary); font-size: 11px; }
+			.weather-status { color: var(--text-tertiary); font-size: 12px; }
 			.weather-list { display: grid; gap: var(--space-2); }
 			.weather-card { padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); }
 			.weather-card-header { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text-primary); font: 700 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
 			.weather-card-meta { color: var(--text-tertiary); font-size: 11px; }
-			.weather-card-status { padding: 2px 6px; border-radius: 999px; font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; }
+			.weather-card-status { padding: 2px 7px; border-radius: 999px; font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
 			.weather-card-status--current { background: color-mix(in srgb, var(--status-success) 18%, transparent); color: var(--status-success); }
 			.weather-card-status--expired { background: color-mix(in srgb, var(--status-error) 18%, transparent); color: var(--status-error); }
 			.weather-card-status--missing, .weather-card-status--unknown { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: var(--status-warning); }
 			.weather-card pre { margin: var(--space-2) 0 0; color: var(--text-secondary); font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 			.weather-monitoring { margin-block-start: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-elevated); color: var(--text-secondary); font-size: 12px; }
 			.weather-impact { display: flex; align-items: center; gap: var(--space-2); }
-			.weather-impact-badge { padding: 2px 6px; border-radius: 999px; font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
+			.weather-impact-badge { padding: 2px 7px; border-radius: 999px; font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
 			.weather-impact-badge--critical { background: color-mix(in srgb, var(--status-error) 18%, transparent); color: var(--status-error); }
 			.weather-impact-badge--warning { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: var(--status-warning); }
 			.weather-impact-badge--advisory { background: color-mix(in srgb, var(--accent-primary) 18%, transparent); color: var(--accent-primary); }
-			.weather-feed-status { margin-inline-start: var(--space-2); font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: uppercase; }
+			.weather-feed-status { margin-inline-start: var(--space-2); font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
 			.weather-feed-status--fresh { color: var(--status-success); }
 			.weather-feed-status--stale, .weather-feed-status--unavailable { color: var(--status-warning); }
-			.assistant-section { margin-block-start: var(--space-5); padding-block-start: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
-			.assistant-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin-block-end: var(--space-3); }
-			.assistant-heading h3 { margin: 0; font-size: 16px; }
-			.assistant-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
+			.assistant-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); max-inline-size: 1000px; }
 			.assistant-form textarea { min-block-size: 72px; resize: vertical; padding: var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-primary); color: var(--text-primary); font: 13px/1.45 ui-sans-serif, system-ui, sans-serif; }
 			.assistant-result { display: grid; gap: var(--space-2); margin-block-start: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-elevated); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 			.assistant-result strong { color: var(--text-primary); }
@@ -138,65 +202,86 @@
 			.citation-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
 			.citation-clause { color: var(--text-primary); font: 700 13px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
 			.citation-clause--none { color: var(--text-tertiary); font-weight: 400; font-style: italic; }
-			.citation-scheme { padding: 2px 6px; border-radius: 999px; font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
+			.citation-scheme { padding: 2px 7px; border-radius: 999px; font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
 			.citation-scheme--casr { background: color-mix(in srgb, var(--status-info) 18%, transparent); color: var(--status-info); }
 			.citation-scheme--om, .citation-scheme--fdm { background: color-mix(in srgb, var(--accent-primary) 18%, transparent); color: var(--accent-primary); }
 			.citation-scheme--generic { background: color-mix(in srgb, var(--text-tertiary) 18%, transparent); color: var(--text-secondary); }
 			.citation-title { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
 			.citation-meta { margin-block-start: var(--space-1); color: var(--text-tertiary); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
-			.citation-excerpt { margin: var(--space-2) 0 0; color: var(--text-secondary); font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-			.citation-provenance { margin-block-start: var(--space-1); color: var(--text-tertiary); font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
-			.assistant-disclaimer { margin-block-start: var(--space-2); padding-block-start: var(--space-2); border-block-start: 1px solid var(--border-subtle); color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
-			.assessment-section { margin-block-start: var(--space-5); padding-block-start: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
-			.assessment-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin-block-end: var(--space-3); }
-			.assessment-heading h3 { margin: 0; font-size: 16px; }
+			.citation-excerpt { margin: var(--space-2) 0 0; color: var(--text-secondary); font: 13px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+			.citation-provenance { margin-block-start: var(--space-1); color: var(--text-tertiary); font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
+			.assistant-disclaimer { margin-block-start: var(--space-2); padding-block-start: var(--space-2); border-block-start: 1px solid var(--border-subtle); color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 			.assessment-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-3); }
-			.assessment-result { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-elevated); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-			.assessment-badge { display: inline-block; inline-size: fit-content; padding: 3px 8px; border-radius: 999px; font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
+			/* Progress and errors live here, so a failed re-assess cannot erase the verdict. */
+			.panel-notice { margin: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+			.panel-notice.is-error { border-color: color-mix(in srgb, var(--status-error) 55%, transparent); color: var(--text-primary); }
+			/* Dimmed, not blanked: the previous verdict is still true, just no longer current. */
+			.assessment-result.is-stale { opacity: 0.45; }
+			/* The panel is already the container; a second bordered box inside it would
+			   be a card in a card. The findings below are the list items. */
+			.assessment-result { display: grid; gap: var(--space-2); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+			.assessment-badge { display: inline-block; inline-size: fit-content; padding: 4px 10px; border-radius: 999px; font: 700 12px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; }
 			.assessment-badge--ready { background: color-mix(in srgb, var(--status-success) 18%, transparent); color: var(--status-success); }
 			.assessment-badge--review_required, .assessment-badge--no_data { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: var(--status-warning); }
 			.assessment-history { display: grid; gap: var(--space-2); margin-block-start: var(--space-3); }
 			.assessment-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); }
 			.assessment-row-meta { color: var(--text-tertiary); font: 11px ui-monospace, SFMono-Regular, Consolas, monospace; }
 			.assessment-note { min-block-size: 56px; inline-size: 100%; resize: vertical; padding: var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-primary); color: var(--text-primary); font: 12px/1.4 ui-sans-serif, system-ui, sans-serif; }
-			.dispatch-inputs { display: grid; gap: var(--space-3); margin-block-start: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); }
-			.dispatch-inputs[hidden], .schedule-confirm[hidden] { display: none; }
-			.dispatch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: var(--space-3); }
+			/* Not a card inside a card: the panel is the container, the fieldsets group. */
+			.dispatch-inputs { display: grid; gap: var(--space-4); }
+			.minima-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr)); gap: var(--space-4); }
+			.minima-group { min-inline-size: 0; margin: 0; padding: var(--space-2) var(--space-4) var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); }
+			.minima-group > legend { padding-inline: var(--space-2); color: var(--text-primary); font-size: 13px; font-weight: 700; }
+			.minima-group > legend span { margin-inline-start: var(--space-2); color: var(--text-tertiary); font-size: 11px; font-weight: 400; }
+			.minima-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(120px, 100%), 1fr)); gap: var(--space-3); }
 			.dispatch-field { display: grid; gap: var(--space-1); min-inline-size: 0; }
-			.dispatch-field label { font: 700 10px ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-tertiary); }
-			.dispatch-field input, .dispatch-field textarea { inline-size: 100%; padding: var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-secondary); color: var(--text-primary); font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+			.dispatch-field label { color: var(--text-tertiary); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+			.dispatch-field input, .dispatch-field textarea { inline-size: 100%; min-block-size: 36px; padding: var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-secondary); color: var(--text-primary); font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
 			.dispatch-field textarea { min-block-size: 52px; resize: vertical; font-family: ui-sans-serif, system-ui, sans-serif; }
-			.dispatch-hint { margin: 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+			.dispatch-hint { margin: 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 			.assessment-badge--go { background: color-mix(in srgb, var(--status-success) 18%, transparent); color: var(--status-success); }
 			.assessment-badge--marginal { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: var(--status-warning); }
 			.assessment-badge--nogo { background: color-mix(in srgb, var(--status-error) 20%, transparent); color: var(--status-error); }
 			.finding-list { display: grid; gap: var(--space-2); }
-			.finding { padding: var(--space-2) var(--space-3); border-inline-start: 3px solid var(--border-default); border-radius: 2px; background: var(--surface-secondary); font-size: 12px; line-height: 1.5; }
-			.finding--critical { border-inline-start-color: var(--status-error); }
-			.finding--caution { border-inline-start-color: var(--status-warning); }
-			.finding--info { border-inline-start-color: var(--status-info); }
-			.finding-head { display: flex; gap: var(--space-2); align-items: baseline; font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); }
-			.finding-evidence { color: var(--text-tertiary); font-size: 11px; margin-block-start: 2px; }
+			.finding { display: grid; gap: var(--space-1); padding: var(--space-3) var(--space-4); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-primary); font-size: 13px; line-height: 1.5; }
+			.finding--critical { border-color: color-mix(in srgb, var(--status-error) 55%, transparent); background: color-mix(in srgb, var(--status-error) 7%, var(--surface-primary)); }
+			.finding--caution { border-color: color-mix(in srgb, var(--status-warning) 50%, transparent); background: color-mix(in srgb, var(--status-warning) 7%, var(--surface-primary)); }
+			.finding-head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; font: 700 11px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); }
+			.finding-evidence { color: var(--text-tertiary); font-size: 12px; margin-block-start: 2px; }
 			.narrative { display: grid; gap: 2px; white-space: pre-wrap; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
 			.schedule-confirm { display: grid; gap: var(--space-2); margin-block-start: var(--space-3); padding: var(--space-3); border: 1px solid var(--status-warning); border-radius: var(--radius-control); background: color-mix(in srgb, var(--status-warning) 10%, transparent); }
 			.schedule-confirm p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+			/* A board is scanned across, not read down: callsign, route, time, aircraft
+			   each hold a column so two rows can be compared without reading either. */
 			.flight-list { display: grid; gap: var(--space-2); }
-			.flight-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; inline-size: 100%; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); color: var(--text-primary); text-align: start; }
+			.flight-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: var(--space-3); align-items: center; inline-size: 100%; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); color: var(--text-primary); text-align: start; }
 			.flight-row:hover, .flight-row[aria-pressed="true"] { border-color: var(--accent-primary); background: var(--surface-elevated); }
-			.flight-row strong, .flight-row span { display: block; }
-			.flight-row strong { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
-			.flight-row span { margin-block-start: 3px; color: var(--text-secondary); font-size: 12px; }
-			.flight-row-meta { color: var(--text-tertiary); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; text-align: end; }
+			.flight-row-callsign { font: 700 13px ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: 0.02em; }
+			.flight-row-route { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+			.flight-row-time { color: var(--text-secondary); font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap; }
+			.flight-row-time.is-unavailable { color: var(--text-tertiary); }
+			.flight-row-reg { color: var(--text-tertiary); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; text-align: end; white-space: nowrap; }
+			.flight-row[aria-pressed="true"] .flight-row-callsign { color: var(--accent-primary); }
 			.notice { min-block-size: 20px; margin-block-start: var(--space-4); color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 
 			@media (max-width: 767px) {
 				.app-header { align-items: flex-start; flex-direction: column; }
 				.header-actions { justify-content: space-between; inline-size: 100%; }
-				.workspace-grid { grid-template-columns: 1fr; }
-				.context-panel { position: static; }
 				.document-form { grid-template-columns: 1fr; }
 				.document-row { align-items: flex-start; flex-direction: column; }
 				.document-row-meta { text-align: start; }
+				/* Stack, so a timestamp is never broken mid-token to fit a flex row. */
+				.assessment-row { align-items: flex-start; flex-direction: column; }
+				.assessment-row-meta { text-align: start; }
+				.flight-row { grid-template-columns: minmax(0, 1fr) auto; }
+				.flight-row-route { grid-column: 1; grid-row: 2; }
+				.flight-row-time { grid-column: 2; grid-row: 2; }
+				.verdict-strip { padding: var(--space-2) var(--space-3); gap: var(--space-2); }
+				.verdict-strip-main { flex-wrap: wrap; }
+				/* The 44px touch floor applies where touch is the input, without
+				   loosening the desktop density the board is scanned at. */
+				.button { min-block-size: 44px; }
+				.document-form select, .document-form input[type="file"] { min-block-size: 44px; }
 			}
 
 			@media (prefers-reduced-motion: reduce) {
@@ -215,6 +300,10 @@
 					</div>
 				</div>
 				<div class="header-actions">
+					<div class="ops-clock">
+						<span class="ops-clock-label">UTC</span>
+						<time class="ops-clock-value" id="ops-clock">--SEP-- --:--Z</time>
+					</div>
 					<div class="status-label" id="connection-status">AWQ Cloud not connected</div>
 					<button class="button button-primary" id="connect-button" type="button">Connect AWQ Cloud</button>
 				</div>
@@ -222,146 +311,205 @@
 
 			<div class="workspace-scroll">
 				<main class="workspace">
-					<section class="page-intro" aria-labelledby="page-title">
-						<div class="eyebrow">Dispatch workspace</div>
+					<!-- Survives scrolling: the verdict is read while its findings are. -->
+					<div class="verdict-strip" id="verdict-strip" hidden>
+						<div class="verdict-strip-main" role="status" aria-live="polite">
+							<span class="assessment-badge" id="verdict-badge">NO DATA</span>
+							<div class="verdict-identity">
+								<strong id="verdict-flight">No flight assessed</strong>
+								<span class="verdict-windows" id="verdict-windows"></span>
+							</div>
+						</div>
+						<div class="verdict-actions">
+							<button class="button button-secondary" id="assessment-report-button" type="button" disabled>Open printable report</button>
+						</div>
+					</div>
+
+					<section class="workspace-intro" aria-labelledby="page-title">
 						<h1 class="page-title" id="page-title">Active flight context</h1>
 						<p class="page-copy">Select a flight from the active AWQ Cloud Flight Board to review its operational context.</p>
 					</section>
 
-					<div class="workspace-grid">
+					<div class="workspace-stack">
 						<section class="panel" aria-labelledby="board-title">
 							<div class="panel-heading">
-								<div>
-									<div class="panel-kicker">Source</div>
-									<h2 class="panel-title" id="board-title">Active Flight Board</h2>
+								<h2 class="panel-title" id="board-title">Active Flight Board</h2>
+								<div class="panel-tools">
+									<span class="panel-count" id="active-flight-count" aria-label="Active flight count">0 flights</span>
+									<button class="button button-secondary" id="refresh-button" type="button">Refresh board</button>
 								</div>
-								<div class="panel-count" id="active-flight-count" aria-label="Active flight count">0 flights</div>
 							</div>
 							<div class="panel-body">
 								<div class="empty-state" id="board-empty">
 									<h2>No active flights loaded</h2>
 									<p>The board will appear here after the AWQ Cloud SSO connection is configured.</p>
-									<div class="empty-state-actions">
-										<button class="button button-primary" id="refresh-button" type="button">Refresh board</button>
-									</div>
-									</div>
-									<div class="flight-list" id="flight-list" aria-label="Active flights" hidden></div>
-									<div class="notice" id="board-notice" aria-live="polite"></div>
+								</div>
+								<div class="flight-list" id="flight-list" aria-label="Active flights" hidden></div>
+								<div class="notice" id="board-notice" aria-live="polite"></div>
 							</div>
 						</section>
 
-						<section class="panel context-panel" aria-labelledby="context-title">
+						<section class="panel" aria-labelledby="context-title">
 							<div class="panel-heading">
-								<div>
-									<div class="panel-kicker">Selected context</div>
-									<h2 class="panel-title" id="context-title">Flight details</h2>
-								</div>
-								<div class="panel-count">No selection</div>
+								<h2 class="panel-title" id="context-title">Flight context</h2>
+								<div class="panel-tools"><span class="panel-count" id="context-count">No selection</span></div>
 							</div>
 							<div class="panel-body">
-									<div class="context-status" id="context-status" role="status">
+								<div class="context-status" id="context-status" role="status">
 									<strong>Waiting for a flight</strong>
 									<span>Context is isolated by explicit flight ID. No operational data is shown until the board connection is ready.</span>
 								</div>
-									<div class="field-grid">
-										<div class="field"><span class="field-label">Date of flight</span><span class="field-value is-unavailable" data-field="date-of-flight">Unavailable</span></div>
-										<div class="field"><span class="field-label">Flight number</span><span class="field-value is-unavailable" data-field="flight-number">Unavailable</span></div>
-										<div class="field"><span class="field-label">Registration</span><span class="field-value is-unavailable" data-field="registration">Unavailable</span></div>
-										<div class="field"><span class="field-label">Origin</span><span class="field-value is-unavailable" data-field="origin">Unavailable</span></div>
-										<div class="field"><span class="field-label">Destination</span><span class="field-value is-unavailable" data-field="destination">Unavailable</span></div>
-										<div class="field"><span class="field-label">Destination alternate 1</span><span class="field-value is-unavailable" data-field="destination-alternate-1">Unavailable</span></div>
-										<div class="field"><span class="field-label">Destination alternate 2</span><span class="field-value is-unavailable" data-field="destination-alternate-2">Unavailable</span></div>
-										<div class="field"><span class="field-label">Enroute alternate 1</span><span class="field-value is-unavailable" data-field="enroute-alternate-1">Unavailable</span></div>
-										<div class="field"><span class="field-label">Enroute alternate 2</span><span class="field-value is-unavailable" data-field="enroute-alternate-2">Unavailable</span></div>
-										<div class="field"><span class="field-label">Enroute alternate 3</span><span class="field-value is-unavailable" data-field="enroute-alternate-3">Unavailable</span></div>
-								</div>
-						<div class="weather-section" aria-labelledby="weather-title">
-					<div class="weather-heading">
-						<h3 id="weather-title">TAF and Weather Monitoring</h3>
-						<div>
-							<span class="weather-status" id="weather-status">No selection</span>
-							<button class="button button-secondary" id="weather-refresh-button" type="button" disabled>Refresh weather</button>
-						</div>
-					</div>
-							<div class="weather-list" id="weather-list" aria-live="polite"><p class="document-empty">Select a flight to view TAF.</p></div>
-						</div>
-						<div class="assessment-section" aria-labelledby="assessment-title">
-							<div class="assessment-heading"><h3 id="assessment-title">Operational assessment</h3><span class="weather-status" id="assessment-status">No selection</span></div>
-							<div class="assessment-result" id="assessment-result"><span>Select a flight to create an immutable readiness snapshot.</span></div>
-							<div class="dispatch-inputs" id="dispatch-inputs" hidden>
-								<p class="dispatch-hint">Minima are not published by AWQ Cloud and must be entered from the chart. Without them, and without NOTAM remarks, the verdict cannot reach GO.</p>
-								<div class="dispatch-grid">
-									<div class="dispatch-field"><label for="dest-approach">Destination approach</label><input id="dest-approach" type="text" maxlength="120" placeholder="ILS RWY 25L"></div>
-									<div class="dispatch-field"><label for="dest-ceiling">Dest ceiling (ft)</label><input id="dest-ceiling" type="number" min="0" step="10" placeholder="500"></div>
-									<div class="dispatch-field"><label for="dest-visibility">Dest visibility (m)</label><input id="dest-visibility" type="number" min="0" step="50" placeholder="1500"></div>
-									<div class="dispatch-field"><label for="alt-approach">Alternate approach</label><input id="alt-approach" type="text" maxlength="120" placeholder="ILS RWY 09"></div>
-									<div class="dispatch-field"><label for="alt-ceiling">Alt ceiling (ft)</label><input id="alt-ceiling" type="number" min="0" step="10"></div>
-									<div class="dispatch-field"><label for="alt-visibility">Alt visibility (m)</label><input id="alt-visibility" type="number" min="0" step="50"></div>
-								</div>
-								<div class="dispatch-field"><label for="notam-remarks">NOTAM / remarks</label><textarea id="notam-remarks" maxlength="2000" placeholder="e.g. RWY 25L ILS serviceable. No significant NOTAM."></textarea></div>
-							</div>
-							<div class="assessment-actions"><button class="button button-primary" id="assessment-create-button" type="button" disabled>Create assessment snapshot</button><button class="button button-secondary" id="assessment-report-button" type="button" disabled>Open printable report</button></div>
-							<div class="schedule-confirm" id="schedule-confirm" hidden>
-								<p id="schedule-confirm-text"></p>
-								<div class="dispatch-field"><label for="schedule-sta">Confirmed arrival (Zulu, ISO 8601)</label><input id="schedule-sta" type="text" placeholder="2026-09-12T03:00:00.000Z"></div>
-								<div class="assessment-actions"><button class="button button-primary" id="schedule-confirm-button" type="button">Confirm date and re-assess</button></div>
-							</div>
-							<textarea class="assessment-note" id="assessment-note" maxlength="1000" placeholder="Optional review note" hidden></textarea>
-							<div class="assessment-actions" id="assessment-review-actions" hidden><button class="button button-secondary" id="assessment-accept-button" type="button">Accept assessment</button><button class="button button-secondary" id="assessment-reject-button" type="button">Reject assessment</button></div>
-							<div class="assessment-history" id="assessment-history" aria-live="polite"></div>
-						</div>
-						<div class="assistant-section" aria-labelledby="assistant-title">
-							<div class="assistant-heading"><h3 id="assistant-title">Dispatch knowledge assistant</h3><span class="weather-status">Manual-grounded</span></div>
-							<form class="assistant-form" id="assistant-form">
-								<textarea id="assistant-question" maxlength="500" placeholder="Ask about an operational procedure or the selected flight context." required></textarea>
-								<button class="button button-primary" type="submit">Ask assistant</button>
-							</form>
-							<div class="assistant-result" id="assistant-result" aria-live="polite" hidden></div>
-						</div>
-						<div class="documents-section" aria-labelledby="documents-title">
-									<div class="documents-heading">
-										<h3 id="documents-title">Flight documents</h3>
-										<span class="documents-count" id="documents-count">No selection</span>
+								<div class="field-groups">
+									<div class="field-group">
+										<h3>Route identity</h3>
+										<dl class="field-grid">
+							<div class="field"><dt class="field-label">Date of flight</dt><dd class="field-value is-unavailable" data-field="date-of-flight">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Flight number</dt><dd class="field-value is-unavailable" data-field="flight-number">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Registration</dt><dd class="field-value is-unavailable" data-field="registration">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Origin</dt><dd class="field-value is-unavailable" data-field="origin">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Destination</dt><dd class="field-value is-unavailable" data-field="destination">Unavailable</dd></div>
+										</dl>
 									</div>
-									<form class="document-form" id="document-upload-form" hidden>
-										<label>Category<select id="document-category" name="category">
-											<option value="flight-plan">Flight plan</option>
-											<option value="weather">Weather</option>
-											<option value="notam">NOTAM</option>
-											<option value="loadsheet">Loadsheet</option>
-											<option value="operational">Operational document</option>
-										</select></label>
-										<label>PDF file<input id="document-file" name="file" type="file" accept="application/pdf,.pdf" required /></label>
-										<button class="button button-primary" type="submit">Upload PDF</button>
-									</form>
-									<div class="document-list" id="document-list" aria-live="polite"><p class="document-empty">Select a flight to view its documents.</p></div>
+									<div class="field-group">
+										<h3>Alternates</h3>
+										<dl class="field-grid">
+							<div class="field"><dt class="field-label">Destination alternate 1</dt><dd class="field-value is-unavailable" data-field="destination-alternate-1">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Destination alternate 2</dt><dd class="field-value is-unavailable" data-field="destination-alternate-2">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Enroute alternate 1</dt><dd class="field-value is-unavailable" data-field="enroute-alternate-1">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Enroute alternate 2</dt><dd class="field-value is-unavailable" data-field="enroute-alternate-2">Unavailable</dd></div>
+							<div class="field"><dt class="field-label">Enroute alternate 3</dt><dd class="field-value is-unavailable" data-field="enroute-alternate-3">Unavailable</dd></div>
+										</dl>
+									</div>
 								</div>
 							</div>
 						</section>
-					</div>
 
-					<section class="panel" aria-labelledby="reference-documents-title">
-						<div class="panel-heading">
-							<div>
-								<div class="panel-kicker">Shared reference</div>
-								<h2 class="panel-title" id="reference-documents-title">Reference manuals</h2>
+						<section class="panel" aria-labelledby="weather-title">
+							<div class="panel-heading">
+								<h2 class="panel-title" id="weather-title">TAF and weather monitoring</h2>
+								<div class="panel-tools">
+									<span class="weather-status" id="weather-status">No selection</span>
+									<button class="button button-secondary" id="weather-refresh-button" type="button" disabled>Refresh weather</button>
+								</div>
 							</div>
-							<div class="panel-count" id="reference-documents-count">0 documents</div>
-						</div>
-						<div class="panel-body">
-							<form class="document-form" id="reference-upload-form">
-								<label>Category<select id="reference-category" name="category">
-									<option value="operations-manual">Operations manual</option>
-									<option value="regulation">Regulation</option>
-									<option value="dispatch-manual">Dispatch manual</option>
-									<option value="other">Other</option>
-								</select></label>
-								<label>PDF file<input id="reference-file" name="file" type="file" accept="application/pdf,.pdf" required /></label>
-								<button class="button button-primary" type="submit">Upload manual</button>
-							</form>
-							<div class="document-list" id="reference-document-list" aria-live="polite"><p class="document-empty">Connect AWQ Cloud to view reference manuals.</p></div>
-						</div>
-					</section>
+							<div class="panel-body">
+								<div class="weather-list" id="weather-list" aria-live="polite"><p class="document-empty">Select a flight to view TAF.</p></div>
+							</div>
+						</section>
+
+						<section class="panel" aria-labelledby="minima-title">
+							<div class="panel-heading">
+								<h2 class="panel-title" id="minima-title">Dispatch minima and NOTAM</h2>
+								<div class="panel-tools"><span class="panel-count">Entered from the chart</span></div>
+							</div>
+							<div class="panel-body">
+								<p class="dispatch-hint" id="minima-empty">Select a flight to enter its minima.</p>
+								<div class="dispatch-inputs" id="dispatch-inputs" hidden>
+									<p class="dispatch-hint">Minima are not published by AWQ Cloud and must be entered from the chart. Without them, and without NOTAM remarks, the verdict cannot reach GO.</p>
+									<div class="minima-groups">
+										<fieldset class="minima-group">
+											<legend>Destination minima</legend>
+											<div class="minima-grid">
+												<div class="dispatch-field"><label for="dest-approach">Destination approach</label><input id="dest-approach" type="text" maxlength="120" placeholder="ILS RWY 25L"></div>
+												<div class="dispatch-field"><label for="dest-ceiling">Dest ceiling (ft)</label><input id="dest-ceiling" type="number" min="0" step="10" placeholder="500"></div>
+												<div class="dispatch-field"><label for="dest-visibility">Dest visibility (m)</label><input id="dest-visibility" type="number" min="0" step="50" placeholder="1500"></div>
+											</div>
+										</fieldset>
+										<fieldset class="minima-group">
+											<legend>Alternate minima</legend>
+											<div class="minima-grid">
+												<div class="dispatch-field"><label for="alt-approach">Alternate approach</label><input id="alt-approach" type="text" maxlength="120" placeholder="ILS RWY 09"></div>
+												<div class="dispatch-field"><label for="alt-ceiling">Alt ceiling (ft)</label><input id="alt-ceiling" type="number" min="0" step="10"></div>
+												<div class="dispatch-field"><label for="alt-visibility">Alt visibility (m)</label><input id="alt-visibility" type="number" min="0" step="50"></div>
+											</div>
+										</fieldset>
+									</div>
+									<div class="dispatch-field"><label for="notam-remarks">NOTAM / remarks</label><textarea id="notam-remarks" maxlength="2000" placeholder="e.g. RWY 25L ILS serviceable. No significant NOTAM."></textarea></div>
+									<div class="assessment-actions">
+										<button class="button button-primary" id="assessment-create-button" type="button">Create assessment snapshot</button>
+									</div>
+								</div>
+							</div>
+						</section>
+
+						<section class="panel" aria-labelledby="assessment-title">
+							<div class="panel-heading">
+								<h2 class="panel-title" id="assessment-title">Operational assessment</h2>
+								<div class="panel-tools"><span class="weather-status" id="assessment-status">No selection</span></div>
+							</div>
+							<div class="panel-body">
+								<p class="panel-notice" id="assessment-notice" role="status" aria-live="polite" hidden></p>
+								<div class="assessment-result" id="assessment-result" aria-live="polite"><span>Select a flight to create an immutable readiness snapshot.</span></div>
+								<div class="schedule-confirm" id="schedule-confirm" hidden>
+									<p id="schedule-confirm-text"></p>
+									<div class="dispatch-field"><label for="schedule-sta">Confirmed arrival (Zulu)</label><input id="schedule-sta" type="text" placeholder="2026-09-12T03:00:00.000Z" aria-describedby="schedule-sta-hint"></div>
+								<p class="dispatch-hint" id="schedule-sta-hint">ISO 8601 instant, for example 2026-09-12T03:00:00.000Z.</p>
+									<div class="assessment-actions"><button class="button button-primary" id="schedule-confirm-button" type="button">Confirm date and re-assess</button></div>
+								</div>
+								<textarea class="assessment-note" id="assessment-note" maxlength="1000" placeholder="Optional review note" aria-label="Review note" hidden></textarea>
+								<div class="assessment-actions" id="assessment-review-actions" hidden>
+									<button class="button button-secondary" id="assessment-accept-button" type="button" disabled>Accept assessment</button>
+									<button class="button button-secondary" id="assessment-reject-button" type="button" disabled>Reject assessment</button>
+								</div>
+								<div class="assessment-history" id="assessment-history" aria-live="polite"></div>
+							</div>
+						</section>
+
+						<section class="panel" aria-labelledby="documents-title">
+							<div class="panel-heading">
+								<h2 class="panel-title" id="documents-title">Flight documents</h2>
+								<div class="panel-tools"><span class="panel-count" id="documents-count">No selection</span></div>
+							</div>
+							<div class="panel-body">
+								<form class="document-form" id="document-upload-form" hidden>
+									<label>Category<select id="document-category" name="category">
+										<option value="flight-plan">Flight plan</option>
+										<option value="weather">Weather</option>
+										<option value="notam">NOTAM</option>
+										<option value="loadsheet">Loadsheet</option>
+										<option value="operational">Operational document</option>
+									</select></label>
+									<label>PDF file<input id="document-file" name="file" type="file" accept="application/pdf,.pdf" required /></label>
+									<button class="button button-primary" type="submit">Upload PDF</button>
+								</form>
+								<div class="document-list" id="document-list" aria-live="polite"><p class="document-empty">Select a flight to view its documents.</p></div>
+							</div>
+						</section>
+
+						<section class="panel" aria-labelledby="assistant-title">
+							<div class="panel-heading">
+								<h2 class="panel-title" id="assistant-title">Dispatch knowledge assistant</h2>
+								<div class="panel-tools"><span class="weather-status">Manual-grounded</span></div>
+							</div>
+							<div class="panel-body">
+								<form class="assistant-form" id="assistant-form">
+									<textarea id="assistant-question" maxlength="500" placeholder="Ask about an operational procedure or the selected flight context." aria-label="Question for the dispatch knowledge assistant" required></textarea>
+									<button class="button button-primary" type="submit">Ask assistant</button>
+								</form>
+								<div class="assistant-result" id="assistant-result" aria-live="polite" hidden></div>
+							</div>
+						</section>
+
+						<section class="panel" aria-labelledby="reference-documents-title">
+							<div class="panel-heading">
+								<h2 class="panel-title" id="reference-documents-title">Reference manuals</h2>
+								<div class="panel-tools"><span class="panel-count" id="reference-documents-count">0 documents</span></div>
+							</div>
+							<div class="panel-body">
+								<form class="document-form" id="reference-upload-form">
+									<label>Category<select id="reference-category" name="category">
+										<option value="operations-manual">Operations manual</option>
+										<option value="regulation">Regulation</option>
+										<option value="dispatch-manual">Dispatch manual</option>
+										<option value="other">Other</option>
+									</select></label>
+									<label>PDF file<input id="reference-file" name="file" type="file" accept="application/pdf,.pdf" required /></label>
+									<button class="button button-primary" type="submit">Upload manual</button>
+								</form>
+								<div class="document-list" id="reference-document-list" aria-live="polite"><p class="document-empty">Connect AWQ Cloud to view reference manuals.</p></div>
+							</div>
+						</section>
+					</div>
 				</main>
 			</div>
 		</div>
@@ -375,6 +523,13 @@
 			const flightList = document.getElementById('flight-list');
 			const activeFlightCount = document.getElementById('active-flight-count');
 			const contextStatus = document.getElementById('context-status');
+			const contextCount = document.getElementById('context-count');
+			const opsClock = document.getElementById('ops-clock');
+			const verdictStrip = document.getElementById('verdict-strip');
+			const verdictBadge = document.getElementById('verdict-badge');
+			const verdictFlight = document.getElementById('verdict-flight');
+			const verdictWindows = document.getElementById('verdict-windows');
+			const minimaEmpty = document.getElementById('minima-empty');
 			const documentCount = document.getElementById('documents-count');
 			const documentList = document.getElementById('document-list');
 			const documentUploadForm = document.getElementById('document-upload-form');
@@ -393,6 +548,7 @@
 			const assistantResult = document.getElementById('assistant-result');
 			const assessmentStatusLabel = document.getElementById('assessment-status');
 			const assessmentResult = document.getElementById('assessment-result');
+			const assessmentNotice = document.getElementById('assessment-notice');
 			const assessmentHistory = document.getElementById('assessment-history');
 			const assessmentCreateButton = document.getElementById('assessment-create-button');
 			const assessmentReportButton = document.getElementById('assessment-report-button');
@@ -408,6 +564,63 @@
 			const MINIMA_DESTINATION_FIELDS = ['dest-approach', 'dest-ceiling', 'dest-visibility'];
 			const MINIMA_ALTERNATE_FIELDS = ['alt-approach', 'alt-ceiling', 'alt-visibility'];
 			const NOTAM_FIELD = 'notam-remarks';
+
+			const pad2 = value => String(value).padStart(2, '0');
+
+			/**
+			 * `DDHHMMZ`, the same stamp the printable report prints. A dispatch screen
+			 * without a Zulu clock makes every other time on it unverifiable.
+			 */
+			function zuluStamp(iso) {
+				const date = new Date(iso);
+				if (Number.isNaN(date.getTime())) return '----Z';
+				return `${pad2(date.getUTCDate())}${pad2(date.getUTCHours())}${pad2(date.getUTCMinutes())}Z`;
+			}
+
+			function zuluWindow(window) {
+				if (!window || !window.from || !window.to) return '';
+				return `${zuluStamp(window.from)} - ${zuluStamp(window.to)}`;
+			}
+
+			/**
+			 * The engine's ETA windows, which are what the TAF was actually compared
+			 * against. Before this they existed only in the printable report, so the
+			 * verdict's own evidence was not on the screen that states it.
+			 */
+			function describeWindows(windows, destinationStation, alternateStation) {
+				const parts = [];
+				const destination = zuluWindow(windows?.destination);
+				const alternate = zuluWindow(windows?.primaryAlternate);
+				if (destination) parts.push(`Destination ETA ${destination}${destinationStation ? ` (${destinationStation})` : ''}`);
+				if (alternate) parts.push(`Alternate ETA ${alternate}${alternateStation ? ` (${alternateStation})` : ''}`);
+				return parts.join(' · ');
+			}
+
+			/** `HHMMZ` from an instant, for the board row. */
+			function clockFromInstant(value) {
+				const match = /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/.exec(String(value ?? ''));
+				return match ? `${match[1]}${match[2]}Z` : '';
+			}
+
+			function updateOpsClock() {
+				const now = new Date();
+				opsClock.textContent = `${pad2(now.getUTCDate())}${DOF_MONTHS[now.getUTCMonth()]}${String(now.getUTCFullYear()).slice(2)} ${pad2(now.getUTCHours())}${pad2(now.getUTCMinutes())}Z`;
+				opsClock.dateTime = now.toISOString();
+			}
+
+			/** Re-state the verdict strip, which is the only always-visible verdict. */
+			function renderVerdictStrip(data) {
+				const verdict = String(data?.verdict || 'NO_DATA');
+				const dispatch = data?.snapshot?.dispatch || {};
+				const windows = describeWindows(dispatch.windows, dispatch.destinationStation, dispatch.alternateStation);
+				const flight = data?.snapshot?.flight || {};
+				verdictBadge.className = `assessment-badge assessment-badge--${assessmentSlug(verdict)}`;
+				verdictBadge.textContent = verdict.replaceAll('_', ' ');
+				const identity = flight.callsign || flight.flightNumber || `Flight ${flight.id ?? ''}`.trim();
+				verdictFlight.textContent = `${identity} · ${flight.origin || '----'} to ${flight.destination || '----'}`;
+				verdictWindows.textContent = windows || 'ETA windows not available for this snapshot.';
+				verdictStrip.hidden = false;
+			}
 
 			function dispatchFieldValue(id) {
 				const element = document.getElementById(id);
@@ -558,7 +771,12 @@
 			function renderFlightContext(flight) {
 				const destinations = Array.isArray(flight.destinationAlternates) ? flight.destinationAlternates : [];
 				const enroutes = Array.isArray(flight.enrouteAlternates) ? flight.enrouteAlternates : [];
-				contextStatus.querySelector('strong').textContent = `Flight ${flight.callsign || flight.id} selected`;
+				// Both statements of the selection are written together: the panel count
+				// used to stay at "No selection" while the band below it named a flight.
+				const identity = flight.callsign || flight.flightNumber || `Flight ${flight.id}`;
+				contextCount.textContent = identity;
+				contextStatus.classList.add('is-selected');
+				contextStatus.querySelector('strong').textContent = `Flight ${identity} selected`;
 				contextStatus.querySelector('span').textContent = 'Operational context is read-only and scoped to the selected active Flight Board row.';
 				setField('date-of-flight', formatDateOfFlight(flight));
 				setField('flight-number', flight.callsign || flight.flightNumber);
@@ -871,6 +1089,17 @@
 				header.append(badge, meta);
 				assessmentResult.append(header);
 
+				// The ETA windows the TAF was compared against. They were only ever in
+				// the printable report, so the verdict's own evidence was off-screen.
+				const dispatch = data?.snapshot?.dispatch || {};
+				const windowsLine = describeWindows(dispatch.windows, dispatch.destinationStation, dispatch.alternateStation);
+				if (windowsLine) {
+					const windows = document.createElement('p');
+					windows.className = 'verdict-windows';
+					windows.textContent = windowsLine;
+					assessmentResult.append(windows);
+				}
+
 				const fuel = data?.fuel;
 				if (fuel) {
 					const fuelLine = document.createElement('p');
@@ -949,9 +1178,15 @@
 				}
 
 				renderScheduleConfirmation(data?.schedule);
+				renderVerdictStrip(data);
 				assessmentReportButton.disabled = !selectedAssessmentId;
 				assessmentNote.hidden = false;
 				assessmentReviewActions.hidden = false;
+				assessmentAcceptButton.disabled = false;
+				assessmentRejectButton.disabled = false;
+				assessmentResult.classList.remove('is-stale');
+				assessmentNotice.hidden = true;
+				assessmentNotice.classList.remove('is-error');
 			}
 
 			function renderAssessmentHistory(items) {
@@ -1001,9 +1236,23 @@
 			} catch (error) {
 				if (!selectedAssessmentId) {
 					assessmentStatusLabel.textContent = 'Unavailable';
-					assessmentResult.textContent = error.message;
+					assessmentNotice.hidden = false;
+					assessmentNotice.classList.add('is-error');
+					assessmentNotice.textContent = error.message;
 				}
 			}
+			}
+
+			/**
+			 * Report progress and failures in the notice, never in `assessmentResult`.
+			 *
+			 * Writing an error there used to destroy the on-screen verdict, so a failed
+			 * re-assess left the dispatch decision permanently gone from the display.
+			 */
+			function reportAssessmentNotice(message, isError) {
+				assessmentNotice.hidden = false;
+				assessmentNotice.classList.toggle('is-error', Boolean(isError));
+				assessmentNotice.textContent = message;
 			}
 
 			async function createAssessmentSnapshot() {
@@ -1011,7 +1260,8 @@
 			assessmentCreateButton.disabled = true;
 			scheduleConfirmButton.disabled = true;
 			scheduleConfirm.hidden = true;
-			assessmentResult.textContent = 'Building a verified flight, TAF, weather, and reference snapshot...';
+			assessmentResult.classList.add('is-stale');
+			reportAssessmentNotice('Building a verified flight, TAF, weather, and reference snapshot. The verdict below is the previous assessment until this completes.', false);
 			try {
 				const body = {
 					flightId: selectedFlightId,
@@ -1028,7 +1278,8 @@
 				renderAssessmentResult(payload.data);
 				await loadAssessmentHistory(selectedFlightId);
 			} catch (error) {
-				assessmentResult.textContent = error.message;
+				reportAssessmentNotice(error.message, true);
+				assessmentResult.classList.remove('is-stale');
 			} finally {
 				assessmentCreateButton.disabled = !selectedFlightId;
 				scheduleConfirmButton.disabled = false;
@@ -1046,7 +1297,7 @@
 				assessmentStatusLabel.textContent = `Reviewed: ${decision}`;
 				await loadAssessmentHistory(selectedFlightId);
 			} catch (error) {
-				assessmentResult.textContent = error.message;
+				reportAssessmentNotice(error.message, true);
 			} finally {
 				assessmentAcceptButton.disabled = false;
 				assessmentRejectButton.disabled = false;
@@ -1126,13 +1377,23 @@
 				selectedAssessmentId = null;
 				assessmentReportButton.disabled = true;
 				assessmentReviewActions.hidden = true;
+				assessmentAcceptButton.disabled = true;
+				assessmentRejectButton.disabled = true;
 				assessmentNote.hidden = true;
+				// A new flight has no assessment yet, so the strip must not keep stating
+				// the previous flight's verdict.
+				verdictStrip.hidden = true;
+				verdictWindows.textContent = '';
+				verdictFlight.textContent = 'No flight assessed';
+				assessmentResult.classList.remove('is-stale');
+				assessmentNotice.hidden = true;
 				assessmentResult.textContent = 'Select Create assessment snapshot to capture the verified operational context.';
 				// Minima and NOTAM are specific to one flight, so nothing carries across a
 				// selection change; reusing another flight's minima would be a silent error.
 				// The reset is keyed on the flight actually changing, so refreshing the board
 				// or re-clicking the same row does not discard what the operator has typed.
 				dispatchInputs.hidden = false;
+				minimaEmpty.hidden = true;
 				if (dispatchFlightId !== flight.id) {
 					resetDispatchInputs();
 					dispatchFlightId = flight.id;
@@ -1156,21 +1417,30 @@
 					button.className = 'flight-row';
 					button.type = 'button';
 					button.setAttribute('aria-pressed', index === 0 ? 'true' : 'false');
-					const identity = document.createElement('div');
-					const title = document.createElement('strong');
-					title.textContent = flight.callsign || `Flight ${flight.id}`;
+					const callsign = document.createElement('span');
+					callsign.className = 'flight-row-callsign';
+					callsign.textContent = flight.callsign || `Flight ${flight.id}`;
 					const route = document.createElement('span');
+					route.className = 'flight-row-route';
 					route.textContent = `${flight.origin || '----'} to ${flight.destination || '----'}`;
-					identity.append(title, route);
-					const meta = document.createElement('span');
-					meta.className = 'flight-row-meta';
-					// The date of flight sits on the row itself because it is what tells an
-					// operator whether the row is current: a board can still list a flight
-					// that has already landed, and without the date that is invisible.
+					// The date of flight and the scheduled time sit on the row itself: the
+					// date says whether the row is current, and the time is what the ETA
+					// windows are built from. Both were missing from the board.
+					const time = document.createElement('span');
+					time.className = 'flight-row-time';
 					const dateOfFlight = formatDateOfFlight(flight);
-					const registration = flight.aircraft?.registration || 'No registration';
-					meta.textContent = dateOfFlight ? `${dateOfFlight} · ${registration}` : registration;
-					button.append(identity, meta);
+					const departure = clockFromInstant(flight.std);
+					const stamp = [dateOfFlight, departure].filter(Boolean).join(' ');
+					time.textContent = stamp || '—';
+					if (!stamp) {
+						time.classList.add('is-unavailable');
+						time.setAttribute('aria-label', 'Date of flight and scheduled time unavailable');
+					}
+					const registration = document.createElement('span');
+					registration.className = 'flight-row-reg';
+					registration.textContent = flight.aircraft?.registration || '—';
+					if (!flight.aircraft?.registration) registration.setAttribute('aria-label', 'Registration unavailable');
+					button.append(callsign, route, time, registration);
 					button.addEventListener('click', () => {
 						flightList.querySelectorAll('.flight-row').forEach(row => row.setAttribute('aria-pressed', row === button ? 'true' : 'false'));
 						void selectFlight(flight);
@@ -1229,20 +1499,31 @@
 				window.location.assign('/auth/start');
 			});
 
+			/** The dot beside the status text has to state the same thing the text does. */
+			function setConnectionState(state) {
+				connectionStatus.classList.toggle('is-connected', state === 'connected');
+				connectionStatus.classList.toggle('is-pending', state === 'pending');
+				connectionStatus.classList.toggle('is-offline', state === 'offline');
+			}
+
 			async function refreshBoard() {
 				refreshButton.disabled = true;
 				boardNotice.textContent = 'Checking the AWQ Cloud flight board...';
+				setConnectionState('pending');
 				try {
 					const payload = await requestFlightBoard();
 					renderFlightBoard(payload);
 					void loadReferenceDocuments();
 					connectionStatus.textContent = 'AWQ Cloud connected';
+					setConnectionState('connected');
 					boardNotice.textContent = `${payload.data.flights.length} active flight${payload.data.flights.length === 1 ? '' : 's'} loaded.`;
 				} catch (error) {
 					if (error.code === 'SSO_REQUIRED') {
 						connectionStatus.textContent = 'SSO connection required';
+						setConnectionState('offline');
 						boardNotice.textContent = error.message;
 					} else {
+						setConnectionState('offline');
 						boardNotice.textContent = error.message;
 					}
 				} finally {
@@ -1254,6 +1535,11 @@
 			weatherRefreshButton.addEventListener('click', () => {
 				if (selectedFlightId) void loadFlightWeather(selectedFlightId);
 			});
+
+			updateOpsClock();
+			// Ticks on the minute boundary rather than every second, so the only
+			// animation on the page is the value that actually changes.
+			setInterval(updateOpsClock, 15000);
 			void refreshBoard();
 		</script>
 	</body>
