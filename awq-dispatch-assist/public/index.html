@@ -264,6 +264,7 @@
 									<span>Context is isolated by explicit flight ID. No operational data is shown until the board connection is ready.</span>
 								</div>
 									<div class="field-grid">
+										<div class="field"><span class="field-label">Date of flight</span><span class="field-value is-unavailable" data-field="date-of-flight">Unavailable</span></div>
 										<div class="field"><span class="field-label">Flight number</span><span class="field-value is-unavailable" data-field="flight-number">Unavailable</span></div>
 										<div class="field"><span class="field-label">Registration</span><span class="field-value is-unavailable" data-field="registration">Unavailable</span></div>
 										<div class="field"><span class="field-label">Origin</span><span class="field-value is-unavailable" data-field="origin">Unavailable</span></div>
@@ -531,11 +532,35 @@
 				element.classList.toggle('is-unavailable', !available);
 			}
 
+			const DOF_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+			function stampDateOfFlight(digits) {
+				const month = Number(digits.slice(4, 6));
+				if (!(month >= 1 && month <= 12)) return '';
+				return `${digits.slice(6, 8)}${DOF_MONTHS[month - 1]}${digits.slice(2, 4)}`;
+			}
+
+			/**
+			 * Date of flight, as `21SEP26`.
+			 *
+			 * `dof` is the operator-controlled date and the only published field that
+			 * says which day a board row belongs to — the date embedded in `std` is not
+			 * authoritative and can be stale by weeks. When `dof` is absent the
+			 * normalised `std` instant is used, and a bare clock time yields nothing.
+			 */
+			function formatDateOfFlight(flight) {
+				const digits = String(flight?.dof ?? '').replace(/[^0-9]/g, '');
+				if (digits.length >= 8) return stampDateOfFlight(digits);
+				const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(flight?.std ?? ''));
+				return iso ? stampDateOfFlight(`${iso[1]}${iso[2]}${iso[3]}`) : '';
+			}
+
 			function renderFlightContext(flight) {
 				const destinations = Array.isArray(flight.destinationAlternates) ? flight.destinationAlternates : [];
 				const enroutes = Array.isArray(flight.enrouteAlternates) ? flight.enrouteAlternates : [];
 				contextStatus.querySelector('strong').textContent = `Flight ${flight.callsign || flight.id} selected`;
 				contextStatus.querySelector('span').textContent = 'Operational context is read-only and scoped to the selected active Flight Board row.';
+				setField('date-of-flight', formatDateOfFlight(flight));
 				setField('flight-number', flight.callsign || flight.flightNumber);
 				setField('registration', flight.aircraft?.registration);
 				setField('origin', flight.origin);
@@ -1139,7 +1164,12 @@
 					identity.append(title, route);
 					const meta = document.createElement('span');
 					meta.className = 'flight-row-meta';
-					meta.textContent = flight.aircraft?.registration || 'No registration';
+					// The date of flight sits on the row itself because it is what tells an
+					// operator whether the row is current: a board can still list a flight
+					// that has already landed, and without the date that is invisible.
+					const dateOfFlight = formatDateOfFlight(flight);
+					const registration = flight.aircraft?.registration || 'No registration';
+					meta.textContent = dateOfFlight ? `${dateOfFlight} · ${registration}` : registration;
 					button.append(identity, meta);
 					button.addEventListener('click', () => {
 						flightList.querySelectorAll('.flight-row').forEach(row => row.setAttribute('aria-pressed', row === button ? 'true' : 'false'));
