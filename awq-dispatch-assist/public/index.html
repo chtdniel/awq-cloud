@@ -544,8 +544,7 @@
 
 			.registry-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: var(--space-3); align-items: start; }
 			@media (max-width: 1023px) { .registry-layout { grid-template-columns: minmax(0, 1fr); } }
-			.chip-row { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-			.chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border: 1px solid var(--border-default); border-radius: 999px; background: var(--surface-elevated); color: var(--text-secondary); font: 700 11px var(--font-mono); letter-spacing: 0.03em; }
+			.chip-row { display: flex; flex-wrap: wrap; gap: var(--space-1); }			.chip { display: inline-flex; align-items: center; gap: var(--space-1); padding: 2px var(--space-2); border: 1px solid var(--border-default); border-radius: 999px; background: var(--surface-elevated); color: var(--text-secondary); font: 700 11px var(--font-mono); letter-spacing: 0.03em; }
 			.record-group { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); background: var(--surface-primary); }
 			.record-group > h3 { margin: 0; font: 700 12px var(--font-mono); overflow-wrap: anywhere; }
 			.record-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
@@ -556,6 +555,21 @@
 			.audit-meta { color: var(--text-tertiary); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 			.audit-delta { color: var(--text-secondary); font: 12px var(--font-mono); overflow-wrap: anywhere; }
 			.extract-result { display: grid; gap: var(--space-2); }
+
+			/* ---------------------------------------------------------- bulk review */
+			/**
+			 * The bulk bar is a bordered surface rather than a floating element: it stays in
+			 * the flow directly above the list it acts on, so it cannot cover the records a
+			 * reviewer is deciding about. Its border carries the "this touches many records"
+			 * signal without a second accent colour competing with the outcome badges.
+			 */
+			.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--surface-elevated); }
+			.bulk-bar-main { display: grid; gap: 2px; min-inline-size: 0; }
+			.bulk-bar-main strong { font-size: 13px; }
+			/* The checkbox leads the row so the selection column reads as one vertical run. */
+			.record-select { display: inline-flex; align-items: center; padding-inline-end: var(--space-2); }
+			.record-select input { inline-size: 16px; block-size: 16px; accent-color: var(--accent-primary); cursor: pointer; }
+			.record-row:has(.record-select input:checked) { border-color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 7%, transparent); }
 
 			/* --------------------------------------------------------------- utilities */
 
@@ -1082,6 +1096,28 @@
 									</div>
 									<p class="panel-note" id="registry-status" role="status" aria-live="polite"></p>
 
+									<!--
+										Bulk review bar.
+
+										Sits directly above the list, because the decision it offers is about the
+										selection being made in the list, and a control that only appears after
+										scrolling is a control found late. "Select every approvable record" asks
+										the server which ids qualify rather than re-deriving the rule here, so the
+										count shown is the count that will be accepted.
+									-->
+									<div class="bulk-bar" id="registry-bulk-bar" hidden>
+										<div class="bulk-bar-main">
+											<strong id="registry-bulk-count">0 selected</strong>
+											<span class="panel-note" id="registry-bulk-note"></span>
+										</div>
+										<div class="button-row">
+											<button class="button button-secondary button-sm" id="registry-select-approvable" type="button">Select every approvable record</button>
+											<button class="button button-ghost button-sm" id="registry-clear-selection" type="button">Clear selection</button>
+											<button class="button button-primary button-sm" id="registry-approve-selected" type="button">Approve selected</button>
+										</div>
+									</div>
+									<div class="stack-md" id="registry-bulk-confirm" hidden></div>
+
 									<div class="registry-layout">
 										<div class="stack-md" id="registry-records"><p class="document-empty">Choose an aerodrome to list its minima records.</p></div>
 										<div class="stack-md" id="registry-detail"><p class="document-empty">Select a record to inspect, correct, approve or reject it.</p></div>
@@ -1412,6 +1448,13 @@
 				registryStatus: document.getElementById('registry-status'),
 				registryRecords: document.getElementById('registry-records'),
 				registryDetail: document.getElementById('registry-detail'),
+				registryBulkBar: document.getElementById('registry-bulk-bar'),
+				registryBulkCount: document.getElementById('registry-bulk-count'),
+				registryBulkNote: document.getElementById('registry-bulk-note'),
+				registryBulkConfirm: document.getElementById('registry-bulk-confirm'),
+				registrySelectApprovable: document.getElementById('registry-select-approvable'),
+				registryClearSelection: document.getElementById('registry-clear-selection'),
+				registryApproveSelected: document.getElementById('registry-approve-selected'),
 				extractKeys: document.getElementById('extract-keys'),
 				extractModel: document.getElementById('extract-model'),
 				extractButton: document.getElementById('extract-button'),
@@ -1647,7 +1690,34 @@
 			 */
 			const DEFAULT_DIVERSION_MINUTES = 120;
 
-			let registry = { loaded: false, airports: [], icao: null, records: [], activeIds: [], selectedRecordId: null, history: [] };
+			let registry = {
+				loaded: false,
+				airports: [],
+				icao: null,
+				records: [],
+				activeIds: [],
+				selectedRecordId: null,
+				history: [],
+				/** Ids ticked for a bulk decision. Cleared whenever the record list reloads. */
+				selectedIds: new Set(),
+				/** Live checkbox handles, so "select all approvable" can tick them individually. */
+				checkboxes: new Map()
+			};
+
+			/**
+			 * Whether a record may be approved, mirrored from the server's rule.
+			 *
+			 * The server is the authority; this exists so the registry can hide the
+			 * checkbox and disable the control *before* the click rather than presenting an
+			 * action whose only possible outcome is an error. If the two ever disagree the
+			 * server wins and reports the reason per record, which the bulk response does.
+			 */
+			function canApproveInUi(record) {
+				if (!record) return false;
+				const status = String(record.status || '').toLowerCase();
+				if (status === 'approved' || status === 'superseded') return false;
+				return record.ceilingFt !== null || record.visibilityM !== null;
+			}
 
 			/* =====================================================================
 			 * Clock
@@ -4153,8 +4223,15 @@
 			/** Records grouped by chart, because one chart yields several approach rows. */
 			function renderRegistryRecords() {
 				clear(E.registryRecords);
+				E.registryBulkConfirm.hidden = true;
+				clear(E.registryBulkConfirm);
+				// Selection is per record id, and a reload can change which records exist, so
+				// the selection is dropped rather than carried onto a different list.
+				registry.selectedIds.clear();
+				registry.checkboxes.clear();
 				if (!registry.records.length) {
 					E.registryRecords.append(el('p', 'document-empty', `No records for ${registry.icao || 'this aerodrome'}.`));
+					renderBulkBar();
 					return;
 				}
 				const groups = new Map();
@@ -4178,11 +4255,156 @@
 					section.append(list);
 					E.registryRecords.append(section);
 				}
+				renderBulkBar();
+			}
+
+			/**
+			 * The bulk bar's content, written from the current selection.
+			 *
+			 * The count and the caveat are the two things a reviewer needs before clicking:
+			 * how many records the action will touch, and that records without a value are
+			 * not among them. Stating both here is what keeps a batch from being a surprise.
+			 */
+			function renderBulkBar() {
+				const approvable = registry.records.filter(canApproveInUi).length;
+				const unapprovable = registry.records.length - approvable;
+				E.registryBulkBar.hidden = registry.records.length === 0;
+				E.registryBulkCount.textContent = `${registry.selectedIds.size} selected`;
+				E.registryBulkNote.textContent = registry.records.length
+					? `${approvable} of ${registry.records.length} record(s) can be approved; ${unapprovable} ha${unapprovable === 1 ? 's' : 've'} no value recorded and cannot be approved until one is entered.`
+					: '';
+				E.registryApproveSelected.disabled = registry.selectedIds.size === 0;
+				E.registrySelectApprovable.disabled = approvable === 0;
+				E.registryClearSelection.disabled = registry.selectedIds.size === 0;
+			}
+
+			/** Tick every record the server would accept, and only those. */
+			async function selectEveryApprovable() {
+				E.registryStatus.textContent = 'Asking the server which records can be approved…';
+				let ids = [];
+				try {
+					const data = await api(`/api/minima/approvable?icao=${encodeURIComponent(registry.icao || '')}`);
+					ids = Array.isArray(data?.approvableIds) ? data.approvableIds.map(Number) : [];
+				} catch (error) {
+					// Falling back to the client-side predicate keeps the action usable; the
+					// server still refuses anything it would not accept, per record.
+					ids = registry.records.filter(canApproveInUi).map(record => Number(record.id));
+					E.registryStatus.textContent = `Could not ask the server which records are approvable (${errorMessage(error)}); selected by the local rule instead.`;
+				}
+				registry.selectedIds.clear();
+				for (const id of ids) registry.selectedIds.add(id);
+				for (const [id, box] of registry.checkboxes) box.checked = registry.selectedIds.has(id);
+				renderBulkBar();
+				if (!E.registryStatus.textContent.startsWith('Could not')) {
+					E.registryStatus.textContent = `${ids.length} record(s) selected. Every one has a ceiling or a visibility recorded; records with no value are never included.`;
+				}
+			}
+
+			/**
+			 * Approve the selection, through one confirmation step.
+			 *
+			 * The confirmation is where the reviewer states what they checked and sees
+			 * exactly which records the action will touch. Bulk approval is a change to the
+			 * review *pace*: each record still gets its own audit entry with the approver and
+			 * the time, and the response reports per-record outcomes, so a batch is not a
+			 * lesser record than a single approval.
+			 */
+			function confirmBulkApproval() {
+				const ids = [...registry.selectedIds];
+				if (!ids.length) return;
+				clear(E.registryBulkConfirm);
+				E.registryBulkConfirm.hidden = false;
+				const box = el('div', 'banner banner-warning');
+				box.innerHTML = icon('warn', 'icon');
+				const body = el('div', 'banner-body');
+				body.append(el('strong', null, `Approve ${ids.length} record(s)?`));
+				body.append(
+					el('p', null, 'Approving makes these values usable by an assessment. The approval is recorded against your account with the time, per record. Records with no value are not included.')
+				);
+				const noteGroup = el('div', 'input-group');
+				const noteLabel = el('label', null, 'What was checked against the chart');
+				noteLabel.setAttribute('for', 'bulk-decision-note');
+				const note = document.createElement('textarea');
+				note.className = 'field-textarea';
+				note.id = 'bulk-decision-note';
+				note.placeholder = 'For example: compared every selected value against the named AIP chart PDF';
+				note.required = true;
+				noteGroup.append(noteLabel, note);
+				const actions = el('div', 'button-row');
+				const confirm = el('button', 'button button-primary', `Approve ${ids.length} record(s)`);
+				confirm.type = 'button';
+				confirm.disabled = true;
+				note.addEventListener('input', () => {
+					confirm.disabled = note.value.trim().length < 4;
+				});
+				const cancel = el('button', 'button button-secondary', 'Cancel');
+				cancel.type = 'button';
+				cancel.addEventListener('click', () => {
+					E.registryBulkConfirm.hidden = true;
+					clear(E.registryBulkConfirm);
+				});
+				actions.append(confirm, cancel);
+				const status = el('p', 'panel-note');
+				body.append(noteGroup, actions, status);
+				box.append(body);
+				E.registryBulkConfirm.append(box);
+
+				confirm.addEventListener('click', async () => {
+					confirm.disabled = true;
+					status.textContent = `Approving ${ids.length} record(s)…`;
+					try {
+						const data = await api('/api/minima/bulk-decision', {
+							method: 'POST',
+							body: { ids, decision: 'APPROVED', note: note.value.trim() }
+						});
+						const approvedList = Array.isArray(data?.approved) ? data.approved : [];
+						const skippedList = Array.isArray(data?.skipped) ? data.skipped : [];
+						status.textContent = `${approvedList.length} approved.${skippedList.length ? ` ${skippedList.length} skipped: ${skippedList.map(entry => `#${entry.id} (${entry.reason})`).join('; ')}` : ''}`;
+						registry.selectedIds.clear();
+						await loadRegistryRecords(registry.icao);
+						// An approval changes which records a picker may offer, so the cached
+						// bundle for this aerodrome is dropped rather than left stale.
+						state.minimaReady.delete(String(registry.icao || '').toUpperCase());
+						registry.loaded = true;
+						await loadMinimaAirports();
+					} catch (error) {
+						status.textContent = errorMessage(error);
+						confirm.disabled = false;
+					}
+				});
 			}
 
 			function registryRecordRow(record) {
 				const item = el('li', 'record-row');
 				const head = el('div', 'row-between');
+				/**
+				 * Selection checkbox.
+				 *
+				 * A registry of 138 drafts is not reviewable one click at a time, and forcing
+				 * that produces a reviewer who clicks without reading rather than a reviewer
+				 * who reads. The checkbox batches the decision; it does not change what is
+				 * recorded, because every record still gets its own audit entry with the
+				 * approver and the time.
+				 *
+				 * A record that cannot be approved has no checkbox at all, so it cannot be
+				 * swept into a batch and quietly skipped — it is visibly not selectable.
+				 */
+				const selectable = canApproveInUi(record);
+				if (selectable) {
+					const label = el('label', 'record-select');
+					const box = document.createElement('input');
+					box.type = 'checkbox';
+					box.checked = registry.selectedIds.has(Number(record.id));
+					box.setAttribute('aria-label', `Select record ${record.id} for a bulk decision`);
+					box.addEventListener('change', () => {
+						if (box.checked) registry.selectedIds.add(Number(record.id));
+						else registry.selectedIds.delete(Number(record.id));
+						renderBulkBar();
+					});
+					registry.checkboxes.set(Number(record.id), box);
+					label.append(box);
+					head.append(label);
+				}
 				const title = el('strong', null, `${recordLabel(record)} · ${minimaValuesText(record)}`);
 				head.append(title);
 				head.append(registryStatusChip(record));
@@ -4620,6 +4842,14 @@
 				renderNotams();
 			});
 			E.registryRefreshButton.addEventListener('click', () => void loadMinimaAirports());
+			E.registrySelectApprovable.addEventListener('click', () => void selectEveryApprovable());
+			E.registryClearSelection.addEventListener('click', () => {
+				registry.selectedIds.clear();
+				for (const box of registry.checkboxes.values()) box.checked = false;
+				E.registryBulkConfirm.hidden = true;
+				renderBulkBar();
+			});
+			E.registryApproveSelected.addEventListener('click', () => confirmBulkApproval());
 			E.registryLoadButton.addEventListener('click', () => void loadRegistryRecords(E.registryIcao.value));
 			E.registryIcao.addEventListener('change', () => { if (E.registryIcao.value) void loadRegistryRecords(E.registryIcao.value); });
 			E.extractButton.addEventListener('click', () => void runExtraction());

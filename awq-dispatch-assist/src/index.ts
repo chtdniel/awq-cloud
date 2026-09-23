@@ -52,7 +52,7 @@ import {
 } from './minima-jobs';
 import { listNotamCandidates, resolveSelectedNotams } from './notams';
 import { citableReferenceDocuments, isExcludedFromCorpus } from './reference-corpus';
-import { approvalBlockedReason } from './minima-rules';
+import { approvalBlockedReason, canApprove } from './minima-rules';
 import type { MinimaRecord } from './minima';
 import { explainDispatch, type ExplainerInput, type ExplainerResult } from './explainer';
 
@@ -1769,6 +1769,131 @@ async function listExtractionJobsApi(request: Request, env: Env, url: URL): Prom
 	return documentResponse({ ok: true, data: { jobs } });
 }
 
+/**
+ * Approve or reject several minima records in one action.
+ *
+ * Why this exists
+ *   A registry of 138 drafts is not reviewable one click at a time, and forcing that
+ *   does not produce more care — it produces a reviewer who clicks without reading.
+ *   So the selection is batched, and the controls that make the batch mean something
+ *   are kept rather than dropped.
+ *
+ * What it deliberately does not do
+ *   - It does not apply the approve-all convenience to silent records. A record with
+ *     neither a ceiling nor a visibility is **skipped**, not approved, because
+ *     approving it would create a record that reads as usable minima while checking
+ *     nothing. That is the same rule the single-record path enforces, applied
+ *     per record rather than relaxed for the batch.
+ *   - It does not approve across aerodromes or charts implicitly. The caller names
+ *     the ids.
+ *   - It does not hide the count. The response reports approved, skipped and already
+ *     approved separately, and `skipped` carries the reason per record so a batch that
+ *     silently did less than the reviewer expected cannot happen.
+ *
+ * The audit trail is per record: each approval writes its own `airport_minima_audit`
+ * entry and its own approver identity and timestamp, so a batch approval is
+ * indistinguishable in the record from a single one. Bulk is a change to the review
+ * *pace*, not to what is recorded.
+ */
+async function decideMinimaRecordsBulk(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	const userId = await authorizeUser(request, env);
+	if (!userId) return documentResponse({ error: 'SSO is required.' }, 401);
+	let body: { ids?: unknown; decision?: unknown; note?: unknown };
+	try { body = await request.json() as typeof body; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
+
+	const ids = Array.isArray(body.ids)
+		? [...new Set(body.ids.map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0))]
+		: [];
+	if (!ids.length) return documentResponse({ error: 'At least one record id is required.' }, 400);
+	// Bounded so one request cannot hold a Worker open across hundreds of writes; the
+	// UI chunks its selection to match.
+	if (ids.length > 200) return documentResponse({ error: 'A bulk decision is limited to 200 records at a time.' }, 400);
+
+	const decision = String(body.decision ?? '').trim().toUpperCase();
+	if (decision !== 'APPROVED' && decision !== 'REJECTED') {
+		return documentResponse({ error: 'Decision must be APPROVED or REJECTED.' }, 400);
+	}
+	const note = String(body.note ?? '').trim().slice(0, 1000) || null;
+
+	const approved: number[] = [];
+	const rejected: number[] = [];
+	const skipped: Array<{ id: number; reason: string }> = [];
+
+	for (const id of ids) {
+		if (decision === 'REJECTED') {
+			const result = await rejectRecord(env, userId, id, note);
+			if (result.ok) {
+				rejected.push(id);
+				await audit(env, userId, 'minima_reject', 'airport_minima', id, note ?? '', ctx);
+			} else {
+				skipped.push({ id, reason: result.error });
+			}
+			continue;
+		}
+
+		const result = await approveRecord(env, userId, id, note);
+		if (result.ok) {
+			approved.push(id);
+			// Each record gets its own audit entry, so a batch approval is recorded exactly
+			// as a single approval would be: approver identity, time, and the note.
+			await audit(
+				env,
+				userId,
+				'minima_approve',
+				'airport_minima',
+				id,
+				`${result.record.icao} ${result.record.chartIdentifier} ${result.record.approach} ${result.record.kind} (bulk of ${ids.length})`,
+				ctx
+			);
+		} else {
+			const current = await getMinima(env, id);
+			skipped.push({ id, reason: approvalBlockedReason(current ? current.record : null) ?? result.error });
+		}
+	}
+
+	return documentResponse({
+		ok: true,
+		data: {
+			requested: ids.length,
+			approved,
+			rejected,
+			skipped,
+			note:
+				decision === 'APPROVED'
+					? 'A skipped record is reported with its reason rather than approved. A record with no value cannot be approved, because there would be nothing for an assessment to compare against.'
+					: 'Rejected records remain readable for audit and are not part of the active set.'
+		}
+	});
+}
+
+/**
+ * Which records a bulk approval would actually accept.
+ *
+ * Exposed so the registry view can show the real count before the click and offer
+ * "select every record that can be approved" without the client re-implementing the
+ * rule. The predicate is the same `canApprove` the write path enforces, so the count
+ * the reviewer sees is the count they get.
+ */
+async function listApprovableMinima(request: Request, env: Env, url: URL): Promise<Response> {
+	if (!await authorizeUser(request, env)) return documentResponse({ error: 'SSO is required.' }, 401);
+	const icao = String(url.searchParams.get('icao') ?? '').trim().toUpperCase();
+	if (!/^[A-Z0-9]{4}$/.test(icao)) return documentResponse({ error: 'A four-character ICAO location indicator is required.' }, 400);
+
+	const records = await listMinima(env, icao);
+	const candidates = records.filter(record => record.status === 'draft' || record.status === 'rejected');
+	const approvable = candidates.filter(record => canApprove(record).ok);
+	return documentResponse({
+		ok: true,
+		data: {
+			icao,
+			draftCount: candidates.length,
+			approvableIds: approvable.map(record => record.id),
+			blockedCount: candidates.length - approvable.length,
+			note: 'A record with neither a ceiling nor a visibility is not approvable and is excluded from this list.'
+		}
+	});
+}
+
 /** Apply an ADMIN correction to a minima draft or approved record. */
 async function correctMinimaDraft(request: Request, env: Env, ctx: ExecutionContext, id: number): Promise<Response> {
 	const userId = await authorizeUser(request, env);
@@ -1983,6 +2108,8 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 		if (url.pathname === '/api/minima' && request.method === 'GET') return listMinimaRecords(request, env, url);
 		if (url.pathname === '/api/minima/extract' && request.method === 'POST') return extractMinimaDrafts(request, env, ctx);
 		if (url.pathname === '/api/minima/extraction-jobs' && request.method === 'GET') return listExtractionJobsApi(request, env, url);
+		if (url.pathname === '/api/minima/approvable' && request.method === 'GET') return listApprovableMinima(request, env, url);
+		if (url.pathname === '/api/minima/bulk-decision' && request.method === 'POST') return decideMinimaRecordsBulk(request, env, ctx);
 		const minimaMatch = url.pathname.match(/^\/api\/minima\/(\d+)$/);
 		if (minimaMatch && request.method === 'GET') return getMinimaRecord(request, env, Number(minimaMatch[1]));
 		if (minimaMatch && request.method === 'PATCH') return correctMinimaDraft(request, env, ctx, Number(minimaMatch[1]));
