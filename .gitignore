@@ -32,3 +32,6 @@ docs/backups/*.sql
 
 # Production database exports (contain operational data; never commit).
 backups/
+
+# Obsidian vault metadata (editor state, not project content).
+.obsidian/
