@@ -524,3 +524,47 @@ Breakpoints and behaviour:
 
 The outcome summary lives outside every view, pinned under the header, so it cannot be
 scrolled away while the evidence it summarises is on screen.
+
+### Reflow: the defect that was measured rather than seen
+
+The first build of the two-panel layout scrolled the whole document sideways by 461px
+at 390px wide and 349px at 834px. Both had one cause, and it is worth recording because
+the symptom does not point at it: `.primary-nav` is a horizontal scroll container
+(`overflow-x: auto`), and a scroll container's automatic minimum size is its **content**
+width, not zero. As a flex item it therefore refused to shrink, so the header measured
+851px inside a 390px viewport and dragged the document's scroll width with it. The fix
+is `min-inline-size: 0` on the header and the nav, applied in both the tablet and phone
+blocks.
+
+A second, smaller cause was the outcome strip: a 320px flex basis on
+`.outcome-strip-main` could not fit beside a 323px action row, so on a phone the strip's
+row is now allowed to take the full width and the actions wrap beneath it.
+
+Measured after the fix, with a real ADMIN session against production:
+
+| Viewport | Document scroll width | Element overflow |
+|---|---:|---|
+| 1440×1000 | 1440 (= client) | 0px |
+| 834×1112 | 834 (= client) | 0px |
+| 390×844 | 390 (= client) | 0px |
+
+No console errors on any of the three, desktop and mobile drawer states both captured.
+The counter-check is part of the method: after the fix the diagnostic found no element
+past the right edge, starting left of the viewport, or wider than it — a previous pass
+had reported "no element overflows" while the document still scrolled, because it only
+checked the right edge and missed a drawer parked off-canvas by a transform.
+
+### What the release-1 verification found
+
+The verification is reported in full rather than summarised, because three of the
+findings were defects that a passing test suite did not catch:
+
+| Finding | How it surfaced | Resolution |
+|---|---|---|
+| The report's disclaimer said it was not an airworthiness determination but never used the words "dispatch release" | A smoke assertion looking for the phrase the PRD uses | The rendered report now states "This is an assessment outcome and not a dispatch release" |
+| CASR Part 121 was still listed as an indexed reference manual, in the library view and in every report | A smoke assertion on the **rendered** text rather than the HTML, which is where the leak was visible | One shared exclusion (`src/reference-corpus.ts`) applied to retrieval, the snapshot and the library list; the CASR rows stay in D1 so the ingestion history remains readable |
+| The document scrolled sideways on tablet and phone | Measuring `scrollWidth - clientWidth` per viewport instead of eyeballing a screenshot | The `min-inline-size: 0` fix above |
+
+Each of those was found by asserting on what a reader sees, not on what the server
+returned, which is the reason the smoke test renders the report and measures the layout
+rather than only checking status codes.
