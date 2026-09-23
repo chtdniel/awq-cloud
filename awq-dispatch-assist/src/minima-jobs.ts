@@ -180,6 +180,8 @@ export type ExtractionOutcome = {
 	skippedDuplicates: number;
 	duplicatesOfApproved: number;
 	draftIds: number[];
+	/** The model's own reply, kept on failure as well as success. */
+	rawModelResponse?: string;
 };
 
 /**
@@ -214,10 +216,22 @@ export async function runExtractionJob(
 		};
 		await env.DB.prepare(
 			`UPDATE airport_minima_extraction_jobs
-			    SET status = 'failed', error = ?, source_bytes = ?, markdown_chars = ?, finished_at = ?
+			    SET status = 'failed', error = ?, source_bytes = ?, markdown_chars = ?,
+			        raw_model_response = COALESCE(?, raw_model_response), finished_at = ?
 			  WHERE id = ?`
 		)
-			.bind(reason.slice(0, 500), outcome.sourceBytes, outcome.markdownChars, new Date().toISOString(), message.jobId)
+			.bind(
+				reason.slice(0, 500),
+				outcome.sourceBytes,
+				outcome.markdownChars,
+				// A failure keeps the model's reply too. It used to be written only on the
+				// success path, so a job that failed with `unparseable-json` left nothing
+				// on the row to say what the model actually answered - which is the one
+				// question a failed extraction raises.
+				outcome.rawModelResponse ?? null,
+				new Date().toISOString(),
+				message.jobId
+			)
 			.run();
 		return outcome;
 	};
@@ -256,7 +270,16 @@ export async function runExtractionJob(
 		}
 	});
 
-	if (!extraction.ok) return fail(extraction.reason, { sourceBytes: bytes.length });
+	if (!extraction.ok) {
+		return fail(extraction.reason, {
+			sourceBytes: bytes.length,
+			// Both are reported when the conversion succeeded, so the row distinguishes
+			// "the chart produced no text" from "the chart produced text and the model
+			// answered with something unusable".
+			...(extraction.markdownChars === undefined ? {} : { markdownChars: extraction.markdownChars }),
+			...(extraction.rawModelResponse ? { rawModelResponse: extraction.rawModelResponse } : {})
+		});
+	}
 
 	const stored = await insertDrafts(env, {
 		drafts: extraction.drafts,

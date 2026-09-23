@@ -4953,11 +4953,23 @@
 					const item = el('div', 'sidebar-item');
 					const head = el('div', 'row-between');
 					head.append(el('strong', null, object.objectKey || 'Unnamed object'));
-					head.append(object.ok ? badge('Drafts created', 'gap', 'warn') : badge(`Failed: ${object.reason || 'reason not stated'}`, 'error', 'x'));
+					// The reason is shown as its own line rather than inside the badge. A badge
+					// carrying a 300-character failure reason wrecks the row, and the reason is
+					// the part an operator has to read.
+					head.append(object.ok ? badge('Drafts created', 'gap', 'warn') : badge('Failed', 'error', 'x'));
 					item.append(head);
 					if (object.ok) {
-						item.append(el('span', null, `${numberOr(object.draftsExtracted, 0)} extracted · ${numberOr(object.draftsStored, 0)} stored as drafts · ${numberOr(object.skippedDuplicates, 0)} duplicate${numberOr(object.skippedDuplicates, 0) === 1 ? '' : 's'} skipped · ${numberOr(object.duplicatesOfApproved, 0)} duplicates of approved records · ${numberOr(object.markdownChars, 0)} characters read`));
+						// "Skipped" is spelled out. It used to read as "58 duplicates skipped",
+						// which sounds like harmless repetition but is the wording that hid a real
+						// loss: 58 minima lines read from one chart could not be stored because
+						// they shared a record identity. A collapse now fails the extraction, so
+						// what remains here is a row that was already present from an earlier run.
+						const stored = numberOr(object.draftsStored, 0);
+						const already = numberOr(object.skippedDuplicates, 0);
+						item.append(el('span', null, `${numberOr(object.draftsExtracted, 0)} minima lines read · ${stored} stored as drafts · ${already} already present from an earlier run · ${numberOr(object.duplicatesOfApproved, 0)} match an approved record · ${numberOr(object.markdownChars, 0)} characters of chart text`));
 						if (Array.isArray(object.draftIds) && object.draftIds.length) item.append(el('span', null, `Draft ids: ${object.draftIds.join(', ')} — unusable until approved`));
+					} else if (object.reason) {
+						item.append(el('span', null, object.reason));
 					}
 					E.extractResult.append(item);
 				}

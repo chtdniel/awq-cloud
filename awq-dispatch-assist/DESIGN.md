@@ -684,3 +684,82 @@ approval's supersede rule — which keys on the identifier as well as the slot �
 retire the old records on its own. The orphaned-source check covers that gap only because
 the replaced files are actually absent; a swap that left both sets in the bucket would put
 two approved values on one slot. Recorded in §8 Accepted Debt.
+
+## 12. The LIDO chart set: two silent losses and a provider setting
+
+The AIP chart set was replaced by a LIDO set: one file per aerodrome instead of one file per
+approach, and a minima table that prints several lines per runway. Three charts were
+extracted (YPPH, YPKG, YPPD) and two separate losses were found, both of which had been
+invisible.
+
+### Loss 1: minima lines that shared a record identity were discarded
+
+A LIDO chart prints several minima lines for one procedure and runway — a `Cat 1 SA DME`
+line, a `Cat 1 DME` line, a `LOC DME` line and a `Circling` line — and their values differ by
+hundreds of feet. The registry keys a record on (icao, chart identifier, approach, runway,
+aircraft category, kind), and the first extraction put the line's identity in `valueType`
+instead of `approach`, so all four lines claimed one identity. `insertDrafts` keeps the first
+row for an identity and routes the rest to `skippedDuplicates`.
+
+Measured on the three charts as first extracted:
+
+| Chart | Minima lines the model read | Stored | Discarded |
+|---|---:|---:|---:|
+| YPPH 03SEP26 | 88 | 30 | **58** |
+| YPKG 13AUG26 | 36 | 16 | **20** |
+| YPPD 13AUG26 | 28 | 12 | **16** |
+
+The discarded rows were not the redundant ones. For `ILS Z or LOC Z` RWY 03 cat C the
+surviving record said 150 ft and 450 m; the dropped lines were the CAT 1 DME minima at
+210 ft and 550 m, the LOC DME minima at 460 ft and 1.7 km, and the circling minima at
+1380 ft and 4.0 km. Which line survived was decided by the order the model happened to list
+them in. A dispatcher reading that registry would have seen a complete-looking minima set
+for an aerodrome and no reason to doubt it, and the missing lines were the *more
+restrictive* ones for the procedures they covered. That is the wrong direction: it clears a
+flight the chart does not clear.
+
+Two changes, one in the prompt and one in code:
+
+- The prompt now requires one entry per minima line and puts the line's own label into
+  `approach`, with the measurement quoted back at the model so the rule is not abstract.
+- `collidingDraftIdentities` makes a chart whose lines collide **fail the extraction**
+  instead of storing the survivors. An incomplete set that reads as complete is worse than
+  no set, because the approval step is what makes a value usable and it cannot approve what
+  it cannot see. The check compares rows within one extraction, so re-running a chart stays
+  idempotent.
+
+After the change the same three charts stored every line they read: 36 of 36, 28 of 28, and
+344 rows for YPPH across 31 labelled minima lines. All four aircraft categories are present.
+The earlier run produced categories C and D only.
+
+### Loss 2: the extraction request was fighting the provider's defaults
+
+The YPPH chart failed six times in seven attempts, with three different symptoms, and each
+one was a provider setting rather than a property of the chart:
+
+| Symptom | Cause | Setting |
+|---|---|---|
+| Empty reply with HTTP 200 | Thinking mode is **on by default** at effort `high`, and the answer budget was consumed before any content was emitted | `thinking: { type: 'disabled' }` |
+| `finish_reason=length`, reply cut off mid-JSON at 28,097 characters | `max_tokens` defaults to **8K** in non-thinking mode; the chart needs more | `max_tokens: 32768` |
+| `"approaches": []` with a note saying the document contained no minima | The model's answer varies on a large chart; the same converted text produced 88 minima lines on one attempt and a refusal on another | Retry, bounded at three attempts |
+
+Two further consequences worth recording. `temperature` is **ignored while thinking mode is
+enabled**, so the `temperature: 0` this call has always sent was not doing anything and the
+extraction was not deterministic in the way the product claims; with thinking disabled it
+takes effect. And `response_format: json_object` was tried and removed: it coincided with a
+refusal on the YPPH chart, and the parser already accepts a fenced or prose-wrapped object,
+so it added risk without adding a guarantee the prompt does not already carry.
+
+The failure text now carries the provider's `finish_reason`, the number of characters
+returned and the size of the converted text, and the model's reply is persisted on the
+failure path as well as the success path. Before that, a failed job recorded
+`markdown_chars = 0` and no reply, which cannot distinguish "the chart produced no text"
+from "the chart produced 74,000 characters and the answer was unusable" — and that
+distinction is what identified the token budget rather than the conversion as the cause.
+
+### Accepted debt
+
+| Item | Location | Why accepted | Exit |
+|---|---|---|---|
+| A re-extraction that reads a *different* value for an existing record identity keeps the older value and reports the row only as a duplicate | `insertDrafts` | The content hash is computed after the identity lookup, so the two are never compared. The blast radius is small: the affected record is still a draft that a human compares against the PDF before approving it, which is the control that matters | Compute the hash before the lookup and report differing values for one identity as a conflict on the job row |
+| A large chart's answer is still not reproducible: two runs over the same converted text produced 333 and 344 rows | Extraction | Union by identity means the registry converges, and every row is a draft. The underlying cause is a 74,567-character prompt for one aerodrome | Extract a large chart in labelled sections rather than in one call |
