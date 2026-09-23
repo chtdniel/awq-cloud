@@ -32,7 +32,7 @@
  *   §10 requires.
  */
 
-import type { DispatchFinding, DispatchVerdict, EtaWindows, FuelRequirement } from './dispatch';
+import type { DispatchFinding, DispatchOutcome, EtaWindows, FuelRequirement } from './dispatch';
 
 export type ExplainerRole = 'system' | 'user';
 
@@ -55,13 +55,13 @@ export type ExplainerInput = {
 	registration: string | null;
 	destinationAlternates: readonly string[];
 	/** Fixed by the deterministic engine. The model must reproduce it verbatim. */
-	verdict: DispatchVerdict;
+	outcome: DispatchOutcome;
 	windows: EtaWindows | null;
 	diversionMinutes: number | null;
 	findings: readonly DispatchFinding[];
 	fuel: FuelRequirement;
-	/** False when no NOTAM or remarks were supplied, so the check is unevaluated. */
-	notamEvaluated: boolean;
+	/** False when no NOTAM has been selected, so the review is still pending. */
+	notamReviewed: boolean;
 };
 
 export type ExplainerSuccess = {
@@ -127,7 +127,7 @@ export function composeExplainerPrompt(input: ExplainerInput): ExplainerMessage[
 		'You are a flight dispatch analyst assistant. You write up an operational assessment that has already been decided by a deterministic rules engine.',
 		'',
 		'Hard rules:',
-		'- The verdict is FIXED by the engine. Reproduce it exactly. Never upgrade or downgrade it, and never introduce a GO the engine did not return.',
+		'- The assessment outcome is FIXED by the engine. Reproduce it exactly. Never upgrade or downgrade it, and never introduce a GO the engine did not return.',
 		'- Cite only the clause identifiers given to you. Never quote or paraphrase clause text, and never invent a clause number, a document name, or a value.',
 		'- If something is missing, state that it is missing. Do not fill a gap with a plausible figure.',
 		'- Use the ICAO identifiers, dates and Zulu times exactly as given.',
@@ -137,15 +137,14 @@ export function composeExplainerPrompt(input: ExplainerInput): ExplainerMessage[
 		'**1. ETA Windows & Operational Status**',
 		'- **Destination ([ICAO]):** ETA window | operational status',
 		'- **Primary Alternate ([ICAO]):** ETA window | approach/operational status',
-		'- **Secondary Alternate ([ICAO], if provided):** ETA window | status',
 		'**2. Weather & Minima Evaluation**',
-		'- **Destination ([ICAO]):** prevailing and conditional weather inside the window | landing minima compliance vs alternate planning criteria',
-		'- **Primary Alternate ([ICAO]):** weather assessment vs alternate planning criteria',
-		'**3. Dispatch Recommendations & Verdict**',
-		'- **Feasibility:** the engine verdict, per the cited rules',
-		'- **Legal Fuel Requirement:** the required holding fuel, or the alternate selection that satisfies it',
-		'- **Advisory Fuel Padding:** the recommended discretionary padding and its rationale',
-		'- **Alternate Recommendation:** confirm the primary alternate, or nominate an alternative if it fails criteria',
+		'- **Destination ([ICAO]):** prevailing and conditional weather inside the window | landing minima compliance vs the destination alternate planning criteria',
+		'- **Primary Alternate ([ICAO]):** weather assessment vs the alternate planning criteria',
+		'**3. Assessment Outcome & Fuel**',
+		'- **Assessment outcome:** the engine outcome, per the cited rules',
+		'- **Required holding fuel:** the additional holding fuel the cited rules require, or state that none is required',
+		'- **Standard fuel padding:** the cited FUEL PADDING criteria that were matched, and their rationale',
+		'- **Alternate recommendation:** confirm the selected alternate, or state that another should be selected and why',
 		'',
 		'Every statement in section 3 must name the clause identifier(s) it rests on.'
 	].join('\n');
@@ -155,9 +154,9 @@ export function composeExplainerPrompt(input: ExplainerInput): ExplainerMessage[
 		`Route: ${input.origin ?? 'unknown'} to ${input.destination ?? 'unknown'}`,
 		`Registration: ${input.registration ?? 'unknown'}`,
 		`Nominated destination alternates: ${input.destinationAlternates.length ? input.destinationAlternates.join(', ') : 'none'}`,
-		`Estimated diversion time: ${input.diversionMinutes === null ? 'not specified (60 min assumed)' : `${input.diversionMinutes} min`}`,
-		`Verdict (fixed, reproduce exactly): ${input.verdict}`,
-		`NOTAM/remarks evaluated: ${input.notamEvaluated ? 'yes' : 'no - the check is unevaluated'}`,
+		`Estimated diversion time: ${input.diversionMinutes === null ? 'not published (2 hour default applied, window STA +1 hr to +3 hr)' : `${input.diversionMinutes} min`}`,
+		`Assessment outcome (fixed, reproduce exactly): ${input.outcome}`,
+		`NOTAM review: ${input.notamReviewed ? 'selected NOTAM supplied' : 'NOTAM REVIEW PENDING - no NOTAM has been reviewed, which is not a statement that NOTAM is clear'}`,
 		'',
 		'ETA windows (Zulu):',
 		windowLine('  destination', input.windows?.destination ?? null),
@@ -182,12 +181,15 @@ export function composeExplainerPrompt(input: ExplainerInput): ExplainerMessage[
 
 	lines.push('');
 	lines.push('Fuel:');
-	lines.push(`  mandatory additional holding: ${input.fuel.mandatoryHoldingMinutes} min (${input.fuel.basis})`);
+	lines.push(`  additional holding required by a cited rule: ${input.fuel.mandatoryHoldingMinutes} min (${input.fuel.basis})`);
 	lines.push(`  rationale: ${input.fuel.rationale}`);
 	lines.push(`  references: ${input.fuel.references.length ? input.fuel.references.join(', ') : 'none'}`);
 	lines.push(
-		`  advisory padding: ${input.fuel.advisoryPaddingMinutes} min${input.fuel.advisoryRationale ? ` (${input.fuel.advisoryRationale})` : ''}`
+		`  standard fuel padding: ${input.fuel.advisoryPaddingMinutes} min${input.fuel.advisoryRationale ? ` (${input.fuel.advisoryRationale})` : ''}`
 	);
+	for (const criterion of input.fuel.paddingCriteria) {
+		lines.push(`    criterion matched: ${criterion.statement} | ${criterion.evidence} | ${criterion.minutes} min`);
+	}
 
 	return [
 		{ role: 'system', content: system },

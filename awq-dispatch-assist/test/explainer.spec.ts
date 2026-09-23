@@ -13,26 +13,27 @@ import {
 /**
  * Explainer contract tests.
  *
- * Two properties matter more than the prose: the model is told the verdict is
- * fixed, and clause text never reaches the provider. Both are asserted here
- * rather than left to the prompt text alone.
+ * Two properties matter more than the prose: the model is told the assessment
+ * outcome is fixed, and clause text never reaches the provider. Both are asserted
+ * here rather than left to the prompt text alone.
  */
 
 const STA = new Date(Date.UTC(2026, 8, 21, 20, 0, 0));
 const DOF = new Date(Date.UTC(2026, 8, 21));
 
-/** A case with a TEMPO group, no alternate and an unevaluated NOTAM check. */
+/** A case with a destination TEMPO group and an unreviewed NOTAM check. */
 function explainerInput(overrides: Partial<DispatchInput> = {}): ExplainerInput {
 	const dispatchInput: DispatchInput = {
 		dof: DOF,
 		staZ: STA,
 		diversionMinutes: 60,
 		destinationTaf: 'TAF WIII 211700Z 2118/2224 27008KT 9999 SCT020 TEMPO 2119/2122 3000 TSRA BKN010CB',
-		destinationAlternates: [],
+		alternateIcao: null,
 		alternateTaf: null,
-		destinationMinima: { approach: 'ILS RWY 25L', ceilingFt: 500, visibilityM: 1500, references: ['OM Part A 8.1.2'] },
-		alternateMinima: null,
-		notamRemarks: '',
+		destinationMinima: { approach: 'ILS RWY 25L', ceilingFt: 500, visibilityM: 1500, references: ['OM Part A 8.1.2.2.3'] },
+		alternateLandingMinima: null,
+		alternatePlanningMinima: null,
+		selectedNotams: [],
 		...overrides
 	};
 	const assessment = assessDispatch(dispatchInput);
@@ -41,13 +42,13 @@ function explainerInput(overrides: Partial<DispatchInput> = {}): ExplainerInput 
 		origin: 'WIII',
 		destination: 'WADD',
 		registration: 'PK-AXA',
-		destinationAlternates: dispatchInput.destinationAlternates,
-		verdict: assessment.verdict,
+		destinationAlternates: dispatchInput.alternateIcao ? [dispatchInput.alternateIcao] : [],
+		outcome: assessment.outcome,
 		windows: assessment.windows,
 		diversionMinutes: dispatchInput.diversionMinutes,
 		findings: assessment.findings,
 		fuel: assessment.fuel,
-		notamEvaluated: assessment.notamEvaluated
+		notamReviewed: assessment.notamReviewed
 	};
 }
 
@@ -70,33 +71,47 @@ function completion(content: string): Response {
 }
 
 describe('prompt composition', () => {
-	it('states the verdict is fixed and must be reproduced', () => {
+	it('states the assessment outcome is fixed and must be reproduced', () => {
 		const messages = composeExplainerPrompt(explainerInput());
 		const system = messages.find(message => message.role === 'system')!.content;
-		expect(system).toMatch(/verdict is FIXED/i);
+		expect(system).toMatch(/assessment outcome is FIXED/i);
 		expect(system).toMatch(/Never upgrade or downgrade/i);
 	});
 
-	it('carries the engine verdict, the findings and their clause references', () => {
+	it('carries the engine outcome, the findings and their clause references', () => {
 		const input = explainerInput();
 		const prompt = composeExplainerPrompt(input).map(message => message.content).join('\n');
-		expect(prompt).toContain(`Verdict (fixed, reproduce exactly): ${input.verdict}`);
+		expect(prompt).toContain(`Assessment outcome (fixed, reproduce exactly): ${input.outcome}`);
 		for (const finding of input.findings) {
 			expect(prompt).toContain(finding.code);
 		}
-		expect(prompt).toContain('OM Part A 8.1.2');
+		// Only clause identifiers travel, and every finding's own references must be
+		// among them.
+		for (const finding of input.findings) {
+			for (const reference of finding.references) {
+				expect(prompt).toContain(reference);
+			}
+		}
+		expect(input.findings.length).toBeGreaterThan(0);
 	});
 
 	it('requests the three-section output structure', () => {
 		const prompt = composeExplainerPrompt(explainerInput()).map(message => message.content).join('\n');
 		expect(prompt).toContain('**1. ETA Windows & Operational Status**');
 		expect(prompt).toContain('**2. Weather & Minima Evaluation**');
-		expect(prompt).toContain('**3. Dispatch Recommendations & Verdict**');
+		expect(prompt).toContain('**3. Assessment Outcome & Fuel**');
 	});
 
-	it('marks the NOTAM check as unevaluated when no remarks were supplied', () => {
+	it('marks the NOTAM review as pending when no NOTAM was selected', () => {
 		const prompt = composeExplainerPrompt(explainerInput()).map(message => message.content).join('\n');
-		expect(prompt).toContain('NOTAM/remarks evaluated: no - the check is unevaluated');
+		expect(prompt).toContain('NOTAM REVIEW PENDING');
+		expect(prompt).toContain('not a statement that NOTAM is clear');
+	});
+
+	it('states the 2-hour default diversion time when none is published', () => {
+		const prompt = composeExplainerPrompt(explainerInput({ diversionMinutes: null })).map(message => message.content).join('\n');
+		expect(prompt).toContain('2 hour default applied');
+		expect(prompt).toContain('STA +1 hr to +3 hr');
 	});
 
 	it('renders the windows as unambiguous Zulu timestamps', () => {
@@ -128,9 +143,25 @@ describe('prompt composition', () => {
 		expect(await hashPrompt(composeExplainerPrompt(input))).toBe(await hashPrompt(composeExplainerPrompt(input)));
 	});
 
-	it('changes the prompt hash when the verdict-bearing data changes', async () => {
+	it('changes the prompt hash when the outcome-bearing data changes', async () => {
 		const base = await hashPrompt(composeExplainerPrompt(explainerInput()));
-		const changed = await hashPrompt(composeExplainerPrompt(explainerInput({ notamRemarks: 'RWY 25L SERVICEABLE' })));
+		const changed = await hashPrompt(
+			composeExplainerPrompt(
+				explainerInput({
+					selectedNotams: [
+						{
+							id: 'A1234/26',
+							location: 'WIII',
+							message: 'A1234/26 NOTAMN A) WIII E) RWY 25L SERVICEABLE',
+							validFrom: null,
+							validTo: null,
+							riskLevel: null,
+							fetchedAt: '2026-09-21T18:00:00.000Z'
+						}
+					]
+				})
+			)
+		);
 		expect(changed).not.toBe(base);
 	});
 });

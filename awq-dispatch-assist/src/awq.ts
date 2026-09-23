@@ -31,7 +31,7 @@
  *   guess is exactly what the design forbids.
  */
 
-import type { ApproachMinima, DispatchInput, RouteImpactWarning } from './dispatch';
+import type { ApproachMinima, DispatchInput, RouteImpactWarning, SelectedNotam } from './dispatch';
 
 /** One row of the active flight board. */
 export type AwqFlight = {
@@ -332,6 +332,25 @@ export function selectTaf(entries: readonly Record<string, unknown>[], role: str
 	return entries.find(entry => text(entry.role).trim().toLowerCase() === target) ?? null;
 }
 
+/**
+ * Select the TAF issued for one station, whatever role it was filed under.
+ *
+ * The feed files one TAF per station it has data for: the destination alternate
+ * and the en-route alternates each get their own entry, but only the single
+ * alternate nominated on the flight carries the `Destination alternate` role.
+ * A dispatcher who selects a different alternate therefore has no forecast for
+ * it in this payload, and this lookup is what makes that visible instead of
+ * quietly evaluating the wrong station's weather.
+ */
+export function selectTafForStation(
+	entries: readonly Record<string, unknown>[],
+	station: string | null
+): Record<string, unknown> | null {
+	const target = text(station).trim().toUpperCase();
+	if (!target) return null;
+	return entries.find(entry => text(entry.station).trim().toUpperCase() === target) ?? null;
+}
+
 /** True when a TAF entry carries report text, rather than `NIL`. */
 export function hasUsableTaf(entry: Record<string, unknown> | null): boolean {
 	if (!entry) return false;
@@ -396,9 +415,20 @@ export type BuildOptions = {
 	weather: AwqFlightWeather;
 	/** The board's fetch instant, used to date a bare `HH:MM` schedule. */
 	reference: Date;
+	/** Approved destination landing minima, selected from the minima registry. */
 	destinationMinima: ApproachMinima | null;
-	alternateMinima: ApproachMinima | null;
-	notamRemarks: string | null;
+	/** ICAO of the manually selected primary alternate. */
+	alternateIcao: string | null;
+	/** Approved landing minima of the selected alternate. */
+	alternateLandingMinima: ApproachMinima | null;
+	/**
+	 * Planning minima the alternate must meet. The caller passes the higher of the
+	 * chart's published `Alternate Minima` and the company minima of OM Part A
+	 * Table 8.1-5.
+	 */
+	alternatePlanningMinima: ApproachMinima | null;
+	/** NOTAM the dispatcher selected from AWQ Cloud. Empty means the review is pending. */
+	selectedNotams: readonly SelectedNotam[];
 	/** An operator-stated arrival, which suppresses the schedule inference. */
 	scheduleOverride?: ScheduleOverride;
 };
@@ -415,28 +445,45 @@ export function buildDispatchInput(options: BuildOptions): AdapterResult {
 	const notes = [...schedule.notes];
 
 	const entries = toTafEntries(weather);
+	const destinationStation = text(flight.destination).trim().toUpperCase() || null;
 	const destination = selectTaf(entries, 'Destination');
-	const alternate = selectTaf(entries, 'Destination alternate');
+	const alternateStation = text(options.alternateIcao).trim().toUpperCase() || null;
+	const nominatedAlternate = selectTaf(entries, 'Destination alternate');
+	// Weather is matched by station, not by the feed's role label: the label names
+	// the alternate the flight plan nominated, which is not necessarily the one the
+	// dispatcher selected.
+	const alternate = selectTafForStation(entries, alternateStation);
 
 	if (!hasUsableTaf(destination)) {
-		notes.push(`No usable Destination TAF is present for ${text(flight.destination) || 'the destination'} in this payload.`);
+		notes.push(`No usable Destination TAF is present for ${destinationStation || 'the destination'} in this payload.`);
 	}
-	if (!hasUsableTaf(alternate)) {
-		notes.push('No usable Destination alternate TAF is present in this payload.');
+	if (!alternateStation) {
+		notes.push('No primary alternate was selected, so no alternate forecast could be matched.');
+	} else if (!hasUsableTaf(alternate)) {
+		const nominated = text(nominatedAlternate?.station).trim().toUpperCase();
+		notes.push(
+			nominated && nominated !== alternateStation
+				? `The payload carries no TAF for the selected alternate ${alternateStation}; its only destination-alternate forecast is for ${nominated}. Select ${nominated}, or treat the alternate as not assessed.`
+				: `No usable TAF is present for the selected alternate ${alternateStation} in this payload.`
+		);
 	}
 
-	const destinationAlternates = stringList(flight.destinationAlternates);
-
-	if (!destinationAlternates.length) {
-		notes.push('The flight carries no nominated destination alternate.');
+	// Diversion time is not published by the feed, so the workflow's 2-hour default
+	// applies and the alternate window becomes STA +1 hr to +3 hr.
+	notes.push('Diversion time is not present in the payload; the 2-hour default is used and the alternate window is STA +1 hr to +3 hr.');
+	if (!options.destinationMinima) {
+		notes.push('No approved destination minima record was selected; destination compliance cannot be evaluated.');
 	}
-
-	// Diversion time is not published by the feed. The engine applies the
-	// workflow's 60-minute default, which makes the alternate window an estimate.
-	notes.push('Diversion time is not present in the payload; the 60-minute default is used for the alternate window.');
-	notes.push('Minima are not present in the payload and must be supplied from a chart or entered manually.');
-	notes.push('Fuel figures are not present in the payload; the engine states the required holding fuel but cannot compare it against an uplift.');
-	notes.push('NOTAM is not present in the payload and must be entered manually.');
+	if (!options.alternateLandingMinima) {
+		notes.push('No approved alternate landing minima record was selected; the destination-alternate TEMPO concession cannot be evaluated.');
+	}
+	if (!options.alternatePlanningMinima) {
+		notes.push('No alternate planning minima is available; alternate suitability cannot be evaluated.');
+	}
+	notes.push('Fuel figures are not present in the payload; the engine states the holding fuel and standard padding the cited rules require but cannot compare them against an uplift.');
+	if (!options.selectedNotams.length) {
+		notes.push('No NOTAM has been reviewed for this flight; the NOTAM state is reported as NOTAM REVIEW PENDING, which is not a statement that NOTAM is clear.');
+	}
 
 	const routeWarnings = selectRouteWarnings(weather);
 
@@ -444,12 +491,15 @@ export function buildDispatchInput(options: BuildOptions): AdapterResult {
 		dof: schedule.dof,
 		staZ: schedule.staZ,
 		diversionMinutes: null,
+		originIcao: text(flight.origin).trim().toUpperCase() || null,
+		destinationIcao: destinationStation,
+		alternateIcao: alternateStation,
 		destinationTaf: hasUsableTaf(destination) ? text(destination!.raw) : null,
-		destinationAlternates,
 		alternateTaf: hasUsableTaf(alternate) ? text(alternate!.raw) : null,
 		destinationMinima: options.destinationMinima,
-		alternateMinima: options.alternateMinima,
-		notamRemarks: options.notamRemarks,
+		alternateLandingMinima: options.alternateLandingMinima,
+		alternatePlanningMinima: options.alternatePlanningMinima,
+		selectedNotams: options.selectedNotams,
 		routeImpactWarnings: routeWarnings,
 		destinationTafCurrency: currencyOf(destination),
 		weatherFreshness: freshnessOf(weather),
@@ -459,8 +509,8 @@ export function buildDispatchInput(options: BuildOptions): AdapterResult {
 	return {
 		input,
 		schedule,
-		destinationStation: text(flight.destination).trim() || null,
-		alternateStation: destinationAlternates[0] ?? null,
+		destinationStation,
+		alternateStation,
 		routeWarnings,
 		notes
 	};

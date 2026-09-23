@@ -6,6 +6,7 @@ import {
 	resolveSchedule,
 	selectRouteWarnings,
 	selectTaf,
+	selectTafForStation,
 	toTafEntries,
 	type AwqFlight,
 	type AwqFlightWeather
@@ -198,8 +199,10 @@ describe('resolving the schedule', () => {
 			weather: WEATHER,
 			reference: BOARD_FETCHED_AT,
 			destinationMinima: null,
-			alternateMinima: null,
-			notamRemarks: null
+			alternateIcao: null,
+			alternateLandingMinima: null,
+			alternatePlanningMinima: null,
+			selectedNotams: []
 		});
 		expect(schedule.needsConfirmation).toBe(false);
 		expect(input.scheduleNeedsConfirmation).toBe(false);
@@ -223,6 +226,16 @@ describe('selecting TAFs by role', () => {
 		expect(selectTaf(entries, 'Destination')?.station).toBe('WIII');
 		expect(selectTaf(entries, 'Destination alternate')?.station).toBe('WIPP');
 		expect(selectTaf(entries, 'Departure')?.station).toBe('WADD');
+	});
+
+	it('finds a TAF by station, whichever role filed it', () => {
+		// The alternate is chosen from the minima registry, not from the feed's role
+		// label, so the lookup has to be by station.
+		expect(selectTafForStation(entries, 'WIPP')?.role).toBe('Destination alternate');
+		expect(selectTafForStation(entries, 'wipp')?.role).toBe('Destination alternate');
+		expect(selectTafForStation(entries, 'WADD')?.role).toBe('Departure');
+		expect(selectTafForStation(entries, null)).toBeNull();
+		expect(selectTafForStation(entries, 'YPKG')).toBeNull();
 	});
 
 	it('returns null for a role the payload does not carry', () => {
@@ -258,8 +271,10 @@ describe('building the engine input', () => {
 			weather: WEATHER,
 			reference: BOARD_FETCHED_AT,
 			destinationMinima: null,
-			alternateMinima: null,
-			notamRemarks: null
+			alternateIcao: null,
+			alternateLandingMinima: null,
+			alternatePlanningMinima: null,
+			selectedNotams: []
 		});
 	}
 
@@ -268,17 +283,53 @@ describe('building the engine input', () => {
 		expect(input.dof?.toISOString()).toBe('2026-09-21T00:00:00.000Z');
 		expect(input.staZ?.toISOString()).toBe('2026-09-22T00:50:00.000Z');
 		expect(input.destinationTaf).toContain('WIII');
-		expect(input.alternateTaf).toContain('WIPP');
-		expect(input.destinationAlternates).toEqual(['WIPP']);
+		expect(input.alternateTaf).toBeNull();
+		expect(input.alternateIcao).toBeNull();
 		expect(input.routeImpactWarnings).toHaveLength(2);
+	});
+
+	it('matches the alternate weather by the selected alternate station, not the feed role', () => {
+		const { input } = buildDispatchInput({
+			flight: { ...BARE_CLOCK_FLIGHT, destinationAlternates: ['WIPP'] },
+			weather: WEATHER,
+			reference: BOARD_FETCHED_AT,
+			destinationMinima: null,
+			alternateIcao: 'WIPP',
+			alternateLandingMinima: null,
+			alternatePlanningMinima: null,
+			selectedNotams: []
+		});
+		expect(input.alternateIcao).toBe('WIPP');
+		expect(input.alternateTaf).toContain('WIPP');
+	});
+
+	it('states that a selected alternate has no forecast when the payload carries none for it', () => {
+		const { input, notes } = buildDispatchInput({
+			flight: BARE_CLOCK_FLIGHT,
+			weather: WEATHER,
+			reference: BOARD_FETCHED_AT,
+			destinationMinima: null,
+			alternateIcao: 'YPKG',
+			alternateLandingMinima: null,
+			alternatePlanningMinima: null,
+			selectedNotams: []
+		});
+		expect(input.alternateTaf).toBeNull();
+		expect(notes.join(' ')).toMatch(/no TAF for the selected alternate YPKG/i);
 	});
 
 	it('reports the payload fields it does not receive', () => {
 		const notes = build().notes.join('\n');
 		expect(notes).toMatch(/Diversion time is not present/i);
-		expect(notes).toMatch(/Minima are not present/i);
+		expect(notes).toMatch(/No approved destination minima record/i);
 		expect(notes).toMatch(/Fuel figures are not present/i);
-		expect(notes).toMatch(/NOTAM is not present/i);
+		expect(notes).toMatch(/NOTAM REVIEW PENDING/i);
+	});
+
+	it('states the 2-hour default diversion time and the resulting window', () => {
+		const notes = build().notes.join('\n');
+		expect(notes).toMatch(/2-hour default/i);
+		expect(notes).toMatch(/STA \+1 hr to \+3 hr/i);
 	});
 
 	it('omits an unusable destination alternate TAF instead of passing NIL through', () => {
@@ -294,11 +345,13 @@ describe('building the engine input', () => {
 			weather,
 			reference: BOARD_FETCHED_AT,
 			destinationMinima: null,
-			alternateMinima: null,
-			notamRemarks: null
+			alternateIcao: 'WILL',
+			alternateLandingMinima: null,
+			alternatePlanningMinima: null,
+			selectedNotams: []
 		});
 		expect(input.alternateTaf).toBeNull();
-		expect(notes.join(' ')).toMatch(/No usable Destination alternate TAF/i);
+		expect(notes.join(' ')).toMatch(/No usable TAF is present for the selected alternate WILL/i);
 	});
 
 	it('supplies the feed currency and freshness signals to the engine', () => {
@@ -313,8 +366,10 @@ describe('building the engine input', () => {
 			weather: WEATHER,
 			reference: BOARD_FETCHED_AT,
 			destinationMinima: null,
-			alternateMinima: null,
-			notamRemarks: null,
+			alternateIcao: null,
+			alternateLandingMinima: null,
+			alternatePlanningMinima: null,
+			selectedNotams: [],
 			scheduleOverride: { staZ: new Date('2026-09-12T03:30:00.000Z') }
 		});
 		expect(input.staZ?.toISOString()).toBe('2026-09-12T03:30:00.000Z');
@@ -331,21 +386,23 @@ describe('building the engine input', () => {
 			weather,
 			reference: BOARD_FETCHED_AT,
 			destinationMinima: null,
-			alternateMinima: null,
-			notamRemarks: null
+			alternateIcao: null,
+			alternateLandingMinima: null,
+			alternatePlanningMinima: null,
+			selectedNotams: []
 		});
 		expect(input.destinationTafCurrency).toBe('unknown');
 		expect(input.weatherFreshness).toBe('unknown');
 	});
 
-	it('carries the weather payload into a verdict without claiming compliance', () => {
-		// End to end on the captured payload: no minima and no NOTAM were supplied,
-		// so the engine must not be able to reach GO.
+	it('carries the weather payload into an assessment without claiming compliance', () => {
+		// End to end on the captured payload: no approved minima and no NOTAM were
+		// supplied, so the engine must not be able to reach a clean outcome.
 		const assessment = assessDispatch(build().input);
 		const codes = assessment.findings.map(finding => finding.code);
 		expect(codes).toContain('WX_ROUTE_IMPACT');
-		expect(codes).toContain('NOTAM_UNVERIFIED');
+		expect(codes).toContain('NOTAM_REVIEW_PENDING');
 		expect(codes).toContain('MINIMA_NOT_AVAILABLE');
-		expect(assessment.verdict).toBe('MARGINAL');
+		expect(assessment.outcome).toBe('REVIEW REQUIRED');
 	});
 });

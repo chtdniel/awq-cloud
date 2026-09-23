@@ -18,14 +18,34 @@ import { retrieve } from './retrieval';
 import { planningMode, planQuery } from './query-plan';
 import { buildDispatchInput, type AwqFlightWeather, type ScheduleAdjustment, type ScheduleResolution } from './awq';
 import {
-	CLAUSE_REFERENCES,
 	assessDispatch,
 	type ApproachMinima,
+	type ConditionalClassification,
 	type DispatchFinding,
-	type DispatchVerdict,
+	type DispatchOutcome,
 	type EtaWindows,
-	type FuelRequirement
+	type FuelRequirement,
+	type SelectedNotam
 } from './dispatch';
+import {
+	alternatePlanningMinima,
+	approveRecord,
+	getMinima,
+	insertDrafts,
+	listActiveMinima,
+	listMinima,
+	listMinimaAirports,
+	rejectRecord,
+	referencesForRecord,
+	sha256Hex,
+	toApproachMinima,
+	updateDraft,
+	type DraftCorrection,
+	type MinimaDraftInput
+} from './minima-registry';
+import { EXTRACTION_SYSTEM_PROMPT, MAX_CHART_BYTES, extractChart, parseJsonObject, type ChartSource } from './minima-extraction';
+import { listNotamCandidates, resolveSelectedNotams } from './notams';
+import type { MinimaRecord } from './minima';
 import { explainDispatch, type ExplainerInput, type ExplainerResult } from './explainer';
 
 type FlightBoardUnavailableResponse = {
@@ -237,29 +257,88 @@ type ExplanationRecord =
 type DispatchSnapshotWindows = {
 	destination: { from: string; to: string };
 	primaryAlternate: { from: string; to: string };
+	/** True when the 2-hour default produced the alternate window, not a published time. */
+	alternateUsesDefaultDiversionTime: boolean;
 } | null;
 
 /**
- * Contract version 3: the deterministic dispatch assessment plus its explanation.
+ * A minima value as it entered an assessment, with the record identity it came
+ * from. Storing the identity and the content hash is what makes a stored outcome
+ * traceable to the exact approved revision it was computed from, even after the
+ * record is later corrected.
+ */
+type SnapshotMinima = {
+	recordId: number;
+	contentHash: string;
+	sourceObjectKey: string;
+	pdfHash: string;
+	chartIdentifier: string;
+	chartPage: string | null;
+	approach: string;
+	approachType: string | null;
+	runway: string | null;
+	aircraftCategory: string | null;
+	kind: string;
+	ceilingFt: number | null;
+	visibilityM: number | null;
+	aipCycle: string | null;
+	effectiveFrom: string | null;
+	effectiveTo: string | null;
+	approvedBy: number | null;
+	approvedAt: string | null;
+	/** The value the engine applied, including any OM Part A Table 8.1-5 derivation. */
+	applied: ApproachMinima;
+};
+
+function toSnapshotMinima(record: MinimaRecord, applied: ApproachMinima): SnapshotMinima {
+	return {
+		recordId: record.id,
+		contentHash: record.contentHash,
+		sourceObjectKey: record.sourceObjectKey,
+		pdfHash: record.pdfHash,
+		chartIdentifier: record.chartIdentifier,
+		chartPage: record.chartPage,
+		approach: record.approach,
+		approachType: record.approachType,
+		runway: record.runway,
+		aircraftCategory: record.aircraftCategory,
+		kind: record.kind,
+		ceilingFt: record.ceilingFt,
+		visibilityM: record.visibilityM,
+		aipCycle: record.aipCycle,
+		effectiveFrom: record.effectiveFrom,
+		effectiveTo: record.effectiveTo,
+		approvedBy: record.approvedBy,
+		approvedAt: record.approvedAt,
+		applied
+	};
+}
+
+/**
+ * Contract version 4: the deterministic assessment, its minima provenance, its
+ * NOTAM review state and its explanation.
  *
  * The upstream payloads are stored verbatim alongside the derived assessment so
- * a verdict can always be re-checked against the data it was drawn from, and
+ * an outcome can always be re-checked against the data it was drawn from, and
  * `dataQualityNotes` records what the adapter had to infer or correct.
  */
 type DispatchSnapshot = {
-	contractVersion: '3';
+	contractVersion: '4';
 	createdAt: string;
 	flight: AssessmentFlight;
 	weather: AssessmentWeather;
 	dispatch: {
-		verdict: DispatchVerdict;
+		outcome: DispatchOutcome;
 		windows: DispatchSnapshotWindows;
 		fuel: FuelRequirement;
 		findings: DispatchFinding[];
-		notamEvaluated: boolean;
+		/** False means the NOTAM review is still pending, which is not "NOTAM clear". */
+		notamReviewed: boolean;
 		destinationStation: string | null;
 		alternateStation: string | null;
 		dataQualityNotes: string[];
+		/** How each TEMPO/PROB group was classified for the destination window. */
+		destinationConditional: ConditionalClassification[];
 	};
 	schedule: {
 		stdZ: string | null;
@@ -269,8 +348,18 @@ type DispatchSnapshot = {
 		needsConfirmation: boolean;
 		adjustments: ScheduleAdjustment[];
 	};
-	minima: { destination: ApproachMinima | null; alternate: ApproachMinima | null };
-	notamRemarks: string | null;
+	minima: {
+		destination: SnapshotMinima | null;
+		alternateLanding: SnapshotMinima | null;
+		alternatePlanning: SnapshotMinima | null;
+		/** How the alternate planning minima was obtained, so the derivation is visible. */
+		alternatePlanningBasis: 'chart-published-alternate-minima' | 'company-table-8.1-5' | 'higher-of-both' | 'unavailable';
+	};
+	notams: {
+		reviewed: boolean;
+		selected: SelectedNotam[];
+		missingIds: string[];
+	};
 	explanation: ExplanationRecord | null;
 	referenceDocuments: Array<{ id: number; file_name: string; category: string; chunk_count: number }>;
 };
@@ -290,7 +379,7 @@ const ASSISTANT_PLAN_TIMEOUT_MS = 8_000;
 /**
  * The DeepSeek credential is a Wrangler secret, so it is not part of the
  * generated `Env` unless the secret happened to be present when types were
- * generated — which is not the case on a fresh checkout. It is read through a
+ * generated  --  which is not the case on a fresh checkout. It is read through a
  * narrow shape so the Worker still compiles and still runs without it, degrading
  * to an assessment with no narrative rather than failing.
  */
@@ -303,37 +392,13 @@ function finiteNumberOrNull(value: unknown): number | null {
 	return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-/**
- * Read a minima value supplied by the client.
- *
- * A value with no approach label is not minima, because it cannot be attributed
- * to an approach, so it is discarded rather than defaulted. When the client
- * supplies no clause reference, the planning-minima family is cited: that is the
- * rule basis the value is applied against, and leaving the finding uncited would
- * break the requirement that every recommendation names its source.
- */
-function parseMinima(value: unknown): ApproachMinima | null {
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-	const record = value as Record<string, unknown>;
-	const approach = String(record.approach ?? '').trim().slice(0, 120);
-	if (!approach) return null;
-	const references = Array.isArray(record.references)
-		? record.references.map(entry => String(entry).trim()).filter(Boolean).slice(0, 10)
-		: [];
-	return {
-		approach,
-		ceilingFt: finiteNumberOrNull(record.ceilingFt),
-		visibilityM: finiteNumberOrNull(record.visibilityM),
-		references: references.length ? references : [...CLAUSE_REFERENCES.planningMinima]
-	};
-}
-
 /** Windows are stored as ISO instants so a snapshot stays readable without a revive step. */
 function serialiseWindows(windows: EtaWindows | null): DispatchSnapshotWindows {
 	if (!windows) return null;
 	return {
 		destination: { from: windows.destination.from.toISOString(), to: windows.destination.to.toISOString() },
-		primaryAlternate: { from: windows.primaryAlternate.from.toISOString(), to: windows.primaryAlternate.to.toISOString() }
+		primaryAlternate: { from: windows.primaryAlternate.from.toISOString(), to: windows.primaryAlternate.to.toISOString() },
+		alternateUsesDefaultDiversionTime: windows.alternateUsesDefaultDiversionTime
 	};
 }
 
@@ -347,20 +412,20 @@ function toExplanationRecord(result: ExplainerResult): ExplanationRecord {
  * Coarse readiness for the `status` column.
  *
  * `dispatch_assessments.status` is constrained to the original engine's vocabulary
- * (`READY`, `REVIEW_REQUIRED`, `NO_DATA`) by a CHECK constraint, so the finer verdict
- * cannot be stored there without rebuilding the table. The verdict is kept in full
- * inside the snapshot — which is the record of authority — and mapped here:
+ * (`READY`, `REVIEW_REQUIRED`, `NO_DATA`) by a CHECK constraint, so the finer
+ * outcome cannot be stored there without rebuilding the table. The outcome is kept
+ * in full inside the snapshot  --  which is the record of authority  --  and mapped here:
  *
  *   GO                 -> READY
- *   MARGINAL, NO-GO    -> REVIEW_REQUIRED
+ *   everything else    -> REVIEW_REQUIRED
  *
  * The mapping is deliberately conservative in one direction only: the column never
- * reports READY unless the verdict was GO, so a collapsed value can understate
- * readiness but cannot overstate it. `json_extract` recovers the true verdict for
+ * reports READY unless the outcome was GO, so a collapsed value can understate
+ * readiness but cannot overstate it. `json_extract` recovers the true outcome for
  * the history list.
  */
-export function legacyStatusFor(verdict: DispatchVerdict): 'READY' | 'REVIEW_REQUIRED' {
-	return verdict === 'GO' ? 'READY' : 'REVIEW_REQUIRED';
+export function legacyStatusFor(outcome: DispatchOutcome): 'READY' | 'REVIEW_REQUIRED' {
+	return outcome === 'GO' ? 'READY' : 'REVIEW_REQUIRED';
 }
 
 /**
@@ -395,16 +460,56 @@ async function awqCloudJson(request: Request, env: Env, target: URL): Promise<{ 
 	return { response, payload };
 }
 
+/** A minima record id supplied by the client, or null when none was chosen. */
+function parseRecordId(value: unknown): number | null {
+	const parsed = Number(value);
+	return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * Load the approved minima a request asks for.
+ *
+ * Only `approved` records are returned: this is the boundary that keeps an
+ * unapproved AI draft out of an assessment (PRD Sec.5, acceptance Sec.29). A record
+ * that is asked for but is not approved comes back as null so the engine records
+ * `REVIEW REQUIRED` instead of silently using nothing.
+ */
+async function loadApprovedMinima(
+	env: Env,
+	id: number | null
+): Promise<{ record: MinimaRecord | null; reason: 'not-selected' | 'not-found' | 'not-approved' }> {
+	if (id === null) return { record: null, reason: 'not-selected' };
+	const row = await env.DB.prepare(
+		`SELECT id, status FROM airport_minima WHERE id = ? LIMIT 1`
+	).bind(id).first<{ id: number; status: string }>();
+	if (!row) return { record: null, reason: 'not-found' };
+	if (row.status !== 'approved') return { record: null, reason: 'not-approved' };
+	const record = await getMinima(env, id);
+	return { record: record ? record.record : null, reason: 'not-selected' };
+}
+
 /**
  * Create an immutable dispatch assessment for one flight.
  *
- * The verdict is produced by the deterministic engine and the explanation
+ * The outcome is produced by the deterministic engine and the explanation
  * afterwards. The order matters: an AI outage degrades the write-up, never the
  * decision, so the assessment is complete and storable before any model is
  * called.
+ *
+ * Minima are referenced by registry record id rather than typed into the request.
+ * The engine therefore only ever compares against values an ADMIN dispatcher has
+ * approved against the AIP chart, and the snapshot keeps the record identity so
+ * the value can be traced afterwards.
  */
 async function createAssessment(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-	let body: { flightId?: number; minima?: unknown; notamRemarks?: unknown; explain?: unknown; schedule?: unknown };
+	let body: {
+		flightId?: number;
+		primaryAlternate?: unknown;
+		minima?: unknown;
+		notamIds?: unknown;
+		explain?: unknown;
+		schedule?: unknown;
+	};
 	try { body = await request.json() as typeof body; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
 	const flightId = Number(body.flightId || 0);
 	if (!Number.isInteger(flightId) || flightId <= 0) return documentResponse({ error: 'A valid flightId is required.' }, 400);
@@ -416,13 +521,20 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 	const scheduleBody = (body.schedule && typeof body.schedule === 'object' && !Array.isArray(body.schedule) ? body.schedule : {}) as Record<string, unknown>;
 	const overrideSta = parseInstantInput(scheduleBody.staZ);
 
-	// Minima and NOTAM are not published by the feed, so they arrive with the
-	// request. Both may be absent, in which case the engine records that the check
-	// could not be evaluated rather than assuming compliance.
-	const minima = (body.minima && typeof body.minima === 'object' && !Array.isArray(body.minima) ? body.minima : {}) as Record<string, unknown>;
-	const destinationMinima = parseMinima(minima.destination);
-	const alternateMinima = parseMinima(minima.alternate);
-	const notamRemarks = String(body.notamRemarks ?? '').trim().slice(0, 2000) || null;
+	// The alternate and both minima come from the registry. Nothing numeric is
+	// accepted from the client, so a request cannot introduce a minima value that
+	// no ADMIN has verified.
+	const alternateIcao = String(body.primaryAlternate ?? '').trim().toUpperCase().slice(0, 4) || null;
+	if (alternateIcao !== null && !/^[A-Z0-9]{4}$/.test(alternateIcao)) {
+		return documentResponse({ error: 'primaryAlternate must be a four-character ICAO location indicator.' }, 400);
+	}
+	const minimaBody = (body.minima && typeof body.minima === 'object' && !Array.isArray(body.minima) ? body.minima : {}) as Record<string, unknown>;
+	const destinationId = parseRecordId(minimaBody.destination);
+	const alternateLandingId = parseRecordId(minimaBody.alternateLanding);
+	const alternatePlanningId = parseRecordId(minimaBody.alternatePlanning);
+	const notamIds = Array.isArray(body.notamIds)
+		? body.notamIds.map(value => String(value).trim()).filter(Boolean).slice(0, 50)
+		: [];
 	const wantExplanation = body.explain !== false;
 
 	const boardTarget = new URL(`${env.AWQ_CLOUD_API_ORIGIN}/api/assist`);
@@ -441,16 +553,77 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 	// it is preferred over the Worker clock; that fallback only applies when the
 	// field is missing or unparseable.
 	const reference = new Date(String(boardData?.fetchedAt ?? ''));
+	const boardReference = Number.isNaN(reference.getTime()) ? new Date() : reference;
+
+	// Resolve the minima records and the selected NOTAM before the engine runs, so
+	// a missing or unapproved record becomes a recorded gap rather than a silently
+	// absent comparison.
+	const [destinationLookup, alternateLandingLookup, alternatePlanningLookup] = await Promise.all([
+		loadApprovedMinima(env, destinationId),
+		loadApprovedMinima(env, alternateLandingId),
+		loadApprovedMinima(env, alternatePlanningId)
+	]);
+	const destinationRecord = destinationLookup.record;
+	const alternateLandingRecord = alternateLandingLookup.record;
+	const alternatePlanningRecord = alternatePlanningLookup.record;
+
+	const stationLocations = [
+		String(flight.destination ?? '').trim().toUpperCase(),
+		String(flight.origin ?? '').trim().toUpperCase(),
+		alternateIcao ?? ''
+	].filter(value => /^[A-Z0-9]{4}$/.test(value));
+	const notamResolution = await resolveSelectedNotams(env, notamIds, stationLocations);
+
+	// The alternate planning minima is the chart's published `Alternate Minima`
+	// when the registry holds one for this approach, otherwise the company minima
+	// of OM Part A Table 8.1-5 derived from the landing value  --  and the higher of
+	// the two when both exist, as the note under that table requires.
+	let alternatePlanningBasis: DispatchSnapshot['minima']['alternatePlanningBasis'] = 'unavailable';
+	let alternatePlanningApplied: ApproachMinima | null = null;
+	let alternatePlanningSource: MinimaRecord | null = null;
+	if (alternatePlanningRecord && alternateLandingRecord) {
+		alternatePlanningApplied = alternatePlanningMinima(alternateLandingRecord, alternatePlanningRecord);
+		alternatePlanningBasis = 'higher-of-both';
+		alternatePlanningSource = alternateLandingRecord;
+	} else if (alternatePlanningRecord) {
+		alternatePlanningApplied = alternatePlanningMinima(null, alternatePlanningRecord);
+		alternatePlanningBasis = 'chart-published-alternate-minima';
+		alternatePlanningSource = alternatePlanningRecord;
+	} else if (alternateLandingRecord) {
+		alternatePlanningApplied = alternatePlanningMinima(alternateLandingRecord, null);
+		alternatePlanningBasis = 'company-table-8.1-5';
+		alternatePlanningSource = alternateLandingRecord;
+	}
+
 	const adapted = buildDispatchInput({
 		flight,
 		weather: weatherData as AwqFlightWeather,
-		reference: Number.isNaN(reference.getTime()) ? new Date() : reference,
-		destinationMinima,
-		alternateMinima,
-		notamRemarks,
+		reference: boardReference,
+		destinationMinima: destinationRecord ? toApproachMinima(destinationRecord) : null,
+		alternateIcao,
+		alternateLandingMinima: alternateLandingRecord ? toApproachMinima(alternateLandingRecord) : null,
+		alternatePlanningMinima: alternatePlanningApplied,
+		selectedNotams: notamResolution.selected,
 		scheduleOverride: overrideSta ? { staZ: overrideSta } : {}
 	});
 	const evaluation = assessDispatch(adapted.input);
+
+	// Report the minima lookups the request asked for but could not use. A record
+	// that is only a draft is the case PRD acceptance Sec.29 requires to be visible.
+	const minimaNotes: string[] = [];
+	if (destinationId !== null && !destinationRecord) {
+		minimaNotes.push(`Destination minima record ${destinationId} is ${destinationLookup.reason === 'not-approved' ? 'not approved' : 'not available'}, so no destination minima was applied.`);
+	}
+	if (alternateLandingId !== null && !alternateLandingRecord) {
+		minimaNotes.push(`Alternate landing minima record ${alternateLandingId} is ${alternateLandingLookup.reason === 'not-approved' ? 'not approved' : 'not available'}, so the TEMPO concession cannot be evaluated.`);
+	}
+	if (alternatePlanningId !== null && !alternatePlanningRecord) {
+		minimaNotes.push(`Alternate published minima record ${alternatePlanningId} is ${alternatePlanningLookup.reason === 'not-approved' ? 'not approved' : 'not available'}, so company planning minima was derived instead where possible.`);
+	}
+	if (notamResolution.missing.length) {
+		minimaNotes.push(`${notamResolution.missing.length} selected NOTAM could not be attached: ${notamResolution.missing.join(', ')}. The review is incomplete.`);
+	}
+	const dataQualityNotes = [...adapted.notes, ...minimaNotes];
 
 	let explanation: ExplanationRecord | null = null;
 	if (wantExplanation) {
@@ -459,13 +632,13 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 			origin: flight.origin ?? null,
 			destination: flight.destination ?? null,
 			registration: flight.aircraft?.registration ?? null,
-			destinationAlternates: adapted.input.destinationAlternates,
-			verdict: evaluation.verdict,
+			destinationAlternates: alternateIcao ? [alternateIcao] : [],
+			outcome: evaluation.outcome,
 			windows: evaluation.windows,
 			diversionMinutes: adapted.input.diversionMinutes,
 			findings: evaluation.findings,
 			fuel: evaluation.fuel,
-			notamEvaluated: evaluation.notamEvaluated
+			notamReviewed: evaluation.notamReviewed
 		};
 		explanation = toExplanationRecord(
 			await explainDispatch({ apiKey: deepSeekKey(env), timeoutMs: EXPLAIN_TIMEOUT_MS }, explainerInput)
@@ -481,22 +654,39 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 		  ORDER BY d.created_at ASC, d.id ASC`
 	).bind(CHUNK_INGEST_VERSION).all<{ id: number; file_name: string; category: string; chunk_count: number }>();
 	const snapshot: DispatchSnapshot = {
-		contractVersion: '3',
+		contractVersion: '4',
 		createdAt: new Date().toISOString(),
 		flight,
 		weather: weatherData,
 		dispatch: {
-			verdict: evaluation.verdict,
+			outcome: evaluation.outcome,
 			windows: serialiseWindows(evaluation.windows),
 			fuel: evaluation.fuel,
 			findings: evaluation.findings,
-			notamEvaluated: evaluation.notamEvaluated,
+			notamReviewed: evaluation.notamReviewed,
 			destinationStation: adapted.destinationStation,
 			alternateStation: adapted.alternateStation,
-			dataQualityNotes: adapted.notes
+			dataQualityNotes,
+			destinationConditional: evaluation.destinationConditional
 		},
-		minima: { destination: destinationMinima, alternate: alternateMinima },
-		notamRemarks,
+		minima: {
+			destination: destinationRecord
+				? toSnapshotMinima(destinationRecord, toApproachMinima(destinationRecord))
+				: null,
+			alternateLanding: alternateLandingRecord
+				? toSnapshotMinima(alternateLandingRecord, toApproachMinima(alternateLandingRecord))
+				: null,
+			alternatePlanning:
+				alternatePlanningApplied && alternatePlanningSource
+					? toSnapshotMinima(alternatePlanningSource, alternatePlanningApplied)
+					: null,
+			alternatePlanningBasis
+		},
+		notams: {
+			reviewed: evaluation.notamReviewed,
+			selected: notamResolution.selected,
+			missingIds: notamResolution.missing
+		},
 		explanation,
 		schedule: serialiseSchedule(adapted.schedule),
 		referenceDocuments: references.results || [],
@@ -504,8 +694,8 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 	const contextHash = await hashToken(JSON.stringify(snapshot));
 	const result = await env.DB.prepare(
 		`INSERT INTO dispatch_assessments (flight_id, user_id, status, decision, contract_version, snapshot_json, context_hash)
-		 VALUES (?, ?, ?, 'OPEN', '3', ?, ?)`
-	).bind(flightId, userId, legacyStatusFor(evaluation.verdict), JSON.stringify(snapshot), contextHash).run();
+		 VALUES (?, ?, ?, 'OPEN', '4', ?, ?)`
+	).bind(flightId, userId, legacyStatusFor(evaluation.outcome), JSON.stringify(snapshot), contextHash).run();
 	const assessmentId = Number(result.meta.last_row_id);
 	await audit(
 		env,
@@ -513,7 +703,7 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 		'assessment_create',
 		'dispatch_assessment',
 		assessmentId,
-		`${evaluation.verdict} findings=${evaluation.findings.length} fuel=${evaluation.fuel.mandatoryHoldingMinutes}min notam=${evaluation.notamEvaluated ? 'evaluated' : 'unevaluated'}`,
+		`${evaluation.outcome} findings=${evaluation.findings.length} holding=${evaluation.fuel.mandatoryHoldingMinutes}min padding=${evaluation.fuel.advisoryPaddingMinutes}min notam=${evaluation.notamReviewed ? 'reviewed' : 'pending'} minima=dest:${destinationRecord?.id ?? 'none'}/alt:${alternateLandingRecord?.id ?? 'none'}`,
 		ctx
 	);
 	return documentResponse({
@@ -521,7 +711,7 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 		data: {
 			id: assessmentId,
 			flightId,
-			verdict: evaluation.verdict,
+			outcome: evaluation.outcome,
 			decision: 'OPEN',
 			contextHash,
 			findings: evaluation.findings,
@@ -538,13 +728,14 @@ async function listAssessments(request: Request, env: Env, url: URL): Promise<Re
 	if (!Number.isInteger(flightId) || flightId <= 0) return documentResponse({ error: 'A valid flight_id is required.' }, 400);
 	if (!await authorizeFlight(request, env, flightId)) return documentResponse({ error: 'SSO is required for this flight.' }, 401);
 	const { results } = await env.DB.prepare(
-		// `verdict` is lifted out of the snapshot in SQL rather than parsed in JS: the
+		// `outcome` is lifted out of the snapshot in SQL rather than parsed in JS: the
 		// column only holds the coarse readiness value, and parsing up to twenty full
 		// snapshots (each carrying the raw upstream payload) to read one field would be
-		// wasteful. It is null for contract-2 rows, where the caller falls back to
-		// `status`.
+		// wasteful. It is null for contract-2 and contract-3 rows, where the caller
+		// falls back to `status`.
 		`SELECT id, flight_id, status, decision, contract_version, context_hash, created_at, reviewed_at, review_note,
-		        json_extract(snapshot_json, '$.dispatch.verdict') AS verdict
+		        json_extract(snapshot_json, '$.dispatch.outcome') AS outcome,
+		        json_extract(snapshot_json, '$.dispatch.verdict') AS legacy_verdict
 		   FROM dispatch_assessments WHERE flight_id = ? ORDER BY created_at DESC, id DESC LIMIT 20`
 	).bind(flightId).all();
 	return documentResponse({ ok: true, data: { assessments: results || [] } });
@@ -578,27 +769,347 @@ function escapeHtml(value: unknown): string {
 	return String(value ?? '').replace(/[&<>\"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[character] || character));
 }
 
+/**
+ * Printable report styling.
+ *
+ * The report is a formal operational document, not a screenshot of the dashboard:
+ * light ground, rule-separated sections, tabular data, and no dark chrome, because
+ * it has to print legibly in black and white and be read on paper. Values are
+ * monospaced where they are codes, times or measurements.
+ */
 const REPORT_STYLE = [
-	'body{font-family:Arial,sans-serif;color:#17202b;max-width:960px;margin:40px auto;padding:0 24px;line-height:1.5}',
-	'h1{margin-bottom:4px}h2{margin-top:28px;border-bottom:1px solid #ccd3da;padding-bottom:4px}',
-	'.meta{color:#536273}.badge{display:inline-block;padding:6px 12px;border-radius:999px;background:#eef1f4;font-weight:700;margin-right:6px}',
-	'.finding{padding:12px 16px;border-left:4px solid #ccd3da;background:#f7f9fa;margin-bottom:8px}',
-	'.finding--critical{border-left-color:#c0392b;background:#fdf0ee}',
-	'.finding--caution{border-left-color:#e5a72b;background:#fff8e9}',
-	'.finding--info{border-left-color:#5b7c99;background:#f4f7fa}',
-	'.severity{display:inline-block;min-width:74px;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:.04em}',
-	'.evidence{color:#536273;font-size:12px;margin-top:4px}',
-	'table{border-collapse:collapse;width:100%;margin-top:12px}',
-	'th,td{border:1px solid #ccd3da;padding:8px;text-align:left;vertical-align:top}',
-	'button{padding:10px 16px;margin-bottom:24px}',
-	'.disclaimer{margin-top:32px;padding:12px 16px;border:1px solid #ccd3da;background:#f7f9fa;font-size:12px;color:#3d4a57}',
-	'.narrative{white-space:pre-wrap;background:#f7f9fa;border:1px solid #ccd3da;padding:12px 16px;font-size:13px}',
-	'.badge--go{background:#e3f4ea;color:#1c6b41}',
-	'.badge--marginal{background:#fff4dd;color:#8a5a00}',
-	'.badge--nogo{background:#fbe3e0;color:#8c2b20}',
-	'.note{color:#536273;font-size:12px}',
-	'@media print{button{display:none}}',
+	':root{--ink:#141c26;--muted:#57646f;--rule:#c3ccd4;--panel:#f5f7f8;--amber:#a9701a;--good:#1c6b41;--warn:#8a5a00;--bad:#8c2b20}',
+	'*{box-sizing:border-box}',
+	'body{font-family:"Segoe UI",Arial,Helvetica,sans-serif;color:var(--ink);max-width:1000px;margin:0 auto;padding:32px 28px 56px;line-height:1.5;font-size:13px;background:#fff}',
+	'header.doc{border-bottom:3px solid var(--amber);padding-bottom:12px;margin-bottom:20px}',
+	'.brandline{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}',
+	'.brand{font-weight:800;letter-spacing:.14em;font-size:12px;color:var(--amber);text-transform:uppercase}',
+	'h1{font-size:21px;margin:6px 0 2px;letter-spacing:-.01em}',
+	'h2{font-size:13px;margin:26px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--rule);text-transform:uppercase;letter-spacing:.08em}',
+	'h3{font-size:12px;margin:14px 0 4px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}',
+	'.meta{color:var(--muted);font-size:11px}',
+	'.stamp{margin:14px 0 4px;padding:10px 14px;border:1px solid var(--rule);border-left:3px solid var(--amber);background:var(--panel)}',
+	'.stamp strong{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase}',
+	'.stamp p{margin:4px 0 0;font-size:11px;color:var(--muted)}',
+	'.badge{display:inline-block;padding:4px 10px;border:1px solid var(--rule);border-radius:2px;font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-right:6px}',
+	'.badge--go{background:#e3f4ea;border-color:#9ccfae;color:var(--good)}',
+	'.badge--marginal{background:#fff4dd;border-color:#e0c274;color:var(--warn)}',
+	'.badge--nogo{background:#fbe3e0;border-color:#e0a49c;color:var(--bad)}',
+	'.badge--reviewrequired{background:#eef3f8;border-color:#a9bccd;color:#28516f}',
+	'.badge--notamreviewpending{background:#fff1dc;border-color:#e0b877;color:var(--warn)}',
+	'.finding{padding:10px 12px;border:1px solid var(--rule);border-left-width:3px;margin-bottom:7px;background:#fff}',
+	'.finding--critical{border-left-color:#a5342a;background:#fdf4f3}',
+	'.finding--caution{border-left-color:#c08a1e;background:#fdfaf1}',
+	'.finding--info{border-left-color:#4d6d87;background:#f6f8fa}',
+	'.finding .head{display:flex;gap:8px;align-items:baseline}',
+	'.severity{font-weight:700;font-size:10px;letter-spacing:.08em;text-transform:uppercase;min-width:70px}',
+	'.code{font-family:Consolas,"SFMono-Regular",monospace;font-size:10px;color:var(--muted)}',
+	'.evidence{color:var(--muted);font-size:11px;margin-top:4px}',
+	'table{border-collapse:collapse;width:100%;margin-top:10px;font-size:12px}',
+	'th,td{border:1px solid var(--rule);padding:6px 8px;text-align:left;vertical-align:top}',
+	'th{background:var(--panel);font-size:10px;text-transform:uppercase;letter-spacing:.06em}',
+	'td.num,th.num{text-align:right;font-family:Consolas,"SFMono-Regular",monospace}',
+	'.mono{font-family:Consolas,"SFMono-Regular",monospace}',
+	'ol.citations{margin:8px 0 0;padding-left:22px}',
+	'ol.citations li{margin-bottom:4px}',
+	'.refnum{font-family:Consolas,"SFMono-Regular",monospace;font-weight:700;color:var(--amber)}',
+	'.disclaimer{margin-top:26px;padding:10px 14px;border:1px solid var(--rule);background:var(--panel);font-size:11px;color:#3d4a57}',
+	'.narrative{white-space:pre-wrap;background:var(--panel);border:1px solid var(--rule);padding:12px 14px;font-size:12px}',
+	'.note{color:var(--muted);font-size:11px}',
+	'ul.tight{margin:6px 0 0;padding-left:20px}',
+	'ul.tight li{margin-bottom:3px}',
+	'.toolbar{position:sticky;top:0;background:#fff;padding:0 0 12px}',
+	'.toolbar button{padding:8px 14px;border:1px solid var(--rule);background:var(--panel);font:inherit;font-weight:600;cursor:pointer}',
+	'@media print{.toolbar{display:none}body{padding:0}h2{page-break-after:avoid}.finding,table{page-break-inside:avoid}}',
 ].join('');
+
+/** Reference numbers for the citation list, keyed by the reference text. */
+function citationIndex(findings: readonly { references: readonly string[] }[], fuelReferences: readonly string[]): Map<string, number> {
+	const order = new Map<string, number>();
+	const add = (reference: string): void => {
+		if (!order.has(reference)) order.set(reference, order.size + 1);
+	};
+	for (const finding of findings) for (const reference of finding.references) add(reference);
+	for (const reference of fuelReferences) add(reference);
+	return order;
+}
+
+/** Render `1, 3` beside a finding, so its sources are findable in the list below. */
+function citationNumbers(references: readonly string[], index: Map<string, number>): string {
+	const numbers = references.map(reference => index.get(reference)).filter((value): value is number => value !== undefined);
+	return numbers.length ? `[${numbers.join(', ')}]` : '';
+}
+
+/** A minima block with its provenance, or an explicit statement that it is absent. */
+function minimaTable(title: string, value: SnapshotMinima | null, basisNote: string): string {
+	if (!value) {
+		return `<h3>${escapeHtml(title)}</h3><p class="note">Not available. No approved minima record was applied, so this comparison could not be made.</p>`;
+	}
+	return `<h3>${escapeHtml(title)}</h3>
+<table><tbody>
+<tr><th>Approach</th><td>${escapeHtml(value.approach)}${value.approachType ? ` (${escapeHtml(value.approachType)})` : ''}</td></tr>
+<tr><th>Runway</th><td class="mono">${escapeHtml(value.runway ?? 'not stated')}</td></tr>
+<tr><th>Aircraft category</th><td class="mono">${escapeHtml(value.aircraftCategory ?? 'not stated')}</td></tr>
+<tr><th>Ceiling / visibility applied</th><td class="mono">${escapeHtml(value.applied.ceilingFt ?? 'not stated')} ft / ${escapeHtml(value.applied.visibilityM ?? 'not stated')} m</td></tr>
+<tr><th>Published on chart</th><td class="mono">${escapeHtml(value.ceilingFt ?? 'not stated')} ft / ${escapeHtml(value.visibilityM ?? 'not stated')} m</td></tr>
+<tr><th>Source</th><td>${escapeHtml(value.sourceObjectKey)}<br><span class="note">Page ${escapeHtml(value.chartPage ?? 'not stated')} * AIP cycle ${escapeHtml(value.aipCycle ?? 'not stated')} * effective ${escapeHtml(value.effectiveFrom ?? 'not stated')}${value.effectiveTo ? ` to ${escapeHtml(value.effectiveTo)}` : ''}</span></td></tr>
+<tr><th>PDF hash</th><td class="mono">${escapeHtml(value.pdfHash.slice(0, 32))}...</td></tr>
+<tr><th>Approved</th><td>Record ${escapeHtml(value.recordId)} by user ${escapeHtml(value.approvedBy ?? 'unknown')} at ${escapeHtml(value.approvedAt ?? 'unknown')} UTC</td></tr>
+<tr><th>Basis</th><td>${escapeHtml(basisNote)}</td></tr>
+</tbody></table>`;
+}
+
+/**
+ * Render a contract-4 assessment.
+ *
+ * Everything printed comes from the stored snapshot, never from live data: that is
+ * what makes the report match the assessment that was reviewed (PRD Sec.15). The
+ * review-state banner is printed even when the outcome is clean, so a report taken
+ * before the review finished cannot be mistaken for a finished one (PRD acceptance
+ * Sec.22).
+ */
+function renderDispatchReport(assessment: StoredAssessment, snapshot: DispatchSnapshot): Response {
+	const { dispatch } = snapshot;
+	const windows = dispatch.windows;
+	const destinationWindow = windows ? `${zuluLabel(windows.destination.from)} - ${zuluLabel(windows.destination.to)}` : 'not available';
+	const alternateWindow = windows ? `${zuluLabel(windows.primaryAlternate.from)} - ${zuluLabel(windows.primaryAlternate.to)}` : 'not available';
+	const diversionNote = windows
+		? windows.alternateUsesDefaultDiversionTime
+			? 'Default diversion time: 2 hours. Source diversion time unavailable.'
+			: 'Diversion time as published by the flight plan.'
+		: 'No diversion window could be computed.';
+
+	const citationOrder = citationIndex(dispatch.findings, dispatch.fuel.references);
+	const citationList = [...citationOrder.entries()]
+		.sort((left, right) => left[1] - right[1])
+		.map(([reference, number]) => `<li><span class="refnum">[${number}]</span> ${escapeHtml(reference)}</li>`)
+		.join('');
+
+	const findingBlocks = dispatch.findings.length
+		? dispatch.findings
+				.map(
+					item =>
+						`<div class="finding finding--${escapeHtml(item.severity.toLowerCase())}"><div class="head"><span class="severity">${escapeHtml(item.severity)}</span><span class="code">${escapeHtml(item.code)}</span><span class="refnum">${escapeHtml(citationNumbers(item.references, citationOrder))}</span></div><div>${escapeHtml(item.message)}</div><div class="evidence">Evidence: ${escapeHtml(item.evidence)}</div><div class="evidence">References: ${escapeHtml(item.references.join(' * ') || 'none cited')}</div></div>`
+				)
+				.join('')
+		: '<p>No findings recorded.</p>';
+
+	const dataQuality = dispatch.dataQualityNotes.length
+		? `<ul class="tight">${dispatch.dataQualityNotes.map(note => `<li class="note">${escapeHtml(note)}</li>`).join('')}</ul>`
+		: '<p class="note">No data-quality corrections were required.</p>';
+
+	const conditionalRows = dispatch.destinationConditional.length
+		? dispatch.destinationConditional
+				.map(
+					entry =>
+						`<tr><td class="mono">${escapeHtml(entry.groupType)}</td><td>${escapeHtml(entry.nature)}</td><td>${escapeHtml(entry.applies ? 'Applicable to destination planning minima' : 'Not applicable  --  disregarded for planning minima')}</td><td class="mono">${escapeHtml(entry.phenomena.join(' ') || 'none stated')}</td></tr>`
+				)
+				.join('')
+		: '<tr><td colspan="4">No conditional group affects the destination window.</td></tr>';
+
+	const taf = Array.isArray(snapshot.weather?.taf) ? snapshot.weather.taf : [];
+	const tafRows = taf
+		.map(
+			item =>
+				`<tr><td class="mono">${escapeHtml(item.role)}</td><td class="mono">${escapeHtml(item.station)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.coverage)}</td><td class="mono">${escapeHtml(item.raw)}</td></tr>`
+		)
+		.join('');
+
+	const notamRows = snapshot.notams.selected.length
+		? snapshot.notams.selected
+				.map(
+					notam =>
+						`<tr><td class="mono">${escapeHtml(notam.id)}</td><td class="mono">${escapeHtml(notam.location)}</td><td class="mono">${escapeHtml(notam.validFrom ?? 'not stated')}<br>${escapeHtml(notam.validTo ?? 'not stated')}</td><td class="mono">${escapeHtml(notam.message.slice(0, 900))}</td></tr>`
+				)
+				.join('')
+		: '';
+
+	const fuelCriteria = dispatch.fuel.paddingCriteria.length
+		? `<ul class="tight">${dispatch.fuel.paddingCriteria.map(criterion => `<li>${escapeHtml(criterion.statement)}<br><span class="note">${escapeHtml(criterion.evidence)} * ${escapeHtml(criterion.minutes)} min * ${escapeHtml(criterion.references.join(' * '))}</span></li>`).join('')}</ul>`
+		: '<p class="note">No standard fuel padding criterion was matched by this forecast.</p>';
+
+	const references = Array.isArray(snapshot.referenceDocuments) ? snapshot.referenceDocuments : [];
+	const documentRows = references
+		.map(item => `<li>${escapeHtml(item.file_name)} * ${escapeHtml(item.category)} * ${escapeHtml(item.chunk_count)} indexed excerpts</li>`)
+		.join('');
+
+	const minimaBasis: Record<DispatchSnapshot['minima']['alternatePlanningBasis'], string> = {
+		'chart-published-alternate-minima': 'Alternate minima published on the AIP chart (OM Part A 8.1.2.2.4 note).',
+		'company-table-8.1-5': 'Company planning minima derived from the landing minima per OM Part A Table 8.1-5.',
+		'higher-of-both': 'Higher of the chart-published alternate minima and the company minima per OM Part A Table 8.1-5 note.',
+		unavailable: 'Not available.'
+	};
+
+	const explanation = snapshot.explanation;
+	const narrative =
+		explanation && explanation.ok
+			? `<div class="narrative">${escapeHtml(explanation.narrative)}</div><p class="note">Model ${escapeHtml(explanation.model)} * prompt hash ${escapeHtml(explanation.promptHash)}</p>`
+			: `<p class="note">No model narrative was produced (${escapeHtml(explanation ? explanation.reason : 'not requested')}). The deterministic assessment above stands on its own.</p>`;
+
+	const draftLabel =
+		dispatch.outcome === 'NOTAM REVIEW PENDING'
+			? 'DRAFT / NOTAM REVIEW PENDING'
+			: dispatch.outcome === 'REVIEW REQUIRED' || dispatch.outcome === 'MARGINAL'
+				? 'DRAFT / REVIEW REQUIRED'
+				: null;
+
+	const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Dispatch Assessment ${escapeHtml(assessment.id)}</title><style>${REPORT_STYLE}</style></head><body>
+<div class="toolbar"><button onclick="window.print()">Print / Save as PDF</button></div>
+<header class="doc">
+	<div class="brandline">
+		<div>
+			<div class="brand">AWQ Cloud * Dispatch Assist</div>
+			<h1>Operational Dispatch Assessment</h1>
+			<p class="meta">Assessment #${escapeHtml(assessment.id)} * Flight ${escapeHtml(snapshot.flight.callsign || snapshot.flight.flightNumber || snapshot.flight.id)} * Created ${escapeHtml(assessment.created_at)} UTC</p>
+		</div>
+		<div>
+			<span class="badge badge--${escapeHtml(verdictSlug(dispatch.outcome))}">Assessment outcome: ${escapeHtml(dispatch.outcome)}</span>
+			<span class="badge">Decision: ${escapeHtml(assessment.decision)}</span>
+		</div>
+	</div>
+</header>
+${draftLabel ? `<div class="stamp"><strong>${escapeHtml(draftLabel)}</strong><p>This report was produced before the assessment review finished. It is not a completed assessment and must not be read as one.</p></div>` : ''}
+<div class="stamp"><strong>Assessment outcome, not a dispatch release</strong><p>This document supports a dispatcher decision. It is not a dispatch release, not a compliance certification, and not an airworthiness determination. Every value below is taken from the stored assessment snapshot and the citation list at the end of this document.</p></div>
+
+<h2>Flight context</h2>
+<table><tbody>
+<tr><th>Route</th><td class="mono">${escapeHtml(snapshot.flight.origin)} -> ${escapeHtml(snapshot.flight.destination)}</td></tr>
+<tr><th>Registration</th><td class="mono">${escapeHtml(snapshot.flight.aircraft?.registration ?? 'not stated')}</td></tr>
+<tr><th>Date of flight</th><td class="mono">${escapeHtml((snapshot.schedule.dof ?? '').slice(0, 10) || 'not established')}</td></tr>
+<tr><th>Scheduled arrival (STA)</th><td class="mono">${zuluLabel(snapshot.schedule.staZ ?? undefined)}</td></tr>
+<tr><th>Primary alternate</th><td class="mono">${escapeHtml(dispatch.alternateStation ?? 'not selected')}</td></tr>
+</tbody></table>
+
+<h2>1. ETA windows</h2>
+<table><thead><tr><th>Point</th><th>Aerodrome</th><th>Window (Zulu)</th></tr></thead><tbody>
+<tr><td>Destination (STA +/- 1 hr)</td><td class="mono">${escapeHtml(dispatch.destinationStation || 'unknown')}</td><td class="mono">${escapeHtml(destinationWindow)}</td></tr>
+<tr><td>Primary alternate</td><td class="mono">${escapeHtml(dispatch.alternateStation || 'not selected')}</td><td class="mono">${escapeHtml(alternateWindow)}</td></tr>
+</tbody></table>
+<p class="note">${escapeHtml(diversionNote)}</p>
+${snapshot.schedule.needsConfirmation ? `<div class="stamp"><strong>Schedule confirmation required</strong><p>The ETA windows above are provisional.<br>${snapshot.schedule.adjustments.map(adjustment => escapeHtml(adjustment.note)).join('<br>')}</p></div>` : ''}
+
+<h2>2. Minima</h2>
+${minimaTable('Destination landing minima', snapshot.minima.destination, 'Approved AIP chart value, applied to the destination at ETA +/- 1 hour (OM Part A 8.1.2.2.3).')}
+${minimaTable('Primary alternate landing minima', snapshot.minima.alternateLanding, 'Approved AIP chart value. Required by the destination-alternate TEMPO concession (OM Part A 8.1.6 b.iii), and used to check the alternate is above its landing minima.')}
+${minimaTable('Primary alternate planning minima', snapshot.minima.alternatePlanning, minimaBasis[snapshot.minima.alternatePlanningBasis])}
+
+<h2>3. Weather and change groups</h2>
+<table><thead><tr><th>Role</th><th>Station</th><th>Status</th><th>Coverage</th><th>Raw TAF</th></tr></thead><tbody>${tafRows || '<tr><td colspan="5">No TAF data</td></tr>'}</tbody></table>
+<p class="note">Monitoring freshness: ${escapeHtml(snapshot.weather?.weatherMonitoring?.freshness ?? 'not stated')} * Warnings: ${escapeHtml(snapshot.weather?.weatherMonitoring?.warningCount ?? 'n/a')} * Affecting route: ${escapeHtml(dispatch.findings.some(item => item.code === 'WX_ROUTE_IMPACT') ? 'yes' : 'no')}</p>
+<h3>Destination conditional groups (OM Part A Table 8.1-20, continued, page 8.1-47)</h3>
+<table><thead><tr><th>Group</th><th>Nature</th><th>Application</th><th>Phenomena</th></tr></thead><tbody>${conditionalRows}</tbody></table>
+
+<h2>4. Fuel</h2>
+<table><tbody>
+<tr><th>Additional holding required</th><td class="mono">${escapeHtml(dispatch.fuel.mandatoryHoldingMinutes)} min (${escapeHtml(dispatch.fuel.basis)})</td></tr>
+<tr><th>Rationale</th><td>${escapeHtml(dispatch.fuel.rationale)}</td></tr>
+<tr><th>References</th><td>${escapeHtml(dispatch.fuel.references.join(' * ') || 'none cited')}</td></tr>
+<tr><th>Standard fuel padding</th><td class="mono">${escapeHtml(dispatch.fuel.advisoryPaddingMinutes)} min</td></tr>
+<tr><th>Padding rationale</th><td>${escapeHtml(dispatch.fuel.advisoryRationale ?? 'No standard padding criterion was matched.')}</td></tr>
+</tbody></table>
+<h3>Fuel padding criteria matched</h3>
+${fuelCriteria}
+
+<h2>5. NOTAM</h2>
+${snapshot.notams.reviewed
+		? `<table><thead><tr><th>NOTAM</th><th>Aerodrome</th><th>Validity (UTC)</th><th>Text</th></tr></thead><tbody>${notamRows}</tbody></table>
+<p class="note">Selected manually by the dispatcher from the AWQ Cloud NOTAM feed. Selected NOTAM are not a statement that the aerodrome is free of NOTAM beyond those listed.</p>`
+		: '<div class="stamp"><strong>NOTAM REVIEW PENDING</strong><p>No NOTAM was reviewed for this assessment. This is not a statement that NOTAM is clear.</p></div>'}
+${snapshot.notams.missingIds.length ? `<p class="note">NOTAM that could not be attached: ${escapeHtml(snapshot.notams.missingIds.join(', '))}</p>` : ''}
+
+<h2>6. Findings</h2>
+${findingBlocks}
+
+<h2>7. Written assessment</h2>
+${narrative}
+
+<h2>8. Citations</h2>
+<ol class="citations">${citationList || '<li>No clause reference was required.</li>'}</ol>
+
+<h2>9. Data quality notes</h2>
+${dataQuality}
+
+<h2>10. Reference manuals indexed</h2>
+<ul class="tight">${documentRows || '<li>No reference manuals indexed.</li>'}</ul>
+
+<p class="disclaimer"><strong>Advisory only.</strong> The assessment outcome, the ETA windows and the fuel figures were produced by a deterministic evaluation of the AWQ Cloud payload against the cited clauses of Operations Manual Part A (Doc. No. IAA/FOP/M/001) and the Flight Dispatch Manual (Doc. No. IAA/FOP/M/008) and the AIP chart minima in the minima registry. The written assessment merely explains them and cannot change them. The flight operations officer retains release authority and must verify every finding against the source documents before dispatch.</p>
+<h2>Integrity</h2>
+<p class="meta">Snapshot contract v${escapeHtml(snapshot.contractVersion)} * context hash <span class="mono">${escapeHtml(assessment.context_hash)}</span>${assessment.review_note ? `<br>Review note: ${escapeHtml(assessment.review_note)}` : ''}${assessment.reviewed_at ? `<br>Reviewed: ${escapeHtml(assessment.reviewed_at)} UTC` : ''}</p>
+</body></html>`;
+	return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store' } });
+}
+
+/**
+ * Render a contract-3 assessment, which predates the minima registry.
+ *
+ * Retained because a stored assessment is an immutable record: a contract-3 row
+ * created before this release must stay readable rather than becoming an
+ * unrenderable artifact.
+ */
+function renderContract3Report(assessment: StoredAssessment, snapshot: Record<string, unknown>): Response {
+	const dispatch = (snapshot.dispatch ?? {}) as {
+		verdict?: string;
+		windows?: DispatchSnapshotWindows;
+		fuel?: FuelRequirement;
+		findings?: DispatchFinding[];
+		notamEvaluated?: boolean;
+		destinationStation?: string | null;
+		alternateStation?: string | null;
+		dataQualityNotes?: string[];
+	};
+	const minima = (snapshot.minima ?? {}) as { destination?: ApproachMinima | null; alternate?: ApproachMinima | null };
+	const flight = (snapshot.flight ?? {}) as AssessmentFlight;
+	const schedule = (snapshot.schedule ?? {}) as { needsConfirmation?: boolean; adjustments?: ScheduleAdjustment[] };
+	const outcome = dispatch.verdict ?? 'MARGINAL';
+	const minimaLine = (value: ApproachMinima | null | undefined): string =>
+		value
+			? `${escapeHtml(value.approach)}  --  ceiling ${escapeHtml(value.ceilingFt ?? 'n/a')} ft, visibility ${escapeHtml(value.visibilityM ?? 'n/a')} m`
+			: 'not supplied';
+	const findings = Array.isArray(dispatch.findings) ? dispatch.findings : [];
+	const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Dispatch Assessment ${escapeHtml(assessment.id)}</title><style>${REPORT_STYLE}</style></head><body>
+<div class="toolbar"><button onclick="window.print()">Print / Save as PDF</button></div>
+<header class="doc"><div class="brandline"><div><div class="brand">AWQ Cloud * Dispatch Assist</div><h1>Operational Dispatch Assessment</h1><p class="meta">Assessment #${escapeHtml(assessment.id)} * Flight ${escapeHtml(flight.callsign || flight.flightNumber || flight.id)} * Created ${escapeHtml(assessment.created_at)} UTC * Contract v3 (superseded schema)</p></div><div><span class="badge badge--${escapeHtml(verdictSlug(outcome))}">Assessment outcome: ${escapeHtml(outcome)}</span><span class="badge">Decision: ${escapeHtml(assessment.decision)}</span></div></div></header>
+<div class="stamp"><strong>Superseded contract version</strong><p>This assessment was created before the minima registry existed, so its minima values were entered manually and are not traceable to an approved AIP record. Read it for history only.</p></div>
+<h2>Flight context</h2>
+<p><strong>Route:</strong> <span class="mono">${escapeHtml(flight.origin)} -> ${escapeHtml(flight.destination)}</span><br><strong>Registration:</strong> <span class="mono">${escapeHtml(flight.aircraft?.registration ?? 'not stated')}</span></p>
+<h2>1. ETA windows</h2>
+<p>Destination ${escapeHtml(dispatch.destinationStation || 'unknown')}: <span class="mono">${escapeHtml(dispatch.windows ? `${zuluLabel(dispatch.windows.destination.from)} - ${zuluLabel(dispatch.windows.destination.to)}` : 'not available')}</span><br>Primary alternate ${escapeHtml(dispatch.alternateStation || 'not selected')}: <span class="mono">${escapeHtml(dispatch.windows ? `${zuluLabel(dispatch.windows.primaryAlternate.from)} - ${zuluLabel(dispatch.windows.primaryAlternate.to)}` : 'not available')}</span></p>
+${schedule.needsConfirmation ? `<p class="note"><strong>Schedule confirmation was required.</strong> ${(schedule.adjustments ?? []).map(adjustment => escapeHtml(adjustment.note)).join('<br>')}</p>` : ''}
+<h2>2. Minima</h2>
+<p>Destination landing minima: ${minimaLine(minima.destination)}<br>Alternate planning minima: ${minimaLine(minima.alternate)}</p>
+<h2>3. Fuel</h2>
+<p>Additional holding: <span class="mono">${escapeHtml(dispatch.fuel?.mandatoryHoldingMinutes ?? 0)} min</span> (${escapeHtml(dispatch.fuel?.basis ?? 'unstated')})<br><span class="note">${escapeHtml(dispatch.fuel?.rationale ?? '')}</span></p>
+<h2>4. NOTAM</h2>
+<p>${escapeHtml(dispatch.notamEvaluated ? 'Remarks were supplied.' : 'NOTAM REVIEW PENDING  --  no NOTAM was reviewed for this assessment.')}</p>
+<h2>5. Findings</h2>
+${findings.length ? findings.map(item => `<div class="finding finding--${escapeHtml(item.severity.toLowerCase())}"><div class="head"><span class="severity">${escapeHtml(item.severity)}</span><span class="code">${escapeHtml(item.code)}</span></div><div>${escapeHtml(item.message)}</div><div class="evidence">Evidence: ${escapeHtml(item.evidence)}</div><div class="evidence">References: ${escapeHtml(item.references.join(' * ') || 'none cited')}</div></div>`).join('') : '<p>No findings recorded.</p>'}
+<h2>6. Data quality notes</h2>
+${(dispatch.dataQualityNotes ?? []).length ? `<ul class="tight">${(dispatch.dataQualityNotes ?? []).map(note => `<li class="note">${escapeHtml(note)}</li>`).join('')}</ul>` : '<p class="note">None recorded.</p>'}
+<p class="disclaimer"><strong>Advisory only.</strong> This is a historical assessment record under a superseded schema. It is not a dispatch release and does not authorise flight.</p>
+<h2>Integrity</h2>
+<p class="meta">Context hash <span class="mono">${escapeHtml(assessment.context_hash)}</span></p>
+</body></html>`;
+	return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store' } });
+}
+
+/**
+ * The stored assessment row, as every report renderer receives it.
+ *
+ * Declared before the renderers so the shared helpers below can be used by each
+ * of them.
+ */
+type StoredAssessment = {
+	id: number;
+	flight_id: number;
+	status: string;
+	decision: string;
+	contract_version: string;
+	snapshot_json: string;
+	context_hash: string;
+	created_at: string;
+	reviewed_at: string | null;
+	review_note: string | null;
+};
 
 /**
  * Render the findings section from structured findings, falling back to the flat
@@ -621,20 +1132,7 @@ function renderFindings(snapshot: AssessmentSnapshot): string {
 	return `<ul>${legacy.map(message => `<li>${escapeHtml(message)}</li>`).join('')}</ul>`;
 }
 
-type StoredAssessment = {
-	id: number;
-	flight_id: number;
-	status: string;
-	decision: string;
-	contract_version: string;
-	snapshot_json: string;
-	context_hash: string;
-	created_at: string;
-	reviewed_at: string | null;
-	review_note: string | null;
-};
-
-/** `NO-GO` becomes `nogo`, so a verdict maps onto a CSS class safely. */
+/** `NO-GO` becomes `nogo`, so an outcome maps onto a CSS class safely. */
 function verdictSlug(verdict: string): string {
 	return verdict.toLowerCase().replace(/[^a-z]/g, '');
 }
@@ -648,91 +1146,6 @@ function zuluLabel(iso: string | undefined): string {
 	return `${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}Z`;
 }
 
-/**
- * Render a contract-3 assessment.
- *
- * Section headings follow the evaluation workflow's output format, so the
- * printed report and the model narrative describe the same things in the same
- * order. The verdict, the windows and every finding come from the deterministic
- * engine; the narrative is presentation only and cannot change them.
- */
-function renderDispatchReport(assessment: StoredAssessment, snapshot: DispatchSnapshot): Response {
-	const { dispatch } = snapshot;
-	const windows = dispatch.windows;
-	const destinationWindow = windows ? `${zuluLabel(windows.destination.from)} - ${zuluLabel(windows.destination.to)}` : 'not available';
-	const alternateWindow = windows ? `${zuluLabel(windows.primaryAlternate.from)} - ${zuluLabel(windows.primaryAlternate.to)}` : 'not available';
-
-	const findingBlocks = dispatch.findings.length
-		? dispatch.findings
-				.map(
-					item =>
-						`<div class="finding finding--${escapeHtml(item.severity.toLowerCase())}"><span class="severity">${escapeHtml(item.severity)}</span>${escapeHtml(item.message)}<div class="evidence">Evidence: ${escapeHtml(item.evidence)}</div><div class="evidence">References: ${escapeHtml(item.references.join(', ') || 'none cited')}</div></div>`
-				)
-				.join('')
-		: '<p>No findings recorded.</p>';
-
-	const dataQuality = dispatch.dataQualityNotes.length
-		? `<ul>${dispatch.dataQualityNotes.map(note => `<li class="note">${escapeHtml(note)}</li>`).join('')}</ul>`
-		: '<p class="note">No data-quality corrections were required.</p>';
-
-	const taf = Array.isArray(snapshot.weather?.taf) ? snapshot.weather.taf : [];
-	const tafRows = taf
-		.map(
-			item =>
-				`<tr><td>${escapeHtml(item.role)}</td><td>${escapeHtml(item.station)}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml(item.coverage)}</td><td>${escapeHtml(item.raw)}</td></tr>`
-		)
-		.join('');
-
-	const references = Array.isArray(snapshot.referenceDocuments) ? snapshot.referenceDocuments : [];
-	const documentRows = references
-		.map(item => `<li>${escapeHtml(item.file_name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.chunk_count)} indexed excerpts</li>`)
-		.join('');
-
-	const minimaLine = (value: ApproachMinima | null): string =>
-		value
-			? `${escapeHtml(value.approach)} — ceiling ${escapeHtml(value.ceilingFt ?? 'n/a')} ft, visibility ${escapeHtml(value.visibilityM ?? 'n/a')} m`
-			: 'not supplied';
-
-	const explanation = snapshot.explanation;
-	const narrative =
-		explanation && explanation.ok
-			? `<div class="narrative">${escapeHtml(explanation.narrative)}</div><p class="note">Model ${escapeHtml(explanation.model)} · prompt hash ${escapeHtml(explanation.promptHash)}</p>`
-			: `<p class="note">No model narrative was produced (${escapeHtml(explanation ? explanation.reason : 'not requested')}). The deterministic assessment above stands on its own.</p>`;
-
-	const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Dispatch Assessment ${escapeHtml(assessment.id)}</title><style>${REPORT_STYLE}</style></head><body>
-<button onclick="window.print()">Print / Save as PDF</button>
-<h1>Operational Dispatch Assessment</h1>
-<p class="meta">Assessment #${escapeHtml(assessment.id)} · Flight ${escapeHtml(snapshot.flight.callsign || snapshot.flight.flightNumber || snapshot.flight.id)} · Created ${escapeHtml(assessment.created_at)} UTC</p>
-<p><span class="badge badge--${escapeHtml(verdictSlug(dispatch.verdict))}">Verdict: ${escapeHtml(dispatch.verdict)}</span><span class="badge">Decision: ${escapeHtml(assessment.decision)}</span><span class="badge">Contract v3</span></p>
-<h2>Flight context</h2>
-<p><strong>Route:</strong> ${escapeHtml(snapshot.flight.origin)} to ${escapeHtml(snapshot.flight.destination)}<br><strong>Registration:</strong> ${escapeHtml(snapshot.flight.aircraft?.registration)}<br><strong>Destination alternates:</strong> ${escapeHtml((snapshot.flight.destinationAlternates || []).join(', ') || 'None')}<br><strong>Enroute alternates:</strong> ${escapeHtml((snapshot.flight.enrouteAlternates || []).join(', ') || 'None')}</p>
-<h2>1. ETA Windows &amp; Operational Status</h2>
-<p><strong>Destination (${escapeHtml(dispatch.destinationStation || 'unknown')}):</strong> ETA window ${escapeHtml(destinationWindow)}<br><strong>Primary alternate (${escapeHtml(dispatch.alternateStation || 'none nominated')}):</strong> ETA window ${escapeHtml(alternateWindow)}</p>
-${snapshot.schedule.needsConfirmation ? `<p class="note"><strong>Schedule confirmation required — the ETA windows above are provisional.</strong><br>${snapshot.schedule.adjustments.map(adjustment => escapeHtml(adjustment.note)).join('<br>')}</p>` : ''}
-<h2>2. Weather &amp; Minima Evaluation</h2>
-<p><strong>Destination landing minima:</strong> ${minimaLine(snapshot.minima.destination)}<br><strong>Alternate planning minima:</strong> ${minimaLine(snapshot.minima.alternate)}</p>
-<p><strong>Monitoring freshness:</strong> ${escapeHtml(snapshot.weather?.weatherMonitoring?.freshness ?? 'not stated')} · <strong>Warnings:</strong> ${escapeHtml(snapshot.weather?.weatherMonitoring?.warningCount ?? 'n/a')} · <strong>Affecting route:</strong> ${escapeHtml((dispatch.findings.some(item => item.code === 'WX_ROUTE_IMPACT') ? 'yes' : 'no'))}</p>
-<table><thead><tr><th>Role</th><th>Station</th><th>Status</th><th>Coverage</th><th>Raw TAF</th></tr></thead><tbody>${tafRows || '<tr><td colspan="5">No TAF data</td></tr>'}</tbody></table>
-<h2>3. Dispatch Recommendations &amp; Verdict</h2>
-<p><strong>Feasibility:</strong> ${escapeHtml(dispatch.verdict)}</p>
-<p><strong>Legal fuel requirement:</strong> ${escapeHtml(dispatch.fuel.mandatoryHoldingMinutes)} min additional holding (${escapeHtml(dispatch.fuel.basis)})<br><span class="note">${escapeHtml(dispatch.fuel.rationale)}<br>References: ${escapeHtml(dispatch.fuel.references.join(', ') || 'none cited')}</span></p>
-<p><strong>Advisory fuel padding:</strong> ${escapeHtml(dispatch.fuel.advisoryPaddingMinutes)} min<br><span class="note">${escapeHtml(dispatch.fuel.advisoryRationale || 'No advisory padding recommended.')}</span></p>
-<p><strong>Alternate recommendation:</strong> ${escapeHtml(dispatch.alternateStation || 'none nominated')}${snapshot.minima.alternate ? '' : ' — no planning minima supplied, so suitability could not be confirmed'}</p>
-<p><strong>NOTAM / remarks:</strong> ${escapeHtml(dispatch.notamEvaluated ? (snapshot.notamRemarks || 'supplied') : 'not provided — the check is unevaluated')}</p>
-<h2>Findings</h2>
-${findingBlocks}
-<h2>Written assessment</h2>
-${narrative}
-<h2>Data quality notes</h2>
-${dataQuality}
-<h2>Reference manuals indexed</h2>
-<ul>${documentRows || '<li>No reference manuals indexed.</li>'}</ul>
-<p class="disclaimer"><strong>Advisory only.</strong> The verdict, ETA windows and fuel requirement were produced by a deterministic evaluation of the AWQ Cloud payload; the written assessment merely explains them. This is not an airworthiness determination and does not authorise flight. The flight operations officer retains release authority and must verify every finding against the source documents before dispatch.</p>
-<h2>Integrity</h2>
-<p class="meta">Context hash: ${escapeHtml(assessment.context_hash)}${assessment.review_note ? `<br>Review note: ${escapeHtml(assessment.review_note)}` : ''}${assessment.reviewed_at ? `<br>Reviewed: ${escapeHtml(assessment.reviewed_at)} UTC` : ''}</p>
-</body></html>`;
-	return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-store' } });
-}
 
 async function assessmentReport(request: Request, env: Env, assessmentId: number): Promise<Response> {
 	const loaded = await getAssessment(request, env, assessmentId);
@@ -748,11 +1161,15 @@ async function assessmentReport(request: Request, env: Env, assessmentId: number
 		return new Response('This assessment snapshot is incomplete and cannot be rendered.', { status: 422 });
 	}
 
-	// An assessment is an immutable record, so an earlier contract version must
-	// stay renderable rather than being rewritten by a later one.
-	const candidate = snapshot as Partial<DispatchSnapshot>;
+	// An assessment is an immutable record, so an earlier contract version must stay
+	// renderable rather than being rewritten by a later one. Contract 4 is the
+	// current shape; contract 3 is rendered by its own historical renderer.
+	const candidate = snapshot as { contractVersion?: string; dispatch?: unknown };
+	if (candidate.contractVersion === '4' && candidate.dispatch) {
+		return renderDispatchReport(assessment, snapshot as DispatchSnapshot);
+	}
 	if (candidate.contractVersion === '3' && candidate.dispatch) {
-		return renderDispatchReport(assessment, candidate as DispatchSnapshot);
+		return renderContract3Report(assessment, snapshot as Record<string, unknown>);
 	}
 	return renderLegacyReport(assessment, snapshot as AssessmentSnapshot);
 }
@@ -771,24 +1188,24 @@ function renderLegacyReport(assessment: StoredAssessment, snapshot: AssessmentSn
 	const documentRows = references
 		.map(
 			item =>
-				`<li>${escapeHtml(item.file_name)} · ${escapeHtml(item.category)} · ${escapeHtml(item.chunk_count)} indexed excerpts</li>`
+				`<li>${escapeHtml(item.file_name)} * ${escapeHtml(item.category)} * ${escapeHtml(item.chunk_count)} indexed excerpts</li>`
 		)
 		.join('');
 	const structured = Array.isArray(snapshot.structuredFindings) ? snapshot.structuredFindings : [];
 	const worst = structured.length ? highestSeverity(structured) : null;
-	const classification = worst ? `${assessment.status} · worst finding ${worst}` : assessment.status;
+	const classification = worst ? `${assessment.status} * worst finding ${worst}` : assessment.status;
 
 	const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Dispatch Assessment ${escapeHtml(assessment.id)}</title><style>${REPORT_STYLE}</style></head><body>
 <button onclick="window.print()">Print / Save as PDF</button>
 <h1>Operational Dispatch Assessment</h1>
-<p class="meta">Assessment #${escapeHtml(assessment.id)} · Flight ${escapeHtml(snapshot.flight.callsign || snapshot.flight.flightNumber || snapshot.flight.id)} · Created ${escapeHtml(assessment.created_at)} UTC</p>
+<p class="meta">Assessment #${escapeHtml(assessment.id)} * Flight ${escapeHtml(snapshot.flight.callsign || snapshot.flight.flightNumber || snapshot.flight.id)} * Created ${escapeHtml(assessment.created_at)} UTC</p>
 <p><span class="badge">${escapeHtml(classification)}</span><span class="badge">Decision: ${escapeHtml(assessment.decision)}</span><span class="badge">Contract v${escapeHtml(assessment.contract_version)}</span></p>
 <h2>Flight context</h2>
 <p><strong>Route:</strong> ${escapeHtml(snapshot.flight.origin)} to ${escapeHtml(snapshot.flight.destination)}<br><strong>Registration:</strong> ${escapeHtml(snapshot.flight.aircraft?.registration)}<br><strong>Destination alternates:</strong> ${escapeHtml((snapshot.flight.destinationAlternates || []).join(', ') || 'None')}<br><strong>Enroute alternates:</strong> ${escapeHtml((snapshot.flight.enrouteAlternates || []).join(', ') || 'None')}</p>
 <h2>Readiness findings</h2>
 ${renderFindings(snapshot)}
 <h2>TAF and Weather Monitoring</h2>
-<p><strong>Freshness:</strong> ${escapeHtml(snapshot.weather?.weatherMonitoring?.freshness)} · <strong>Warnings:</strong> ${escapeHtml(snapshot.weather?.weatherMonitoring?.warningCount)}</p>
+<p><strong>Freshness:</strong> ${escapeHtml(snapshot.weather?.weatherMonitoring?.freshness)} * <strong>Warnings:</strong> ${escapeHtml(snapshot.weather?.weatherMonitoring?.warningCount)}</p>
 <table><thead><tr><th>Role</th><th>Station</th><th>Status</th><th>Coverage</th><th>Raw TAF</th></tr></thead><tbody>${tafRows || '<tr><td colspan="5">No TAF data</td></tr>'}</tbody></table>
 <h2>Reference manuals applied</h2>
 <ul>${documentRows || '<li>No reference manuals indexed.</li>'}</ul>
@@ -970,7 +1387,7 @@ async function proxyAssistant(request: Request, env: Env, ctx: ExecutionContext)
 	 * reaches a model provider. It is skipped when the question is an exact clause
 	 * lookup, where the deterministic `clause_id` match is already the strongest
 	 * signal, and it can be switched off entirely with the `QUERY_PLAN_DISABLED`
-	 * variable. Any failure — no key, timeout, malformed body — is a no-op that
+	 * variable. Any failure  --  no key, timeout, malformed body  --  is a no-op that
 	 * leaves retrieval behaving exactly as it did before the planner existed.
 	 */
 	const mode = planningMode(question, (env as unknown as { QUERY_PLAN_DISABLED?: string }).QUERY_PLAN_DISABLED);
@@ -1173,13 +1590,268 @@ async function proxyFlightWeather(request: Request, env: Env, url: URL): Promise
 	return proxyResponse(response, response.headers.get('Content-Type'));
 }
 
+/**
+ * List minima records for an aerodrome.
+ *
+ * Admin-only, like every other minima route: the registry is the authoritative
+ * record of the numbers an assessment applies, so reading it is part of the same
+ * privilege as approving it (PRD acceptance §28).
+ */
+async function listMinimaRecords(request: Request, env: Env, url: URL): Promise<Response> {
+	if (!await authorizeUser(request, env)) return documentResponse({ error: 'SSO is required.' }, 401);
+	const icao = String(url.searchParams.get('icao') ?? '').trim().toUpperCase();
+	if (!icao) {
+		const airports = await listMinimaAirports(env);
+		return documentResponse({ ok: true, data: { airports } });
+	}
+	if (!/^[A-Z0-9]{4}$/.test(icao)) return documentResponse({ error: 'icao must be a four-character location indicator.' }, 400);
+	const [all, active] = await Promise.all([listMinima(env, icao), listActiveMinima(env, icao)]);
+	return documentResponse({
+		ok: true,
+		data: {
+			icao,
+			records: all,
+			/** The subset an assessment may actually use. */
+			activeIds: active.map(record => record.id)
+		}
+	});
+}
+
+/** One minima record with its full audit history. */
+async function getMinimaRecord(request: Request, env: Env, id: number): Promise<Response> {
+	if (!await authorizeUser(request, env)) return documentResponse({ error: 'SSO is required.' }, 401);
+	const loaded = await getMinima(env, id);
+	if (!loaded) return documentResponse({ error: 'Minima record not found.' }, 404);
+	return documentResponse({ ok: true, data: loaded });
+}
+
+/**
+ * Extract draft minima from AIP chart PDFs held in R2.
+ *
+ * The source files are never written to or moved: they are read, hashed, and
+ * converted. Every row this produces is a `draft`, so the extraction can run
+ * without any value reaching an assessment (PRD acceptance §29).
+ */
+async function extractMinimaDrafts(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	const userId = await authorizeUser(request, env);
+	if (!userId) return documentResponse({ error: 'SSO is required.' }, 401);
+	let body: { objectKeys?: unknown; icao?: unknown };
+	try { body = await request.json() as typeof body; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
+
+	const requested = Array.isArray(body.objectKeys) ? body.objectKeys.map(value => String(value).trim()).filter(Boolean) : [];
+	// Bounded per call: each chart is a PDF conversion plus a model round trip, and a
+	// request that tried to do all of them would exceed the Worker's CPU budget.
+	const objectKeys = requested.slice(0, 3);
+	if (!objectKeys.length) return documentResponse({ error: 'At least one R2 object key is required.' }, 400);
+	for (const key of objectKeys) {
+		// Only the airport chart prefix is readable here. A caller cannot point the
+		// extractor at the reference manuals or at a flight document.
+		if (!key.startsWith('airport/')) {
+			return documentResponse({ error: 'Only objects under the airport/ prefix can be extracted as minima sources.' }, 400);
+		}
+	}
+
+	const model = String((env as unknown as { EXTRACTION_MODEL?: string }).EXTRACTION_MODEL ?? '').trim() || 'deepseek-flash';
+	const outcomes: Array<Record<string, unknown>> = [];
+
+	for (const objectKey of objectKeys) {
+		const object = await env.DOCUMENTS.get(objectKey);
+		if (!object) {
+			outcomes.push({ objectKey, ok: false, reason: 'object-not-found' });
+			continue;
+		}
+		if (object.size > MAX_CHART_BYTES) {
+			outcomes.push({ objectKey, ok: false, reason: `chart-larger-than-${MAX_CHART_BYTES}-bytes` });
+			continue;
+		}
+		const bytes = new Uint8Array(await object.arrayBuffer());
+		// The hash identifies the exact bytes the transcription was made from, so a
+		// later replacement of the chart file is detectable.
+		const pdfHash = await sha256Hex(bytes);
+		const fileName = objectKey.split('/').pop() || objectKey;
+		const objectIcao = objectKey.split('/')[1]?.toUpperCase() ?? '';
+		const source: ChartSource = { objectKey, icao: /^[A-Z0-9]{4}$/.test(objectIcao) ? objectIcao : '', fileName, bytes, pdfHash };
+
+		const outcome = await extractChart(source, {
+			apiKey: deepSeekKey(env),
+			model,
+			toMarkdown: async file => {
+				// Workers AI markdown conversion is the only text extraction this feature
+				// uses. The converted text is a search/reasoning aid, not a source of
+				// truth: the numeric values are verified against the PDF by a human.
+				const converted = await env.AI.toMarkdown({
+					name: file.fileName,
+					blob: new Blob([file.bytes], { type: 'application/pdf' })
+				});
+				const result = Array.isArray(converted) ? converted[0] : converted;
+				if (!result || result.format === 'error' || typeof result.data !== 'string') {
+					throw new Error(result && 'error' in result ? String(result.error) : 'conversion produced no text');
+				}
+				return result.data;
+			}
+		});
+
+		if (!outcome.ok) {
+			outcomes.push({ objectKey, ok: false, reason: outcome.reason });
+			await audit(env, userId, 'minima_extract_failed', 'airport_minima', null, `${objectKey}: ${outcome.reason}`.slice(0, 500), ctx);
+			continue;
+		}
+
+		const stored = await insertDrafts(env, {
+			drafts: outcome.drafts,
+			sourceObjectKey: objectKey,
+			pdfHash,
+			extractionModel: model,
+			actorId: userId
+		});
+		outcomes.push({
+			objectKey,
+			ok: true,
+			markdownChars: outcome.markdownChars,
+			draftsExtracted: outcome.drafts.length,
+			draftsStored: stored.inserted.length,
+			skippedDuplicates: stored.skippedDuplicates,
+			duplicatesOfApproved: stored.duplicatesOfApproved,
+			draftIds: stored.inserted
+		});
+		await audit(
+			env,
+			userId,
+			'minima_extract',
+			'airport_minima',
+			null,
+			`${objectKey}: drafts=${stored.inserted.length} skipped=${stored.skippedDuplicates} approvedDuplicates=${stored.duplicatesOfApproved} model=${model}`,
+			ctx
+		);
+	}
+
+	return documentResponse({
+		ok: outcomes.every(outcome => outcome.ok === true),
+		data: {
+			model,
+			objects: outcomes,
+			note: 'Every extracted value is stored as a draft. It becomes usable by an assessment only after an ADMIN dispatcher compares it against the source PDF and approves it.'
+		}
+	});
+}
+
+/** Apply an ADMIN correction to a minima draft or approved record. */
+async function correctMinimaDraft(request: Request, env: Env, ctx: ExecutionContext, id: number): Promise<Response> {
+	const userId = await authorizeUser(request, env);
+	if (!userId) return documentResponse({ error: 'SSO is required.' }, 401);
+	let body: Record<string, unknown>;
+	try { body = await request.json() as Record<string, unknown>; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
+
+	const correction: DraftCorrection = { id };
+	const assignNumber = (key: keyof DraftCorrection, value: unknown): void => {
+		if (value === undefined) return;
+		(correction as Record<string, unknown>)[key] = value === null ? null : finiteNumberOrNull(value);
+	};
+	const assignText = (key: keyof DraftCorrection, value: unknown): void => {
+		if (value === undefined) return;
+		const raw = value === null ? null : String(value).trim().slice(0, 200);
+		(correction as Record<string, unknown>)[key] = raw ? raw : null;
+	};
+	assignNumber('ceilingFt', body.ceilingFt);
+	assignNumber('visibilityM', body.visibilityM);
+	assignText('approach', body.approach);
+	assignText('approachType', body.approachType);
+	assignText('runway', body.runway);
+	assignText('aircraftCategory', body.aircraftCategory);
+	assignText('chartPage', body.chartPage);
+	assignText('aipCycle', body.aipCycle);
+	assignText('effectiveFrom', body.effectiveFrom);
+	assignText('effectiveTo', body.effectiveTo);
+	assignText('valueType', body.valueType);
+	assignText('notes', body.notes);
+
+	const result = await updateDraft(env, userId, correction);
+	if (!result.ok) return documentResponse({ error: result.error }, 400);
+	await audit(env, userId, 'minima_correct', 'airport_minima', id, `status=${result.status}`, ctx);
+	const loaded = await getMinima(env, id);
+	return documentResponse({ ok: true, data: loaded });
+}
+
+/** Approve or reject a minima record. Approval is what makes a value usable. */
+async function decideMinimaRecord(request: Request, env: Env, ctx: ExecutionContext, id: number): Promise<Response> {
+	const userId = await authorizeUser(request, env);
+	if (!userId) return documentResponse({ error: 'SSO is required.' }, 401);
+	let body: { decision?: unknown; note?: unknown };
+	try { body = await request.json() as typeof body; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
+	const decision = String(body.decision ?? '').trim().toUpperCase();
+	const note = String(body.note ?? '').trim().slice(0, 1000) || null;
+	if (decision !== 'APPROVED' && decision !== 'REJECTED') {
+		return documentResponse({ error: 'Decision must be APPROVED or REJECTED.' }, 400);
+	}
+
+	if (decision === 'REJECTED') {
+		const rejected = await rejectRecord(env, userId, id, note);
+		if (!rejected.ok) return documentResponse({ error: rejected.error }, 400);
+		await audit(env, userId, 'minima_reject', 'airport_minima', id, note ?? '', ctx);
+	} else {
+		const approved = await approveRecord(env, userId, id, note);
+		if (!approved.ok) return documentResponse({ error: approved.error }, 400);
+		// The approval is recorded with the approver identity and the time, as PRD
+		// acceptance §28 requires.
+		await audit(
+			env,
+			userId,
+			'minima_approve',
+			'airport_minima',
+			id,
+			`${approved.record.icao} ${approved.record.chartIdentifier} ${approved.record.approach} ${approved.record.kind}`,
+			ctx
+		);
+	}
+
+	const loaded = await getMinima(env, id);
+	return documentResponse({ ok: true, data: loaded });
+}
+
+/**
+ * NOTAM candidates for the aerodromes of a flight.
+ *
+ * The window is derived from the flight's own ETA windows where the caller can
+ * supply them, so what is offered is what could apply; the dispatcher still makes
+ * the selection (PRD §9).
+ */
+async function listNotamsForFlight(request: Request, env: Env, url: URL): Promise<Response> {
+	if (!await authorizeUser(request, env)) return documentResponse({ error: 'SSO is required.' }, 401);
+	const icao = String(url.searchParams.get('icao') ?? '').trim().toUpperCase();
+	const locations = icao
+		.split(',')
+		.map(value => value.trim().toUpperCase())
+		.filter(value => /^[A-Z0-9]{4}$/.test(value))
+		.slice(0, 6);
+	if (!locations.length) return documentResponse({ error: 'At least one four-character ICAO location is required.' }, 400);
+
+	const from = parseInstantInput(url.searchParams.get('from'));
+	const to = parseInstantInput(url.searchParams.get('to'));
+	const windowFrom = from ?? new Date(Date.now() - 86_400_000);
+	const windowTo = to ?? new Date(Date.now() + 3 * 86_400_000);
+	if (windowTo.getTime() < windowFrom.getTime()) {
+		return documentResponse({ error: 'The validity window end must not precede its start.' }, 400);
+	}
+
+	const notams = await listNotamCandidates(env, locations, windowFrom, windowTo);
+	return documentResponse({
+		ok: true,
+		data: {
+			locations,
+			window: { from: windowFrom.toISOString(), to: windowTo.toISOString() },
+			fetchedAt: new Date().toISOString(),
+			notams
+		}
+	});
+}
+
 export default {
 	async fetch(request, env, ctx): Promise<Response> {
 		try {
 			return await handleRequest(request, env, ctx);
 		} catch (error) {
 			// Without this, an uncaught exception leaves the browser with a non-JSON 500
-			// and no reason — which is exactly how the status-constraint failure presented
+			// and no reason  --  which is exactly how the status-constraint failure presented
 			// itself: the UI could only say "Assessment creation failed." The detail goes
 			// to the log (visible in `wrangler tail`); the client gets a stable JSON shape.
 			console.error('[DISPATCH] unhandled request failure', error);
@@ -1217,6 +1889,14 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 			return proxyFlightWeather(request, env, url);
 		}
 		if (url.pathname === '/api/assistant' && request.method === 'POST') return proxyAssistant(request, env, ctx);
+		if (url.pathname === '/api/minima' && request.method === 'GET') return listMinimaRecords(request, env, url);
+		if (url.pathname === '/api/minima/extract' && request.method === 'POST') return extractMinimaDrafts(request, env, ctx);
+		const minimaMatch = url.pathname.match(/^\/api\/minima\/(\d+)$/);
+		if (minimaMatch && request.method === 'GET') return getMinimaRecord(request, env, Number(minimaMatch[1]));
+		if (minimaMatch && request.method === 'PATCH') return correctMinimaDraft(request, env, ctx, Number(minimaMatch[1]));
+		const minimaDecisionMatch = url.pathname.match(/^\/api\/minima\/(\d+)\/decision$/);
+		if (minimaDecisionMatch && request.method === 'POST') return decideMinimaRecord(request, env, ctx, Number(minimaDecisionMatch[1]));
+		if (url.pathname === '/api/notams' && request.method === 'GET') return listNotamsForFlight(request, env, url);
 		if (url.pathname === '/api/assessments' && request.method === 'POST') return createAssessment(request, env, ctx);
 		if (url.pathname === '/api/assessments' && request.method === 'GET') return listAssessments(request, env, url);
 		const assessmentMatch = url.pathname.match(/^\/api\/assessments\/(\d+)$/);

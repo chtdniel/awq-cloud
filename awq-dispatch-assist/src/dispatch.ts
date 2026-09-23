@@ -1,58 +1,94 @@
 /**
  * Deterministic dispatch evaluation.
  *
- * Why the verdict is computed here and not written by a model
- *   The evaluation workflow ends in a GO / NO-GO / MARGINAL call. DESIGN.md §10
+ * Why the outcome is computed here and not written by a model
+ *   The evaluation workflow ends in an assessment outcome. DESIGN.md §10
  *   requires that a language model may explain findings and cite corpus clauses
- *   but must not determine readiness or decide release, so the verdict is
+ *   but must not determine readiness or decide release, so the outcome is
  *   produced by the rules in this module and the model is handed the result.
  *   Every finding therefore carries the clause references that justify it, and
- *   the same input always yields the same verdict.
+ *   the same input always yields the same outcome.
  *
  * What the rules are grounded in
- *   The clause references below are not generic citations; they are the clauses
- *   that were located in the indexed corpus and read before the rule was written:
+ *   Every clause reference in this module was read out of the indexed corpus
+ *   before the rule was written. The agreed sources are the two company manuals
+ *   (PRD §5); CASR is deliberately absent from this module and from every
+ *   reference it emits:
  *
- *     OM Part A 8.1.2 (family)  planning minima for destination, en-route and
- *                               isolated alternates, including the rule that a
- *                               TEMPO forecast below planning minima at
- *                               ETA ± 1 hr keeps an aerodrome usable as an
- *                               alternate when an additional 30 minutes of
- *                               holding fuel is carried
- *     OM Part A Table 8.1-17    effect of failed or downgraded equipment on
- *                               landing minima — the basis for an ILS U/S remark
- *     OM Part A 8.1.7.1.2       additional fuel
- *     OM Part A 8.4.4.2.2.1     holding fuel
- *     FDM 4.8.3.5.1, 4.8.4.3   additional fuel
- *     CASR 121.639, 121.646     additional fuel; en-route fuel supply
+ *     OM Part A 8.1.2.2.3       destination suitability across ETA ± 1 hr
+ *     OM Part A 8.1.2.2.4,
+ *       Table 8.1-5             planning minima required for a destination
+ *                               alternate, and the note that a State-published
+ *                               `Alternate Minima` or the company minima,
+ *                               whichever is higher, governs
+ *     OM Part A 8.1.6 b.iii     the destination alternate TEMPO concession, which
+ *                               is available only when the alternate stays above
+ *                               its landing minima, the destination is at or above
+ *                               destination alternate planning minima, and an
+ *                               additional 30 minutes of holding fuel is carried
+ *     OM Part A 8.1.6.4,
+ *       Table 8.1-20 (cont.),
+ *       page 8.1-47             classification of TEMPO/PROB change groups for
+ *                               `DEST AT ETA ±1HR`
+ *     FDM 5.11 FUEL PADDING
+ *       (Standard), page 5.11-16  the standard 10 minutes @ 1500 ft padding
  *
  * Known limitation
  *   The corpus carries the minima *rules*, not per-aerodrome minima *values*
  *   (the minima tables did not survive extraction — see DESIGN.md §9). A minima
- *   value is therefore an input to this module, supplied from a chart or entered
- *   manually. When it is absent the engine does not infer compliance: it records
- *   that minima could not be evaluated, which caps the verdict below GO.
+ *   value therefore enters this module from the minima registry, where it only
+ *   becomes usable after an `ADMIN` dispatcher has compared it against the AIP
+ *   chart PDF and approved it. When usable minima is absent the engine does not
+ *   infer compliance: it records that minima could not be evaluated, which
+ *   produces `REVIEW REQUIRED`.
+ *
+ * What the engine must never do
+ *   No `TEMPO`-without-alternate holding figure is produced. The review of the
+ *   source manuals found no company rule requiring 60 minutes of holding for a
+ *   destination TEMPO group when no alternate is nominated, so this product does
+ *   not state one (PRD §11, acceptance §12).
  */
 
 import type { FindingSeverity } from './findings';
+import { RULE_REFERENCES, type ApproachMinima } from './minima';
 import {
 	assessTafWindow,
 	decodeTaf,
 	effectiveVisibilityM,
+	type TafChangeGroup,
+	type TafConditions,
 	type TafForecast,
 	type TafWindowAssessment
 } from './taf';
 
-export type DispatchVerdict = 'GO' | 'NO-GO' | 'MARGINAL';
+export type { ApproachMinima, MinimaKind, MinimaRecord, MinimaStatus } from './minima';
 
-/** Clause references, grouped by the rule they support. */
+/**
+ * The assessment outcome.
+ *
+ * `REVIEW REQUIRED` and `NOTAM REVIEW PENDING` are outcomes, not qualifiers: the
+ * product must be able to say that a required piece of data is missing (PRD §12)
+ * rather than collapsing that into a low-confidence GO. `MARGINAL` is only ever
+ * produced from a threshold a source states; where no source states one, the
+ * outcome is `REVIEW REQUIRED` (PRD §12, acceptance §8).
+ */
+export type DispatchOutcome = 'GO' | 'NO-GO' | 'MARGINAL' | 'REVIEW REQUIRED' | 'NOTAM REVIEW PENDING';
+
+/**
+ * Clause references, grouped by the rule they support.
+ *
+ * Each entry names the document, the clause or table and, where the corpus
+ * records it, the printed page. A reference that cannot be resolved to a clause
+ * of a company manual must not be emitted, because PRD §5 makes an incomplete
+ * citation a `REVIEW REQUIRED` condition rather than a silent omission.
+ */
 export const CLAUSE_REFERENCES = {
-	planningMinima: ['OM Part A 8.1.2', 'OM Part A 8.1.2.2.3.1'],
-	equipmentEffect: ['OM Part A Table 8.1-17'],
-	additionalFuel: ['OM Part A 8.1.7.1.2', 'FDM 4.8.3.5.1', 'CASR 121.639'],
-	holdingFuel: ['OM Part A 8.4.4.2.2.1'],
-	tempoAlternate: ['OM Part A 8.1.2'],
-	enRouteFuel: ['CASR 121.646']
+	destinationSuitability: [RULE_REFERENCES.destinationSuitability],
+	alternatePlanningMinima: [RULE_REFERENCES.alternatePlanningMinima],
+	changeIndicatorTable: [RULE_REFERENCES.changeIndicatorTable, RULE_REFERENCES.belowMinimum],
+	destinationAlternateTempo: [RULE_REFERENCES.destinationAlternateTempo],
+	fuelPadding: [RULE_REFERENCES.fuelPadding],
+	chartSource: [RULE_REFERENCES.chartSource]
 } as const;
 
 export type DispatchFindingCode =
@@ -65,20 +101,23 @@ export type DispatchFindingCode =
 	| 'TAF_STATUS_UNKNOWN'
 	| 'DEST_BELOW_LANDING_MINIMA'
 	| 'DEST_CONDITIONAL_DETERIORATION'
+	| 'DEST_CONDITIONAL_IMPROVEMENT_IGNORED'
 	| 'DEST_CONVECTIVE_WEATHER'
 	| 'DEST_LOW_VISIBILITY_PHENOMENA'
 	| 'ALT_NOT_NOMINATED'
+	| 'ALT_TAF_UNAVAILABLE'
 	| 'ALT_BELOW_PLANNING_MINIMA'
 	| 'ALT_CONDITIONAL_BELOW_PLANNING_MINIMA'
+	| 'ALT_TEMPO_CONCESSION_UNAVAILABLE'
 	| 'MINIMA_NOT_AVAILABLE'
 	| 'MINIMA_INCOMPLETE'
-	| 'NOTAM_UNVERIFIED'
+	| 'NOTAM_REVIEW_PENDING'
 	| 'NOTAM_RUNWAY_CLOSURE'
 	| 'WX_ROUTE_IMPACT'
 	| 'WX_NOT_FRESH'
 	| 'WX_FRESHNESS_UNKNOWN'
 	| 'FUEL_ADDITIONAL_HOLDING'
-	| 'FUEL_PADDING_ADVISORY';
+	| 'FUEL_PADDING_STANDARD';
 
 export type DispatchFinding = {
 	severity: FindingSeverity;
@@ -91,23 +130,19 @@ export type DispatchFinding = {
 	/**
 	 * True when the condition is one the workflow treats as incompatible with
 	 * release. Kept explicit rather than inferred from severity, because a
-	 * critical-but-unassessable condition (unknown minima) must degrade the
-	 * verdict rather than block it.
+	 * critical-but-unassessable condition (unapproved minima) must produce
+	 * `REVIEW REQUIRED` rather than a release-blocking outcome.
 	 */
 	blocksRelease: boolean;
+	/**
+	 * True when the finding records that required data or a required citation is
+	 * missing, rather than a rule that was evaluated and failed. Only these
+	 * findings produce `REVIEW REQUIRED`.
+	 */
+	missingData?: boolean;
+	/** The manual states an ambiguous condition here, so `MARGINAL` is a sourced call. */
+	marginalByRule?: boolean;
 	source: 'system';
-};
-
-/** An approach minima value, from a chart or entered manually. */
-export type ApproachMinima = {
-	/** Human label, e.g. `ILS RWY 25L` or `RNP RWY 25R`. */
-	approach: string;
-	/** Decision height / minimum descent height requirement, in feet. */
-	ceilingFt: number | null;
-	/** RVR or visibility requirement, in metres. */
-	visibilityM: number | null;
-	/** Clause the value is traceable to. */
-	references: readonly string[];
 };
 
 /** A weather advisory the upstream feed has already evaluated as touching the route. */
@@ -125,24 +160,51 @@ export type EtaWindow = { from: Date; to: Date };
 export type EtaWindows = {
 	destination: EtaWindow;
 	primaryAlternate: EtaWindow;
+	/**
+	 * True when the alternate window came from the 2-hour default rather than a
+	 * published diversion time. The UI and the PDF must state the assumption and
+	 * that the source was unavailable (PRD §7, acceptance §3).
+	 */
+	alternateUsesDefaultDiversionTime: boolean;
 };
 
+/**
+ * How the fuel requirement is grounded.
+ *
+ * `no-padding-triggered` and `padding-standard` cover the standard 10 minutes @
+ * 1500 ft of FDM 5.11 page 5.11-16. `alternate-tempo-holding` covers the
+ * additional 30 minutes of OM Part A 8.1.6 b.iii. Nothing else is produced: the
+ * source review found no other fuel rule with a complete citation (PRD §11), and
+ * a `TEMPO`-without-alternate holding figure is not part of this product.
+ */
 export type FuelBasis =
-	| 'no-conditional-weather'
-	| 'compliant-alternate'
-	| 'inter-without-alternate'
-	| 'tempo-without-alternate'
-	| 'alternate-conditional';
+	| 'no-padding-triggered'
+	| 'padding-standard'
+	| 'alternate-tempo-holding'
+	| 'alternate-tempo-holding-with-padding';
+
+/** One triggered criterion of the FDM 5.11 FUEL PADDING table, with its citation. */
+export type FuelPaddingCriterion = {
+	code: 'destination-below-alternate-planning-minima' | 'destination-low-visibility-thunderstorm';
+	/** The criterion as the table words it. */
+	statement: string;
+	/** What the forecast showed, so the dispatcher can check the trigger. */
+	evidence: string;
+	minutes: number;
+	references: readonly string[];
+};
 
 export type FuelRequirement = {
-	/** Legally required additional holding fuel, in minutes. */
+	/** Additional holding fuel the cited manual rules require, in minutes. */
 	mandatoryHoldingMinutes: number;
 	basis: FuelBasis;
 	rationale: string;
 	references: readonly string[];
-	/** Advisory padding, in minutes. Discretionary, never a legal requirement. */
+	/** Standard padding from the cited FUEL PADDING table. Discretionary per that table. */
 	advisoryPaddingMinutes: number;
 	advisoryRationale: string | null;
+	/** Every table criterion that fired, so the total is itemised rather than asserted. */
+	paddingCriteria: FuelPaddingCriterion[];
 };
 
 export type DispatchInput = {
@@ -150,22 +212,46 @@ export type DispatchInput = {
 	dof: Date | null;
 	/** Scheduled time of arrival, Zulu. */
 	staZ: Date | null;
-	/** Estimated diversion time to the primary alternate, in minutes. Defaults to 60. */
+	/**
+	 * Published diversion time to the primary alternate, in minutes. When absent
+	 * the engine applies `DEFAULT_DIVERSION_MINUTES` and marks the window as an
+	 * assumption so the UI and PDF state it (PRD §7).
+	 */
 	diversionMinutes: number | null;
+	/** Departure aerodrome, for the flight picture in the snapshot and the report. */
+	originIcao?: string | null;
+	/** Destination aerodrome ICAO. */
+	destinationIcao?: string | null;
 	/** Raw TAF for the destination. */
 	destinationTaf: string | null;
-	/** Nominated destination alternates, in priority order. */
-	destinationAlternates: string[];
+	/** The aerodrome the primary alternate belongs to. */
+	alternateIcao?: string | null;
 	/** Raw TAF for the primary alternate. */
 	alternateTaf: string | null;
+	/** Approved destination landing minima, or null when none is usable. */
 	destinationMinima: ApproachMinima | null;
-	alternateMinima: ApproachMinima | null;
-	/** NOTAM / remarks entered by the dispatcher. Blank means the check is unevaluated. */
-	notamRemarks: string | null;
+	/**
+	 * Planning minima the primary alternate must meet — the AIP chart's published
+	 * `Alternate Minima`, or the company minima of OM Part A Table 8.1-5,
+	 * whichever is higher.
+	 */
+	alternatePlanningMinima: ApproachMinima | null;
+	/**
+	 * Landing minima of the primary alternate. The destination-alternate TEMPO
+	 * concession of OM Part A 8.1.6 b.iii is only available while the alternate
+	 * stays above these, so without them the concession cannot be applied.
+	 */
+	alternateLandingMinima: ApproachMinima | null;
+	/**
+	 * NOTAM the dispatcher has selected for this flight. Empty means the check has
+	 * not been performed, which is `NOTAM REVIEW PENDING` — never a statement that
+	 * NOTAM is clean (PRD §9, acceptance §9).
+	 */
+	selectedNotams?: readonly SelectedNotam[];
 	/**
 	 * Route-impacting advisories from the weather monitoring feed (volcanic ash,
 	 * tropical cyclone, SIGMET). Optional so the engine still runs without them,
-	 * but omitting them removes a hazard from the verdict.
+	 * but omitting them removes a hazard from the outcome.
 	 */
 	routeImpactWarnings?: readonly RouteImpactWarning[];
 	/**
@@ -179,29 +265,74 @@ export type DispatchInput = {
 	weatherFreshness?: 'fresh' | 'stale' | 'unknown';
 	/**
 	 * True when the schedule had to be inferred or corrected to produce the ETA
-	 * windows — for example an arrival that reads earlier than its departure. The
-	 * windows are still computed from the assumed value, but they are provisional
-	 * until a human confirms the date.
+	 * windows. The windows are still computed from the assumed value, but they are
+	 * provisional until a human confirms the date.
 	 */
 	scheduleNeedsConfirmation?: boolean;
 };
 
+/** A NOTAM the dispatcher selected, with the provenance the snapshot must keep. */
+export type SelectedNotam = {
+	id: string;
+	location: string;
+	/** The NOTAM text, as retrieved from AWQ Cloud. */
+	message: string;
+	validFrom: string | null;
+	validTo: string | null;
+	riskLevel: string | null;
+	/** When the dispatcher retrieved it. */
+	fetchedAt: string;
+};
+
+/** Classification of one TEMPO/INTER/PROB group for the destination window. */
+export type ConditionalClassification = {
+	groupType: string;
+	/** True when the table applies the group to destination planning minima. */
+	applies: boolean;
+	/** `transient-showery`, `persistent-continuous`, or `indeterminate`. */
+	nature: 'transient-showery' | 'persistent-continuous' | 'indeterminate';
+	/** The phenomenon codes that decided the classification. */
+	phenomena: readonly string[];
+	reference: string;
+};
+
 export type DispatchAssessment = {
-	verdict: DispatchVerdict;
+	outcome: DispatchOutcome;
 	windows: EtaWindows | null;
 	fuel: FuelRequirement;
 	findings: DispatchFinding[];
 	destination: TafWindowAssessment | null;
 	alternate: TafWindowAssessment | null;
-	/** True when NOTAM/remarks were supplied, so the check is not silently skipped. */
-	notamEvaluated: boolean;
+	/** Classification of every conditional group affecting the destination window. */
+	destinationConditional: ConditionalClassification[];
+	/** True only when the dispatcher selected at least one NOTAM. */
+	notamReviewed: boolean;
 };
 
 /** Half-width of every ETA window, per the evaluation workflow. */
 export const ETA_WINDOW_MINUTES = 60;
 
-/** Diversion time assumed when none is supplied, per the evaluation workflow. */
-export const DEFAULT_DIVERSION_MINUTES = 60;
+/**
+ * Diversion time assumed when the feed publishes none, per the evaluation
+ * workflow (PRD §7). The resulting alternate window is destination STA +1 hr to
+ * +3 hr.
+ */
+export const DEFAULT_DIVERSION_MINUTES = 120;
+
+/** Section 8.1.6 b.iii requires this much additional holding fuel for the concession. */
+export const DESTINATION_ALTERNATE_TEMPO_HOLDING_MINUTES = 30;
+
+/**
+ * The standard FUEL PADDING figure from FDM 5.11 page 5.11-16.
+ *
+ * The printed table lists the category once and applies it to more than one
+ * criterion, so each criterion that fires contributes the same figure and an
+ * itemised total is reported rather than a single opaque number.
+ */
+export const STANDARD_FUEL_PADDING_MINUTES = 10;
+
+/** The visibility at or below which the table's TSRA criterion fires. */
+export const FUEL_PADDING_VISIBILITY_M = 3000;
 
 const MINUTE_MS = 60_000;
 
@@ -211,23 +342,36 @@ function finding(
 	message: string,
 	evidence: string,
 	references: readonly string[],
-	blocksRelease = false
+	options: { blocksRelease?: boolean; missingData?: boolean; marginalByRule?: boolean } = {}
 ): DispatchFinding {
-	return { severity, code, message, evidence, references, blocksRelease, source: 'system' };
+	return {
+		severity,
+		code,
+		message,
+		evidence,
+		references,
+		blocksRelease: options.blocksRelease === true,
+		missingData: options.missingData === true,
+		marginalByRule: options.marginalByRule === true,
+		source: 'system'
+	};
 }
 
 /**
  * ETA windows for the destination and the primary alternate.
  *
- * The destination window is STA ± 1 hr. The alternate window is centred on
- * STA + diversion time, which is the earliest the aircraft could realistically
- * arrive at the alternate after a diversion from the destination.
+ * Destination: `STA ± 1 hr`.
+ *
+ * Alternate with a published diversion time `D`: `STA + D ± 1 hr`.
+ *
+ * Alternate without one: the workflow's 2-hour default makes the window
+ * `STA + 1 hr` to `STA + 3 hr`, and `alternateUsesDefaultDiversionTime` marks it
+ * as an assumption so the UI and PDF state both the default and that the source
+ * was unavailable (PRD §7, acceptance §3).
  */
 export function computeEtaWindows(staZ: Date, diversionMinutes: number | null): EtaWindows {
-	const diversion =
-		diversionMinutes === null || !Number.isFinite(diversionMinutes) || diversionMinutes < 0
-			? DEFAULT_DIVERSION_MINUTES
-			: diversionMinutes;
+	const hasPublished = diversionMinutes !== null && Number.isFinite(diversionMinutes) && diversionMinutes >= 0;
+	const diversion = hasPublished ? (diversionMinutes as number) : DEFAULT_DIVERSION_MINUTES;
 	const sta = staZ.getTime();
 	return {
 		destination: {
@@ -237,88 +381,181 @@ export function computeEtaWindows(staZ: Date, diversionMinutes: number | null): 
 		primaryAlternate: {
 			from: new Date(sta + (diversion - ETA_WINDOW_MINUTES) * MINUTE_MS),
 			to: new Date(sta + (diversion + ETA_WINDOW_MINUTES) * MINUTE_MS)
-		}
+		},
+		alternateUsesDefaultDiversionTime: !hasPublished
 	};
 }
 
 /**
- * Mandatory additional holding fuel.
+ * Transient or persistent nature of a conditional group, per the
+ * `DEST AT ETA ±1HR` column of OM Part A Table 8.1-20 (continued), page 8.1-47.
  *
- * The workflow distinguishes two cases. With a compliant destination alternate
- * nominated, the alternate itself satisfies the legal requirement and no
- * additional holding fuel is mandated. Without one, the fluctuation has to be
- * absorbed at the destination: 30 minutes for an `INTER` group and 60 minutes
- * for a `TEMPO` group.
+ * That column distinguishes transient/showery phenomena — thunderstorm and
+ * showers — which are `Not applicable` to destination planning, from continuous
+ * phenomena — haze, mist, fog, dust or sandstorm and continuous precipitation —
+ * which are `Applicable`. Improvements inside these groups are to be disregarded
+ * for minima planning.
+ *
+ * A group carrying both kinds is read as persistent, because the persistent part
+ * is what affects planning minima. A group carrying neither is `indeterminate`,
+ * which is recorded for review instead of being treated as harmless.
+ */
+export function classifyConditionalNature(conditions: TafConditions): {
+	nature: ConditionalClassification['nature'];
+	phenomena: string[];
+} {
+	const transient = new Set(['TS', 'SH']);
+	/**
+	 * Continuous phenomena, restricted to the codes that are continuous on their
+	 * own. Precipitation is listed here without its descriptors, and the transient
+	 * check runs first below, because `TSRA` is a thunderstorm with rain and the
+	 * table classifies thunderstorm as transient — reading the `RA` would call it
+	 * continuous and defeat the row the table actually states.
+	 */
+	const persistent = new Set(['HZ', 'BR', 'FG', 'FU', 'DU', 'SA', 'SS', 'DS', 'DZ', 'RA', 'SN', 'SG', 'IC', 'PL', 'GR', 'GS', 'UP']);
+	const phenomena = conditions.weather.map(code => code.toUpperCase());
+	const carries = (set: Set<string>): boolean =>
+		phenomena.some(code => {
+			for (let index = 0; index + 2 <= code.length; index += 2) {
+				if (set.has(code.slice(index, index + 2))) return true;
+			}
+			return false;
+		});
+	if (carries(transient)) return { nature: 'transient-showery', phenomena };
+	if (carries(persistent)) return { nature: 'persistent-continuous', phenomena };
+	return { nature: 'indeterminate', phenomena };
+}
+
+/** The table's own wording for a group type, without the probability figure. */
+function tableGroupLabel(group: TafChangeGroup): string {
+	if (group.type === 'TEMPO') {
+		const sameDay = group.to.day === group.from.day;
+		return sameDay ? 'TEMPO (alone)' : 'TEMPO FM / TEMPO TL';
+	}
+	if (group.type === 'PROB') return `PROB ${group.probability ?? ''}`.trim();
+	return group.type;
+}
+
+/**
+ * Classify every conditional group of the destination window.
+ *
+ * Only `TEMPO`, `INTER` and `PROB` groups are conditional; `FM` and `BECMG` are
+ * transitions, which the window assessment already folds into the prevailing
+ * conditions. The classification applies to the destination only: the PRD is
+ * explicit that it must not be transferred to the alternate without a rule of
+ * its own (PRD §8, acceptance §5).
+ */
+export function classifyDestinationConditionals(assessment: TafWindowAssessment): ConditionalClassification[] {
+	return assessment.conditional.map(group => {
+		const { nature, phenomena } = classifyConditionalNature(group.conditions);
+		return {
+			groupType: tableGroupLabel(group),
+			applies: nature === 'persistent-continuous',
+			nature,
+			phenomena,
+			reference: RULE_REFERENCES.changeIndicatorTable
+		};
+	});
+}
+
+/**
+ * Additional holding fuel and standard fuel padding.
+ *
+ * Only two grounded figures exist in this release:
+ *
+ *   30 minutes of additional holding fuel
+ *     When a forecast prefixed by TEMPO takes the destination alternate below its
+ *     planning minima at ETA ± 1 hr, OM Part A 8.1.6 b.iii keeps the aerodrome
+ *     usable as a designated alternate only if the conditions remain above the
+ *     applicable landing minima, the destination is at or above destination
+ *     alternate planning minima, and the additional 30 minutes is carried.
+ *
+ *   10 minutes @ 1500 ft of standard padding
+ *     FDM 5.11 page 5.11-16, when either printed criterion is met. The table
+ *     itself calls padding recommended or advisory and subject to Commander
+ *     discretion, so it is reported as padding and never merged into a legal
+ *     figure.
+ *
+ * No other fuel rule is produced. In particular there is no
+ * `TEMPO`-without-alternate holding figure, because no company rule stating one
+ * was found (PRD §11, acceptance §12).
  */
 export function evaluateHoldingFuel(input: {
-	hasInter: boolean;
-	hasTempo: boolean;
-	hasCompliantAlternate: boolean;
-	hasConvectiveWeather: boolean;
+	/** A conditional group takes the alternate below its planning minima. */
+	alternateConditionalBelowPlanningMinima: boolean;
+	/** The alternate stays above its applicable landing minima inside the window. */
+	alternateAboveLandingMinima: boolean;
+	/** The destination is at or above destination alternate planning minima. */
+	destinationAtOrAboveAlternatePlanningMinima: boolean;
 	/**
-	 * True when a TEMPO/INTER group takes the destination alternate below its
-	 * planning minima inside the diversion window. OM Part A 8.1.2 keeps the
-	 * aerodrome usable as an alternate in that case only if additional holding
-	 * fuel is carried, which is why this is a fuel input and not only a finding.
+	 * Padding criterion 1: at ETA ± 1 hr the destination ceiling or visibility is
+	 * at or below the planning minima required for the destination alternate.
 	 */
-	alternateConditionalBelowMinima?: boolean;
+	paddingDestinationBelowAlternatePlanningMinima: boolean;
+	/** What the forecast showed for criterion 1. */
+	paddingCriterionOneEvidence: string;
+	/** Padding criterion 2: at ETA ± 1 hr destination visibility ≤ 3000 m and TSRA. */
+	paddingDestinationLowVisibilityThunderstorm: boolean;
+	/** What the forecast showed for criterion 2. */
+	paddingCriterionTwoEvidence: string;
 }): FuelRequirement {
-	const references = [...CLAUSE_REFERENCES.tempoAlternate, ...CLAUSE_REFERENCES.holdingFuel, ...CLAUSE_REFERENCES.additionalFuel];
-
-	// Shower and thunderstorm activity is the case the workflow names for
-	// discretionary padding, because it produces holding that the forecast does
-	// not quantify. Padding is advisory and is never folded into the legal figure.
-	const advisoryPaddingMinutes = input.hasConvectiveWeather ? 15 : 0;
-	const advisoryRationale = input.hasConvectiveWeather
-		? 'Convective activity is forecast in the arrival window, which typically produces holding that a TAF does not quantify. Padding is discretionary and is not a legal requirement.'
+	const paddingCriteria: FuelPaddingCriterion[] = [];
+	if (input.paddingDestinationBelowAlternatePlanningMinima) {
+		paddingCriteria.push({
+			code: 'destination-below-alternate-planning-minima',
+			statement:
+				'At ETA ± 1 hour the ceiling or visibility at destination is at or below the planning minima required for the destination alternate.',
+			evidence: input.paddingCriterionOneEvidence,
+			minutes: STANDARD_FUEL_PADDING_MINUTES,
+			references: [RULE_REFERENCES.fuelPadding]
+		});
+	}
+	if (input.paddingDestinationLowVisibilityThunderstorm) {
+		paddingCriteria.push({
+			code: 'destination-low-visibility-thunderstorm',
+			statement: `At ETA ± 1 hour the visibility at destination is ${FUEL_PADDING_VISIBILITY_M} m or below and the forecast contains TSRA.`,
+			evidence: input.paddingCriterionTwoEvidence,
+			minutes: STANDARD_FUEL_PADDING_MINUTES,
+			references: [RULE_REFERENCES.fuelPadding]
+		});
+	}
+	const advisoryPaddingMinutes = paddingCriteria.reduce((total, criterion) => total + criterion.minutes, 0);
+	const advisoryRationale = advisoryPaddingMinutes
+		? `The FUEL PADDING - Standard table (FDM 5.11, printed page 5.11-16) lists ${paddingCriteria.length} criterion matched by this forecast, each contributing ${STANDARD_FUEL_PADDING_MINUTES} minutes at 1500 ft. The table states padding is recommended or advisory and subject to Pilot-in-Command discretion.`
 		: null;
 
-	// The destination rule from the evaluation workflow.
-	let destinationMinutes = 0;
-	let destinationBasis: FuelBasis = 'no-conditional-weather';
-	let destinationRationale = 'No INTER or TEMPO group affects the destination arrival window.';
+	// The concession needs all three conditions the manual states. A missing
+	// condition is not a satisfied one: the aerodrome is not treated as a usable
+	// alternate on an assumption.
+	const concessionAvailable =
+		input.alternateConditionalBelowPlanningMinima &&
+		input.alternateAboveLandingMinima &&
+		input.destinationAtOrAboveAlternatePlanningMinima;
 
-	if (input.hasInter || input.hasTempo) {
-		if (input.hasCompliantAlternate) {
-			destinationMinutes = 0;
-			destinationBasis = 'compliant-alternate';
-			destinationRationale =
-				'A conditional deterioration affects the destination arrival window, but a compliant destination alternate is nominated, which satisfies the requirement.';
-		} else if (input.hasTempo) {
-			destinationMinutes = 60;
-			destinationBasis = 'tempo-without-alternate';
-			destinationRationale =
-				'A TEMPO group affects the destination arrival window and no compliant alternate is nominated, so 60 minutes of additional holding fuel is required.';
-		} else {
-			destinationMinutes = 30;
-			destinationBasis = 'inter-without-alternate';
-			destinationRationale =
-				'An INTER group affects the destination arrival window and no compliant alternate is nominated, so 30 minutes of additional holding fuel is required.';
-		}
-	}
-
-	// The alternate rule from OM Part A 8.1.2. Both requirements are "additional
-	// holding fuel" for the same flight, so the larger governs rather than their
-	// sum, which would count the same holding twice.
-	if (input.alternateConditionalBelowMinima && 30 > destinationMinutes) {
+	if (concessionAvailable) {
 		return {
-			mandatoryHoldingMinutes: 30,
-			basis: 'alternate-conditional',
+			mandatoryHoldingMinutes: DESTINATION_ALTERNATE_TEMPO_HOLDING_MINUTES,
+			basis: advisoryPaddingMinutes > 0 ? 'alternate-tempo-holding-with-padding' : 'alternate-tempo-holding',
 			rationale:
-				'A TEMPO or INTER group takes the destination alternate below its planning minima inside the diversion window, so the alternate remains usable only with 30 minutes of additional holding fuel.',
-			references,
+				'A forecast prefixed by TEMPO takes the destination alternate below its planning minima at ETA ± 1 hour. OM Part A 8.1.6 b.iii keeps the aerodrome usable as a designated alternate when the conditions remain above the applicable landing minima, the destination is at or above destination alternate planning minima, and an additional 30 minutes of holding fuel is carried.',
+			references: [RULE_REFERENCES.destinationAlternateTempo, RULE_REFERENCES.alternatePlanningMinima],
 			advisoryPaddingMinutes,
-			advisoryRationale
+			advisoryRationale,
+			paddingCriteria
 		};
 	}
 
 	return {
-		mandatoryHoldingMinutes: destinationMinutes,
-		basis: destinationBasis,
-		rationale: destinationRationale,
-		references,
+		mandatoryHoldingMinutes: 0,
+		basis: advisoryPaddingMinutes > 0 ? 'padding-standard' : 'no-padding-triggered',
+		rationale:
+			advisoryPaddingMinutes > 0
+				? 'No additional holding fuel is required by a cited rule. Standard fuel padding applies as advisory extra fuel.'
+				: 'No cited fuel rule is triggered by the forecast in these windows.',
+		references: advisoryPaddingMinutes > 0 ? [RULE_REFERENCES.fuelPadding] : [],
 		advisoryPaddingMinutes,
-		advisoryRationale
+		advisoryRationale,
+		paddingCriteria
 	};
 }
 
@@ -328,11 +565,13 @@ export function evaluateHoldingFuel(input: {
  *
  * Deliberately conservative. The scan only looks for unambiguous closure
  * wording, because a false positive here blocks a release while a false negative
- * merely leaves the human remark visible for review. The remark text itself is
- * always carried into the assessment, so nothing is hidden by a missed keyword.
+ * merely leaves the NOTAM text visible for review. The text itself is always
+ * carried into the assessment, so nothing is hidden by a missed keyword.
  */
 export function detectClosureRemarks(remarks: string): string[] {
-	const matches = String(remarks ?? '').toUpperCase().match(/\b(?:RWY|RUNWAY|AD|AERODROME|AIRPORT)?\s*(?:CLOSED|CLSD)\b/g);
+	const matches = String(remarks ?? '')
+		.toUpperCase()
+		.match(/\b(?:RWY|RUNWAY|AD|AERODROME|AIRPORT)?\s*(?:CLOSED|CLSD)\b/g);
 	return matches ? [...new Set(matches.map(match => match.trim()))] : [];
 }
 
@@ -370,29 +609,69 @@ function describeWeather(assessment: TafWindowAssessment): string {
 }
 
 /**
- * Highest verdict the evidence supports.
+ * The assessment outcome the evidence supports.
  *
- * `NO-GO` requires a finding that is both critical and explicitly incompatible
- * with release. A critical condition that merely could not be assessed degrades
- * to `MARGINAL`, so an unknown is never presented as a violation and never as a
- * clean result.
+ * The order encodes the product's safety rule: a finding that records missing
+ * required data is never presented as a clean result and never as a violation
+ * either, so it produces `REVIEW REQUIRED` and takes precedence over everything
+ * below it. A NOTAM check that has not been performed is its own outcome, which
+ * must not be read as "NOTAM clean" (PRD §9, §12).
+ *
+ * `MARGINAL` is only returned when a finding is explicitly marked as a threshold
+ * the manual states (`marginalByRule`). No synthetic threshold is invented here:
+ * PRD §12 says that where the manual does not state a threshold, the outcome is
+ * `REVIEW REQUIRED`, not an assumed mid-band.
  */
-export function deriveVerdict(findings: DispatchFinding[]): DispatchVerdict {
+export function deriveOutcome(findings: DispatchFinding[]): DispatchOutcome {
 	if (findings.some(item => item.severity === 'CRITICAL' && item.blocksRelease)) return 'NO-GO';
-	if (findings.some(item => item.severity === 'CRITICAL' || item.severity === 'CAUTION')) return 'MARGINAL';
+	if (findings.some(item => item.missingData === true)) return 'REVIEW REQUIRED';
+	if (findings.some(item => item.code === 'NOTAM_REVIEW_PENDING')) return 'NOTAM REVIEW PENDING';
+	if (findings.some(item => item.marginalByRule === true)) return 'MARGINAL';
+	if (findings.some(item => item.severity === 'CRITICAL' || item.severity === 'CAUTION')) return 'REVIEW REQUIRED';
 	return 'GO';
 }
 
+/** Precedence used to order findings for display, highest first. */
+function rank(severity: FindingSeverity): number {
+	return severity === 'CRITICAL' ? 2 : severity === 'CAUTION' ? 1 : 0;
+}
+
 /**
- * Evaluate one flight against the dispatch workflow.
+ * True when a minima value states at least one component.
  *
- * Order matters: windows first (everything else is relative to them), then the
- * destination, then the alternate, then fuel, which depends on whether the
- * alternate turned out to be compliant. The NOTAM check is last because its
- * absence caps the verdict rather than changing any of the above.
+ * Deliberately returns a plain boolean rather than narrowing the argument: the
+ * callers keep the value in a local so an unreadable record is reported with its
+ * own label and references, which a narrowed `never` branch could not do.
+ */
+function minimaUsable(minima: ApproachMinima | null): boolean {
+	return minima !== null && (minima.ceilingFt !== null || minima.visibilityM !== null);
+}
+
+/** The neutral fuel requirement, used when no ETA window could be computed. */
+function emptyFuel(): FuelRequirement {
+	return evaluateHoldingFuel({
+		alternateConditionalBelowPlanningMinima: false,
+		alternateAboveLandingMinima: false,
+		destinationAtOrAboveAlternatePlanningMinima: false,
+		paddingDestinationBelowAlternatePlanningMinima: false,
+		paddingCriterionOneEvidence: '',
+		paddingDestinationLowVisibilityThunderstorm: false,
+		paddingCriterionTwoEvidence: ''
+	});
+}
+
+/**
+ * Evaluate one flight against the agreed dispatch workflow.
+ *
+ * Order matters: windows first, because everything else is relative to them;
+ * then the destination; then the alternate, whose TEMPO concession feeds the
+ * fuel calculation; then the NOTAM state, which is its own outcome; and the
+ * standard fuel padding last, because it reads the destination comparison.
  */
 export function assessDispatch(input: DispatchInput): DispatchAssessment {
 	const findings: DispatchFinding[] = [];
+	const selectedNotams = input.selectedNotams ?? [];
+	const notamReviewed = selectedNotams.length > 0;
 
 	if (input.dof === null || input.staZ === null) {
 		findings.push(
@@ -401,28 +680,25 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 				'INPUT_INCOMPLETE',
 				'Date of flight or scheduled time of arrival is missing, so no ETA window could be computed.',
 				`dof=${input.dof ? input.dof.toISOString() : 'absent'}; staZ=${input.staZ ? input.staZ.toISOString() : 'absent'}`,
-				[]
+				[],
+				{ missingData: true }
 			)
 		);
 		return {
-			verdict: deriveVerdict(findings),
+			outcome: deriveOutcome(findings),
 			windows: null,
-			fuel: evaluateHoldingFuel({ hasInter: false, hasTempo: false, hasCompliantAlternate: false, hasConvectiveWeather: false }),
+			fuel: emptyFuel(),
 			findings,
 			destination: null,
 			alternate: null,
-			notamEvaluated: false
+			destinationConditional: [],
+			notamReviewed
 		};
 	}
 
 	const reference = input.staZ;
 	const windows = computeEtaWindows(input.staZ, input.diversionMinutes);
 
-	// The schedule decided the windows above, so a date that was inferred or
-	// corrected has to be confirmed by a human before the windows can be relied
-	// on. This caps the verdict below GO rather than blocking outright: the assumed
-	// value is usually right, and the assessment is still worth reading while the
-	// confirmation is outstanding.
 	if (input.scheduleNeedsConfirmation) {
 		findings.push(
 			finding(
@@ -430,7 +706,8 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 				'SCHEDULE_NEEDS_CONFIRMATION',
 				'The flight schedule needed a date to be inferred or corrected, so the ETA windows are provisional.',
 				'the published schedule does not state these dates unambiguously; confirm the date of flight and the arrival date',
-				[]
+				CLAUSE_REFERENCES.destinationSuitability,
+				{ missingData: true }
 			)
 		);
 	}
@@ -438,6 +715,15 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 	// ---- Destination ------------------------------------------------------
 	const destinationForecast: TafForecast | null = input.destinationTaf ? decodeTaf(input.destinationTaf) : null;
 	let destination: TafWindowAssessment | null = null;
+	let destinationConditional: ConditionalClassification[] = [];
+	/** Prevailing destination weather is at or above the alternate planning minima. */
+	let destinationAtOrAboveAlternatePlanningMinima = false;
+	/** Criterion 1 of the FUEL PADDING table matched. */
+	let paddingCriterionOne = false;
+	let paddingCriterionOneEvidence = '';
+	/** Criterion 2 of the FUEL PADDING table matched. */
+	let paddingCriterionTwo = false;
+	let paddingCriterionTwoEvidence = '';
 
 	if (!destinationForecast) {
 		findings.push(
@@ -446,19 +732,23 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 				'TAF_UNPARSEABLE',
 				'No readable TAF is available for the destination.',
 				input.destinationTaf ? 'destination TAF could not be decoded' : 'destination TAF is absent',
-				CLAUSE_REFERENCES.planningMinima
+				CLAUSE_REFERENCES.destinationSuitability,
+				{ missingData: true }
 			)
 		);
 	} else {
 		destination = assessTafWindow(destinationForecast, windows.destination.from, windows.destination.to, reference);
+		destinationConditional = classifyDestinationConditionals(destination);
+
 		if (!destination.covered) {
 			findings.push(
 				finding(
 					'CRITICAL',
 					'TAF_WINDOW_NOT_COVERED',
 					'The destination TAF validity does not cover the whole arrival window.',
-					`destination TAF ${destinationForecast.validFrom.day}/${destinationForecast.validFrom.hour}Z-${destinationForecast.validTo.day}/${destinationForecast.validTo.hour}Z`,
-					CLAUSE_REFERENCES.planningMinima
+					`destination TAF ${destinationForecast.validFrom.day}/${destinationForecast.validFrom.hour}Z-${destinationForecast.validTo.day}/${destinationForecast.validTo.hour}Z against the window ${windows.destination.from.toISOString()}-${windows.destination.to.toISOString()}`,
+					CLAUSE_REFERENCES.destinationSuitability,
+					{ missingData: true }
 				)
 			);
 		}
@@ -469,14 +759,12 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 					'TAF_TOKENS_UNRECOGNISED',
 					`${destinationForecast.unparsed.length} destination TAF token(s) were not recognised.`,
 					destinationForecast.unparsed.join(', '),
-					CLAUSE_REFERENCES.planningMinima
+					CLAUSE_REFERENCES.destinationSuitability,
+					{ marginalByRule: true }
 				)
 			);
 		}
 
-		// Currency is the feed's judgement that the report has not been superseded.
-		// It is separate from coverage: a TAF can span the window and still be an
-		// out-of-date issue.
 		if (input.destinationTafCurrency === 'stale') {
 			findings.push(
 				finding(
@@ -484,7 +772,8 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 					'TAF_NOT_CURRENT',
 					'The destination TAF is not current.',
 					'the feed reports the destination TAF as superseded or expired',
-					CLAUSE_REFERENCES.planningMinima
+					CLAUSE_REFERENCES.destinationSuitability,
+					{ missingData: true }
 				)
 			);
 		} else if (input.destinationTafCurrency === 'unknown') {
@@ -494,62 +783,93 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 					'TAF_STATUS_UNKNOWN',
 					'Destination TAF currency could not be determined.',
 					'the feed did not state a status for the destination TAF',
-					CLAUSE_REFERENCES.planningMinima
+					CLAUSE_REFERENCES.destinationSuitability,
+					{ missingData: true }
 				)
 			);
 		}
 
-		const prevailingVisibility = effectiveVisibilityM(destination.prevailing);
-		const prevailingComparison = input.destinationMinima
-			? compareToMinima(prevailingVisibility, destination.prevailing.ceilingFt, input.destinationMinima)
-			: null;
-
-		if (!input.destinationMinima) {
-			findings.push(
-				finding(
-					'CAUTION',
-					'MINIMA_NOT_AVAILABLE',
-					'No destination landing minima is available, so compliance could not be assessed.',
-					'no minima value supplied for the destination approach',
-					CLAUSE_REFERENCES.planningMinima
-				)
-			);
-		} else if (input.destinationMinima.ceilingFt === null && input.destinationMinima.visibilityM === null) {
-			// A labelled approach with no values is not minima. Comparing against it
-			// would find no shortfall for the wrong reason, and would silently suppress
-			// the unavailable-minima caution — a pass that means nothing.
-			findings.push(
-				finding(
-					'CAUTION',
-					'MINIMA_INCOMPLETE',
-					'Destination minima was supplied without a ceiling or visibility value, so nothing could be compared against the forecast.',
-					`approach "${input.destinationMinima.approach}" carries neither a ceiling nor a visibility value`,
-					CLAUSE_REFERENCES.planningMinima
-				)
-			);
-		} else if (prevailingComparison && (prevailingComparison.visibilityBelow || prevailingComparison.ceilingBelow)) {
-			findings.push(
-				finding(
-					'CRITICAL',
-					'DEST_BELOW_LANDING_MINIMA',
-					'Prevailing destination weather is below the landing minima for the nominated approach.',
-					`forecast ${prevailingVisibility === null ? 'visibility not stated' : `${prevailingVisibility} m`} / ${destination.prevailing.ceilingFt === null ? 'ceiling not stated' : `${destination.prevailing.ceilingFt} ft`} against minima ${input.destinationMinima.visibilityM ?? 'n/a'} m / ${input.destinationMinima.ceilingFt ?? 'n/a'} ft for ${input.destinationMinima.approach}`,
-					input.destinationMinima.references,
-					true
-				)
-			);
-		} else {
-			const worstComparison = compareToMinima(destination.worstVisibilityM, destination.lowestCeilingFt, input.destinationMinima);
-			if (worstComparison.visibilityBelow || worstComparison.ceilingBelow) {
+		// The DEST AT ETA ±1HR column of Table 8.1-20 (continued). A group the table
+		// does not apply is recorded as disregarded, with its citation, so the
+		// classification itself is auditable rather than invisible.
+		for (const classification of destinationConditional) {
+			if (classification.nature === 'indeterminate') {
 				findings.push(
 					finding(
 						'CAUTION',
 						'DEST_CONDITIONAL_DETERIORATION',
-						'A conditional deterioration in the arrival window reaches below the destination landing minima.',
-						`worst case ${describeWeather(destination)} against minima ${input.destinationMinima.visibilityM ?? 'n/a'} m / ${input.destinationMinima.ceilingFt ?? 'n/a'} ft for ${input.destinationMinima.approach}`,
-						input.destinationMinima.references
+						`A ${classification.groupType} group affects the destination arrival window and carries no phenomenon the change-indicator table classifies.`,
+						`group ${classification.groupType}; phenomena ${classification.phenomena.join(', ') || 'none stated'}`,
+						[classification.reference],
+						{ missingData: true }
 					)
 				);
+			} else if (!classification.applies) {
+				findings.push(
+					finding(
+						'INFO',
+						'DEST_CONDITIONAL_IMPROVEMENT_IGNORED',
+						`A ${classification.groupType} group affects the destination arrival window and is transient or showery, so the table does not apply it to destination planning minima.`,
+						`group ${classification.groupType}; phenomena ${classification.phenomena.join(', ') || 'none stated'}; classification ${classification.nature}`,
+						[classification.reference]
+					)
+				);
+			}
+		}
+
+		const prevailingVisibility = effectiveVisibilityM(destination.prevailing);
+		const destinationMinima = input.destinationMinima;
+
+		if (!destinationMinima) {
+			findings.push(
+				finding(
+					'CAUTION',
+					'MINIMA_NOT_AVAILABLE',
+					'No approved destination landing minima is available, so compliance could not be assessed.',
+					'no approved minima record was selected for the destination approach',
+					CLAUSE_REFERENCES.chartSource,
+					{ missingData: true }
+				)
+			);
+		} else if (!minimaUsable(destinationMinima)) {
+			findings.push(
+				finding(
+					'CAUTION',
+					'MINIMA_INCOMPLETE',
+					'Destination minima carries neither a ceiling nor a visibility value, so nothing could be compared against the forecast.',
+					`approach "${destinationMinima.approach}" carries neither a ceiling nor a visibility value`,
+					[...CLAUSE_REFERENCES.chartSource, ...destinationMinima.references],
+					{ missingData: true }
+				)
+			);
+		} else {
+			const minima = destinationMinima;
+			const prevailingComparison = compareToMinima(prevailingVisibility, destination.prevailing.ceilingFt, minima);
+			if (prevailingComparison.visibilityBelow || prevailingComparison.ceilingBelow) {
+				findings.push(
+					finding(
+						'CRITICAL',
+						'DEST_BELOW_LANDING_MINIMA',
+						'Prevailing destination weather is below the landing minima for the nominated approach.',
+						`forecast ${prevailingVisibility === null ? 'visibility not stated' : `${prevailingVisibility} m`} / ${destination.prevailing.ceilingFt === null ? 'ceiling not stated' : `${destination.prevailing.ceilingFt} ft`} against minima ${minima.visibilityM ?? 'n/a'} m / ${minima.ceilingFt ?? 'n/a'} ft for ${minima.approach}`,
+						[...CLAUSE_REFERENCES.destinationSuitability, ...minima.references],
+						{ blocksRelease: true }
+					)
+				);
+			} else {
+				const worstComparison = compareToMinima(destination.worstVisibilityM, destination.lowestCeilingFt, minima);
+				if (worstComparison.visibilityBelow || worstComparison.ceilingBelow) {
+					findings.push(
+						finding(
+							'CAUTION',
+							'DEST_CONDITIONAL_DETERIORATION',
+							'A conditional deterioration in the arrival window reaches below the destination landing minima.',
+							`worst case ${describeWeather(destination)} against minima ${minima.visibilityM ?? 'n/a'} m / ${minima.ceilingFt ?? 'n/a'} ft for ${minima.approach}`,
+							[...CLAUSE_REFERENCES.destinationSuitability, ...minima.references],
+							{ marginalByRule: true }
+						)
+					);
+				}
 			}
 		}
 
@@ -560,7 +880,8 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 					'DEST_CONVECTIVE_WEATHER',
 					'Thunderstorm activity is forecast in the destination arrival window.',
 					describeWeather(destination),
-					CLAUSE_REFERENCES.planningMinima
+					CLAUSE_REFERENCES.changeIndicatorTable,
+					{ marginalByRule: true }
 				)
 			);
 		}
@@ -571,102 +892,159 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 					'DEST_LOW_VISIBILITY_PHENOMENA',
 					'Fog is forecast in the destination arrival window.',
 					describeWeather(destination),
-					[...CLAUSE_REFERENCES.planningMinima, ...CLAUSE_REFERENCES.equipmentEffect]
+					CLAUSE_REFERENCES.changeIndicatorTable,
+					{ marginalByRule: true }
 				)
 			);
 		}
+
+		// ---- Destination checks the fuel rules read --------------------------
+		// OM Part A 8.1.6 b.iii condition 2 needs the destination at or above
+		// destination alternate planning minima, and criterion 1 of the FUEL PADDING
+		// table needs the destination at or below the same figure.
+		const destinationPlanningMinima = input.alternatePlanningMinima;
+		if (destinationPlanningMinima && minimaUsable(destinationPlanningMinima)) {
+			const prevailingAgainstPlanning = compareToMinima(
+				prevailingVisibility,
+				destination.prevailing.ceilingFt,
+				destinationPlanningMinima
+			);
+			destinationAtOrAboveAlternatePlanningMinima =
+				!prevailingAgainstPlanning.visibilityBelow && !prevailingAgainstPlanning.ceilingBelow;
+			const worstAgainstPlanning = compareToMinima(
+				destination.worstVisibilityM,
+				destination.lowestCeilingFt,
+				destinationPlanningMinima
+			);
+			paddingCriterionOne = worstAgainstPlanning.visibilityBelow || worstAgainstPlanning.ceilingBelow;
+			paddingCriterionOneEvidence = `worst case ${describeWeather(destination)} against destination alternate planning minima ${destinationPlanningMinima.visibilityM ?? 'n/a'} m / ${destinationPlanningMinima.ceilingFt ?? 'n/a'} ft for ${destinationPlanningMinima.approach}`;
+		}
+
+		// Criterion 2 of the FUEL PADDING table. The printed row is `visibility at
+		// destination at or below 3,000 m; and TSRA`, so both halves must hold.
+		const reportedVisibility = destination.worstVisibilityM ?? prevailingVisibility;
+		const tsra = destination.conditional.some(group =>
+			group.conditions.weather.some(code => code.toUpperCase().includes('TSRA'))
+		);
+		paddingCriterionTwo = reportedVisibility !== null && reportedVisibility <= FUEL_PADDING_VISIBILITY_M && tsra;
+		paddingCriterionTwoEvidence = `forecast visibility ${reportedVisibility === null ? 'not stated' : `${reportedVisibility} m`} against the ${FUEL_PADDING_VISIBILITY_M} m trigger with TSRA ${tsra ? 'present' : 'absent'} in the arrival window`;
 	}
 
 	// ---- Primary alternate ------------------------------------------------
 	const alternateForecast: TafForecast | null = input.alternateTaf ? decodeTaf(input.alternateTaf) : null;
 	let alternate: TafWindowAssessment | null = null;
-	let alternateCompliant = false;
-	/** Set when only a conditional group takes the alternate below planning minima. */
+	/** A conditional group takes the alternate below its planning minima. */
 	let alternateConditionalBelow = false;
+	/** The alternate stays above its applicable landing minima, which the TEMPO rule needs. */
+	let alternateAboveLandingMinima = false;
+	let alternateLandingMinimaKnown = false;
 
-	if (!input.destinationAlternates.length) {
+	if (!input.alternateIcao) {
 		findings.push(
 			finding(
 				'CAUTION',
 				'ALT_NOT_NOMINATED',
-				'No destination alternate is nominated for this flight.',
-				'destinationAlternates is empty',
-				CLAUSE_REFERENCES.tempoAlternate
+				'No destination alternate has been selected for this flight.',
+				'no primary alternate was selected in this assessment',
+				CLAUSE_REFERENCES.alternatePlanningMinima,
+				{ missingData: true }
 			)
 		);
 	} else if (!alternateForecast) {
 		findings.push(
 			finding(
 				'CAUTION',
-				'ALT_BELOW_PLANNING_MINIMA',
-				'No readable TAF is available for the nominated alternate, so its suitability could not be assessed.',
+				'ALT_TAF_UNAVAILABLE',
+				'No readable TAF is available for the selected alternate, so its suitability could not be assessed.',
 				input.alternateTaf ? 'alternate TAF could not be decoded' : 'alternate TAF is absent',
-				CLAUSE_REFERENCES.planningMinima
+				CLAUSE_REFERENCES.alternatePlanningMinima,
+				{ missingData: true }
 			)
 		);
 	} else {
 		alternate = assessTafWindow(alternateForecast, windows.primaryAlternate.from, windows.primaryAlternate.to, reference);
-		alternateCompliant = alternate.covered;
 
-		if (!input.alternateMinima) {
-			alternateCompliant = false;
+		if (!alternate.covered) {
+			findings.push(
+				finding(
+					'CAUTION',
+					'ALT_TAF_UNAVAILABLE',
+					'The alternate TAF validity does not cover the whole diversion window.',
+					`alternate TAF ${alternateForecast.validFrom.day}/${alternateForecast.validFrom.hour}Z-${alternateForecast.validTo.day}/${alternateForecast.validTo.hour}Z against the window ${windows.primaryAlternate.from.toISOString()}-${windows.primaryAlternate.to.toISOString()}`,
+					CLAUSE_REFERENCES.alternatePlanningMinima,
+					{ missingData: true }
+				)
+			);
+		}
+
+		// The TEMPO concession is only available while the alternate stays above its
+		// applicable landing minima, so that comparison is made first and separately
+		// from the planning comparison.
+		const alternateLanding = input.alternateLandingMinima;
+		if (alternateLanding && minimaUsable(alternateLanding)) {
+			alternateLandingMinimaKnown = true;
+			const againstLanding = compareToMinima(alternate.worstVisibilityM, alternate.lowestCeilingFt, alternateLanding);
+			alternateAboveLandingMinima = !againstLanding.visibilityBelow && !againstLanding.ceilingBelow;
+		}
+
+		const planning = input.alternatePlanningMinima;
+		if (!planning || !minimaUsable(planning)) {
 			findings.push(
 				finding(
 					'CAUTION',
 					'MINIMA_NOT_AVAILABLE',
-					'No alternate planning minima is available, so alternate suitability could not be assessed.',
-					'no planning minima value supplied for the alternate',
-					CLAUSE_REFERENCES.planningMinima
-				)
-			);
-		} else if (input.alternateMinima.ceilingFt === null && input.alternateMinima.visibilityM === null) {
-			// Same trap as the destination: a labelled approach with no values cannot
-			// fail a comparison, so it would read as a compliant alternate while
-			// actually having been checked against nothing.
-			alternateCompliant = false;
-			findings.push(
-				finding(
-					'CAUTION',
-					'MINIMA_INCOMPLETE',
-					'Alternate planning minima was supplied without a ceiling or visibility value, so suitability could not be assessed.',
-					`approach "${input.alternateMinima.approach}" carries neither a ceiling nor a visibility value`,
-					CLAUSE_REFERENCES.planningMinima
+					'No approved alternate planning minima is available, so alternate suitability could not be assessed.',
+					'no approved minima record or company planning minima was available for the selected alternate',
+					CLAUSE_REFERENCES.alternatePlanningMinima,
+					{ missingData: true }
 				)
 			);
 		} else {
 			const prevailing = compareToMinima(
 				effectiveVisibilityM(alternate.prevailing),
 				alternate.prevailing.ceilingFt,
-				input.alternateMinima
+				planning
 			);
-			const worst = compareToMinima(alternate.worstVisibilityM, alternate.lowestCeilingFt, input.alternateMinima);
+			const worst = compareToMinima(alternate.worstVisibilityM, alternate.lowestCeilingFt, planning);
 
 			if (prevailing.visibilityBelow || prevailing.ceilingBelow) {
-				// A persistent shortfall is not something the TEMPO concession covers.
-				alternateCompliant = false;
+				// A persistent shortfall is not something the TEMPO concession covers, so
+				// the alternate is not suitable on this forecast alone. It is reported as
+				// requiring review rather than as a release-blocking condition: PRD
+				// acceptance criterion 10 is explicit that an unsuitable alternate asks
+				// the dispatcher for another selection and does not decide the flight.
 				findings.push(
 					finding(
 						'CRITICAL',
 						'ALT_BELOW_PLANNING_MINIMA',
 						'Prevailing alternate weather is below the alternate planning minima.',
-						`forecast ${describeWeather(alternate)} against planning minima ${input.alternateMinima.visibilityM ?? 'n/a'} m / ${input.alternateMinima.ceilingFt ?? 'n/a'} ft for ${input.alternateMinima.approach}`,
-						[...CLAUSE_REFERENCES.planningMinima, ...input.alternateMinima.references],
-						true
+						`forecast ${describeWeather(alternate)} against planning minima ${planning.visibilityM ?? 'n/a'} m / ${planning.ceilingFt ?? 'n/a'} ft for ${planning.approach}`,
+						[...CLAUSE_REFERENCES.alternatePlanningMinima, ...planning.references],
+						{ marginalByRule: true }
 					)
 				);
 			} else if (worst.visibilityBelow || worst.ceilingBelow) {
-				// OM Part A 8.1.2 keeps the aerodrome usable as an alternate under a
-				// TEMPO forecast below planning minima, provided the conditions stay
-				// above landing minima and additional holding fuel is carried. The
-				// fuel consequence is applied through `alternateConditionalBelow`.
 				alternateConditionalBelow = true;
+				if (!alternateLandingMinimaKnown) {
+					findings.push(
+						finding(
+							'CAUTION',
+							'ALT_TEMPO_CONCESSION_UNAVAILABLE',
+							'A conditional group takes the alternate below its planning minima, and the landing minima needed to apply the TEMPO concession is not available.',
+							`worst case ${describeWeather(alternate)} against planning minima ${planning.visibilityM ?? 'n/a'} m / ${planning.ceilingFt ?? 'n/a'} ft; alternate landing minima was not selected`,
+							CLAUSE_REFERENCES.destinationAlternateTempo,
+							{ missingData: true }
+						)
+					);
+				}
 				findings.push(
 					finding(
 						'CAUTION',
 						'ALT_CONDITIONAL_BELOW_PLANNING_MINIMA',
-						'A TEMPO forecast takes the alternate below its planning minima within the diversion window.',
-						`worst case ${describeWeather(alternate)} against planning minima ${input.alternateMinima.visibilityM ?? 'n/a'} m / ${input.alternateMinima.ceilingFt ?? 'n/a'} ft for ${input.alternateMinima.approach}`,
-						[...CLAUSE_REFERENCES.planningMinima, ...CLAUSE_REFERENCES.holdingFuel]
+						'A conditional group takes the alternate below its planning minima within the diversion window.',
+						`worst case ${describeWeather(alternate)} against planning minima ${planning.visibilityM ?? 'n/a'} m / ${planning.ceilingFt ?? 'n/a'} ft for ${planning.approach}`,
+						[...CLAUSE_REFERENCES.alternatePlanningMinima, ...CLAUSE_REFERENCES.destinationAlternateTempo],
+						{ marginalByRule: true }
 					)
 				);
 			}
@@ -674,9 +1052,6 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 	}
 
 	// ---- Weather monitoring freshness -------------------------------------
-	// Carried over from the original findings engine so migrating to this one
-	// does not drop the check: a stale monitoring feed means the advisories below
-	// may not reflect current hazard information.
 	if (input.weatherFreshness === 'stale') {
 		findings.push(
 			finding(
@@ -684,7 +1059,8 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 				'WX_NOT_FRESH',
 				'Weather monitoring data is not fresh.',
 				'the feed reports the monitoring block as stale',
-				CLAUSE_REFERENCES.planningMinima
+				CLAUSE_REFERENCES.destinationSuitability,
+				{ missingData: true }
 			)
 		);
 	} else if (input.weatherFreshness === 'unknown') {
@@ -694,17 +1070,17 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 				'WX_FRESHNESS_UNKNOWN',
 				'Weather monitoring freshness could not be determined.',
 				'the feed did not state a freshness value',
-				CLAUSE_REFERENCES.planningMinima
+				CLAUSE_REFERENCES.destinationSuitability,
+				{ missingData: true }
 			)
 		);
 	}
 
 	// ---- Route-impacting weather advisories -------------------------------
-	// Reported as critical but deliberately not release-blocking by this engine.
-	// The upstream feed has already decided the advisory touches the route, but
-	// whether a hazard at that distance stops a release is an operator judgement
-	// (volcanic ash and a distant tropical cyclone are not the same decision), so
-	// the engine forces human review instead of making the call itself.
+	// Reported as critical but deliberately not release-blocking: the upstream feed
+	// has decided the advisory touches the route, but whether a hazard at that
+	// distance stops a release is an operator judgement, so the engine forces human
+	// review instead of making the call itself.
 	const routeWarnings = input.routeImpactWarnings ?? [];
 	if (routeWarnings.length) {
 		findings.push(
@@ -718,82 +1094,100 @@ export function assessDispatch(input: DispatchInput): DispatchAssessment {
 						return `${warning.source} ${warning.kind}: ${warning.title} (${warning.severity || 'severity unstated'}, ${distance})`;
 					})
 					.join('; '),
-				CLAUSE_REFERENCES.planningMinima
+				CLAUSE_REFERENCES.destinationSuitability,
+				{ marginalByRule: true }
 			)
 		);
 	}
 
-	// ---- NOTAM / remarks --------------------------------------------------
-	const remarks = String(input.notamRemarks ?? '').trim();
-	const notamEvaluated = remarks.length > 0;
-	if (!notamEvaluated) {
+	// ---- NOTAM ------------------------------------------------------------
+	// Selecting nothing is not the same as finding nothing. An unreviewed NOTAM
+	// state is its own outcome so no reader can take it for a clean check.
+	if (!notamReviewed) {
 		findings.push(
 			finding(
 				'CAUTION',
-				'NOTAM_UNVERIFIED',
-				'No NOTAM or remarks were provided, so approach and runway status could not be checked.',
-				'notamRemarks is blank',
-				CLAUSE_REFERENCES.equipmentEffect
+				'NOTAM_REVIEW_PENDING',
+				'No NOTAM has been selected for this flight, so approach and runway status has not been reviewed.',
+				'no NOTAM was selected from the AWQ Cloud NOTAM list; this is not a statement that NOTAM is clear',
+				CLAUSE_REFERENCES.chartSource
 			)
 		);
 	} else {
-		const closures = detectClosureRemarks(remarks);
+		const closures = selectedNotams.flatMap(notam => detectClosureRemarks(notam.message));
 		if (closures.length) {
 			findings.push(
 				finding(
 					'CRITICAL',
 					'NOTAM_RUNWAY_CLOSURE',
-					'The supplied remarks indicate a runway or aerodrome closure.',
-					closures.join(', '),
-					CLAUSE_REFERENCES.equipmentEffect,
-					true
+					'A selected NOTAM indicates a runway or aerodrome closure.',
+					[...new Set(closures)].join(', '),
+					CLAUSE_REFERENCES.chartSource,
+					{ blocksRelease: true }
 				)
 			);
 		}
 	}
 
 	// ---- Fuel -------------------------------------------------------------
-	const hasConvective = destination !== null && destination.thunderstorm;
 	const fuel = evaluateHoldingFuel({
-		hasInter: destination?.hasInter ?? false,
-		hasTempo: destination?.hasTempo ?? false,
-		hasCompliantAlternate: alternateCompliant,
-		hasConvectiveWeather: hasConvective,
-		alternateConditionalBelowMinima: alternateConditionalBelow
+		alternateConditionalBelowPlanningMinima: alternateConditionalBelow,
+		alternateAboveLandingMinima,
+		destinationAtOrAboveAlternatePlanningMinima,
+		paddingDestinationBelowAlternatePlanningMinima: paddingCriterionOne,
+		paddingCriterionOneEvidence,
+		paddingDestinationLowVisibilityThunderstorm: paddingCriterionTwo,
+		paddingCriterionTwoEvidence
 	});
+
+	const concessionUsed =
+		fuel.basis === 'alternate-tempo-holding' || fuel.basis === 'alternate-tempo-holding-with-padding';
+	if (alternateConditionalBelow && !concessionUsed) {
+		findings.push(
+			finding(
+				'CAUTION',
+				'ALT_TEMPO_CONCESSION_UNAVAILABLE',
+				'The destination alternate TEMPO concession is not available for this forecast.',
+				`alternate above its landing minima: ${alternateAboveLandingMinima ? 'yes' : 'no'}; destination at or above destination alternate planning minima: ${destinationAtOrAboveAlternatePlanningMinima ? 'yes' : 'no'}; additional 30 minutes holding fuel carried: ${concessionUsed ? 'yes' : 'no'}`,
+				CLAUSE_REFERENCES.destinationAlternateTempo,
+				{ missingData: true }
+			)
+		);
+	}
 
 	if (fuel.mandatoryHoldingMinutes > 0) {
 		findings.push(
 			finding(
 				'CAUTION',
 				'FUEL_ADDITIONAL_HOLDING',
-				`Additional holding fuel of ${fuel.mandatoryHoldingMinutes} minutes is required.`,
+				`Additional holding fuel of ${fuel.mandatoryHoldingMinutes} minutes applies under the cited rule.`,
 				fuel.rationale,
-				fuel.references
+				fuel.references,
+				{ marginalByRule: true }
 			)
 		);
 	}
 	if (fuel.advisoryPaddingMinutes > 0 && fuel.advisoryRationale) {
 		findings.push(
-			finding('INFO', 'FUEL_PADDING_ADVISORY', `Advisory fuel padding of ${fuel.advisoryPaddingMinutes} minutes is recommended.`, fuel.advisoryRationale, [
-				...CLAUSE_REFERENCES.additionalFuel,
-				...CLAUSE_REFERENCES.enRouteFuel
-			])
+			finding(
+				'INFO',
+				'FUEL_PADDING_STANDARD',
+				`Standard fuel padding of ${fuel.advisoryPaddingMinutes} minutes at 1500 ft is recommended.`,
+				fuel.paddingCriteria.map(criterion => `${criterion.statement} (${criterion.evidence})`).join(' '),
+				CLAUSE_REFERENCES.fuelPadding
+			)
 		);
 	}
 
 	const ordered = [...findings].sort((left, right) => rank(right.severity) - rank(left.severity));
 	return {
-		verdict: deriveVerdict(ordered),
+		outcome: deriveOutcome(ordered),
 		windows,
 		fuel,
 		findings: ordered,
 		destination,
 		alternate,
-		notamEvaluated
+		destinationConditional,
+		notamReviewed
 	};
-}
-
-function rank(severity: FindingSeverity): number {
-	return severity === 'CRITICAL' ? 2 : severity === 'CAUTION' ? 1 : 0;
 }
