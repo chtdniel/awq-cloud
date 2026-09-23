@@ -70,6 +70,14 @@ export type MinimaRecord = {
 	extractionModel: string | null;
 	/** How sure the extractor was; `low` is a prompt to read the chart. */
 	extractionConfidence: 'high' | 'medium' | 'low' | null;
+	/**
+	 * The chart fragment the extractor says the values came from.
+	 *
+	 * The reviewer checks the number against the chart; this is the claim they
+	 * check, so a value that cannot be reproduced from its own quotation is
+	 * obviously wrong rather than subtly wrong.
+	 */
+	sourceText: string | null;
 	/** Extractor or reviewer notes, including values that were not readable. */
 	reviewNotes: string | null;
 	status: MinimaStatus;

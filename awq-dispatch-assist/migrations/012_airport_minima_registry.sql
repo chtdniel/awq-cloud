@@ -55,6 +55,17 @@ CREATE TABLE IF NOT EXISTS airport_minima (
   -- Extraction transparency.
   extraction_model TEXT,
   extraction_confidence TEXT CHECK (extraction_confidence IN ('high', 'medium', 'low')),
+  /**
+   * The exact chart fragment the extractor says the values came from.
+   *
+   * Converting a chart to text flattens its table, so a value can end up beside
+   * the wrong row label: measured against the real YPPH charts, three models read
+   * the same RVR note three different ways. The reviewer's job is to check the
+   * number against the chart, and this column puts the claim in front of them
+   * instead of leaving them to re-derive it. It is part of the content hash, so a
+   * changed quotation invalidates an approval like any other value change.
+   */
+  source_text TEXT,
   review_notes TEXT,
 
   -- Approval. Recorded for every approval, as PRD acceptance §28 requires.

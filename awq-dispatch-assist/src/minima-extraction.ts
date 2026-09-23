@@ -51,6 +51,16 @@ export type ExtractionOutcome =
  * The chart is public aeronautical publication data, so it is not subject to the
  * manual-confidentiality rule that governs the explainer, but the same
  * data-minimisation discipline is kept.
+ *
+ * Why every entry must quote its source fragment
+ *   Converting a chart to text flattens its table, so a value can end up next to
+ *   the wrong row label. Measured against the real YPPH charts, three different
+ *   models produced three different, mutually contradictory readings of the same
+ *   RVR note, and each one looked plausible. Asking for the exact fragment does
+ *   not remove the ambiguity, but it makes it visible: a reviewer can check the
+ *   quoted text against the chart in seconds, and a model that cannot find a
+ *   fragment is instructed to report the ambiguity rather than pick a row. That
+ *   is what keeps the human approval step meaningful instead of ceremonial.
  */
 export const EXTRACTION_SYSTEM_PROMPT = [
 	'You transcribe landing minima from an aeronautical approach chart into structured data.',
@@ -61,7 +71,9 @@ export const EXTRACTION_SYSTEM_PROMPT = [
 	'- A null ceiling or visibility is a correct and expected answer. A guessed number is a failure.',
 	'- Read values in the units the chart prints. Ceiling and decision height are feet. Visibility and RVR are metres.',
 	'- For each approach on the chart, emit one landing entry for every aircraft category column the chart prints, and one alternate entry for every category column of the chart\'s published alternate minima. Omit the alternate entry when the chart publishes no alternate minima.',
-	'- Set "confidence" to "low" when the table structure in the supplied text is ambiguous, and say what was ambiguous in "notes".',
+	'- For every entry, copy the exact fragment of the supplied text the value came from into "sourceText". A number that does not appear in its own "sourceText" is a transcription error.',
+	'- When the flattened text makes a value ambiguous - it could belong to more than one row or category - write "ambiguous:" followed by the competing fragments in "sourceText", and set that entry\'s confidence to "low". Never resolve an ambiguity by choosing the most likely row.',
+	'- Set "confidence" to "low" whenever the table structure in the supplied text is ambiguous, and say what was ambiguous in "notes".',
 	'',
 	'Return a single JSON object and nothing else, in exactly this shape:',
 	'{',
@@ -79,10 +91,10 @@ export const EXTRACTION_SYSTEM_PROMPT = [
 	'      "approachType": "string, for example CAT I, CAT II/III, Non-precision or Circling",',
 	'      "runway": "string or null, for example 21",',
 	'      "landing": [',
-	'        { "aircraftCategory": "A", "ceilingFt": 200, "visibilityM": 800, "valueType": "DA/H with RVR or null" }',
+	'        { "aircraftCategory": "A", "ceilingFt": 200, "visibilityM": 800, "valueType": "DA/H with RVR or null", "sourceText": "the exact fragment the values came from" }',
 	'      ],',
 	'      "alternate": [',
-	'        { "aircraftCategory": "A", "ceilingFt": 400, "visibilityM": 1500, "valueType": "DA/H with RVR or null" }',
+	'        { "aircraftCategory": "A", "ceilingFt": 400, "visibilityM": 1500, "valueType": "DA/H with RVR or null", "sourceText": "the exact fragment the values came from" }',
 	'      ],',
 	'      "confidence": "high"',
 	'    }',
@@ -179,6 +191,7 @@ export function toDraftRows(payload: unknown, objectKey: string, fallbackIcao: s
 					ceilingFt,
 					visibilityM,
 					valueType: text(row.valueType),
+					sourceText: text(row.sourceText),
 					confidence: ceilingFt === null || visibilityM === null ? 'low' : confidence,
 					notes:
 						ceilingFt === null || visibilityM === null

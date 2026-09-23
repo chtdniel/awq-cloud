@@ -29,3 +29,6 @@ docs/backups/*.sql
 
 # Office lock/temp files (e.g. public/~$briefing-template.xlsx while Excel has it open)
 ~$*
+
+# Production database exports (contain operational data; never commit).
+backups/

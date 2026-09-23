@@ -1,0 +1,57 @@
+/**
+ * Development-only Wrangler configuration.
+ *
+ * Deploys the same bindings as production but as a separate Worker
+ * (`awq-dispatch-assist-dev`) whose entry point also exposes the development
+ * minima extraction harness. Nothing here touches the production Worker,
+ * domain, or data: it reads the same R2 objects and writes nothing.
+ *
+ * Use:
+ *   npx wrangler deploy --config wrangler.dev.jsonc
+ *   curl -X POST "https://<dev-host>/dev/minima-extract?secret=<DEV_HARNESS_SECRET>" ...
+ *   npx wrangler delete --config wrangler.dev.jsonc
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "awq-dispatch-assist-dev",
+	"main": "dev/dev-entry.ts",
+	"workers_dev": true,
+	"vars": {
+		"AWQ_CLOUD_BROWSER_ORIGIN": "https://awq.christiandaniel.my.id",
+		"AWQ_CLOUD_API_ORIGIN": "https://awq-cloud.pages.dev",
+		"QUERY_PLAN_DISABLED": "1"
+	},
+	"compatibility_date": "2026-09-16",
+	"compatibility_flags": ["global_fetch_strictly_public"],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./public"
+	},
+	"r2_buckets": [
+		{
+			"binding": "DOCUMENTS",
+			"bucket_name": "awq-dispatch-documents"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "awq-db",
+			"database_id": "470bf61d-b694-4d4d-a716-0b74f56a5a8a"
+		}
+	],
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+	"vectorize": [
+		{
+			"binding": "VECTORIZE",
+			"index_name": "awq-dispatch-corpus",
+			"remote": true
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}

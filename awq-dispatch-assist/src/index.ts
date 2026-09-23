@@ -1749,7 +1749,10 @@ async function correctMinimaDraft(request: Request, env: Env, ctx: ExecutionCont
 	};
 	const assignText = (key: keyof DraftCorrection, value: unknown): void => {
 		if (value === undefined) return;
-		const raw = value === null ? null : String(value).trim().slice(0, 200);
+		// 500 characters is generous for a chart fragment or an AIP cycle label, and
+		// bounded so a correction cannot store an essay in a field that is rendered
+		// inline.
+		const raw = value === null ? null : String(value).trim().slice(0, 500);
 		(correction as Record<string, unknown>)[key] = raw ? raw : null;
 	};
 	assignNumber('ceilingFt', body.ceilingFt);
@@ -1763,6 +1766,7 @@ async function correctMinimaDraft(request: Request, env: Env, ctx: ExecutionCont
 	assignText('effectiveFrom', body.effectiveFrom);
 	assignText('effectiveTo', body.effectiveTo);
 	assignText('valueType', body.valueType);
+	assignText('sourceText', body.sourceText);
 	assignText('notes', body.notes);
 
 	const result = await updateDraft(env, userId, correction);

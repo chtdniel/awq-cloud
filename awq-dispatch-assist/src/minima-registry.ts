@@ -55,6 +55,8 @@ export type MinimaDraftInput = {
 	aipCycle: string | null;
 	effectiveFrom: string | null;
 	effectiveTo: string | null;
+	/** The chart fragment the extractor says these values came from. */
+	sourceText: string | null;
 	confidence: 'high' | 'medium' | 'low';
 	/** What the extractor could not read, in its own words. */
 	notes: string | null;
@@ -79,13 +81,15 @@ const RECORD_COLUMNS = `
 	chart_identifier, chart_page, runway, approach, approach_type, aircraft_category,
 	kind, ceiling_ft, visibility_m, value_type,
 	aip_cycle, effective_from, effective_to,
-	extraction_model, extraction_confidence, review_notes`;
+	extraction_model, extraction_confidence, source_text, review_notes`;
 
 /**
  * The content a dispatcher is asked to verify.
  *
  * `pdfHash` is included: a record approved against one revision of a chart is not
- * the same record after the chart file is replaced.
+ * the same record after the chart file is replaced. `sourceText` is included too,
+ * because it is the extractor's claim about where the values came from; if that
+ * claim changes, the approval was given against a different claim.
  */
 function contentHashInput(record: {
 	pdfHash: string;
@@ -103,6 +107,7 @@ function contentHashInput(record: {
 	aipCycle: string | null;
 	effectiveFrom: string | null;
 	effectiveTo: string | null;
+	sourceText?: string | null;
 }): string {
 	return JSON.stringify([
 		record.pdfHash,
@@ -119,7 +124,8 @@ function contentHashInput(record: {
 		record.valueType,
 		record.aipCycle,
 		record.effectiveFrom,
-		record.effectiveTo
+		record.effectiveTo,
+		record.sourceText ?? null
 	]);
 }
 
@@ -147,6 +153,7 @@ type MinimaRow = {
 	effective_to: string | null;
 	extraction_model: string | null;
 	extraction_confidence: string | null;
+	source_text: string | null;
 	review_notes: string | null;
 	approved_by: number | null;
 	approved_at: string | null;
@@ -161,7 +168,7 @@ const SELECT_COLUMNS = `
 	id, status, kind, source_object_key, pdf_hash, ais_authority, country, icao,
 	chart_identifier, chart_page, runway, approach, approach_type, aircraft_category,
 	ceiling_ft, visibility_m, value_type, aip_cycle, effective_from, effective_to,
-	extraction_model, extraction_confidence, review_notes,
+	extraction_model, extraction_confidence, source_text, review_notes,
 	approved_by, approved_at, superseded_by, content_hash, created_by, created_at, updated_at`;
 
 function toRecord(row: MinimaRow): MinimaRecord {
@@ -188,6 +195,7 @@ function toRecord(row: MinimaRow): MinimaRecord {
 		effectiveTo: row.effective_to,
 		extractionModel: row.extraction_model,
 		extractionConfidence: (row.extraction_confidence as MinimaRecord['extractionConfidence']) ?? null,
+		sourceText: row.source_text,
 		reviewNotes: row.review_notes,
 		approvedBy: row.approved_by === null ? null : Number(row.approved_by),
 		approvedAt: row.approved_at,
@@ -402,13 +410,14 @@ export async function insertDrafts(env: Env, options: InsertDraftOptions): Promi
 				valueType: draft.valueType,
 				aipCycle: draft.aipCycle,
 				effectiveFrom: draft.effectiveFrom,
-				effectiveTo: draft.effectiveTo
+				effectiveTo: draft.effectiveTo,
+				sourceText: draft.sourceText
 			})
 		);
 
 		const result = await env.DB.prepare(
 			`INSERT INTO airport_minima (${RECORD_COLUMNS}, status, content_hash, created_by)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
 		)
 			.bind(
 				options.sourceObjectKey,
@@ -431,6 +440,7 @@ export async function insertDrafts(env: Env, options: InsertDraftOptions): Promi
 				draft.effectiveTo,
 				options.extractionModel,
 				draft.confidence,
+				draft.sourceText,
 				draft.notes,
 				contentHash,
 				options.actorId
@@ -457,6 +467,8 @@ export type DraftCorrection = {
 	effectiveFrom?: string | null;
 	effectiveTo?: string | null;
 	valueType?: string | null;
+	/** The reviewer can correct the extractor's source quotation as well. */
+	sourceText?: string | null;
 	notes?: string | null;
 };
 
@@ -488,6 +500,7 @@ export async function updateDraft(env: Env, actorId: number, correction: DraftCo
 		effectiveFrom: correction.effectiveFrom === undefined ? before.effectiveFrom : correction.effectiveFrom,
 		effectiveTo: correction.effectiveTo === undefined ? before.effectiveTo : correction.effectiveTo,
 		valueType: correction.valueType === undefined ? before.valueType : correction.valueType,
+		sourceText: correction.sourceText === undefined ? before.sourceText : correction.sourceText,
 		notes: correction.notes === undefined ? before.reviewNotes : correction.notes
 	};
 
@@ -507,7 +520,8 @@ export async function updateDraft(env: Env, actorId: number, correction: DraftCo
 			valueType: next.valueType,
 			aipCycle: next.aipCycle,
 			effectiveFrom: next.effectiveFrom,
-			effectiveTo: next.effectiveTo
+			effectiveTo: next.effectiveTo,
+			sourceText: next.sourceText
 		})
 	);
 
@@ -516,7 +530,7 @@ export async function updateDraft(env: Env, actorId: number, correction: DraftCo
 		`UPDATE airport_minima
 		    SET ceiling_ft = ?, visibility_m = ?, approach = ?, approach_type = ?, runway = ?,
 		        aircraft_category = ?, chart_page = ?, aip_cycle = ?, effective_from = ?, effective_to = ?,
-		        value_type = ?, review_notes = ?, content_hash = ?, updated_at = CURRENT_TIMESTAMP,
+		        value_type = ?, source_text = ?, review_notes = ?, content_hash = ?, updated_at = CURRENT_TIMESTAMP,
 		        status = ?, approved_by = ?, approved_at = ?
 		  WHERE id = ?`
 	)
@@ -532,6 +546,7 @@ export async function updateDraft(env: Env, actorId: number, correction: DraftCo
 			next.effectiveFrom,
 			next.effectiveTo,
 			next.valueType,
+			next.sourceText,
 			next.notes,
 			contentHash,
 			nextStatus,
