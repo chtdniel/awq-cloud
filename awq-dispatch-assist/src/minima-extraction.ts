@@ -26,11 +26,32 @@ import type { MinimaDraftInput } from './minima-registry';
 /** A chart PDF larger than this is not converted, to keep the request bounded. */
 export const MAX_CHART_BYTES = 8 * 1024 * 1024;
 
+/**
+ * How many charts one extraction request may carry.
+ *
+ * One. Measured against the real charts, a single chart costs a Workers AI markdown
+ * conversion plus a model call, and the conversion alone was observed ranging from
+ * under two seconds to two minutes depending on whether the document had been
+ * converted before. A batch of three therefore cannot be given a useful timeout:
+ * the request would either abort a chart that was still converting, or hold the
+ * client for minutes. The caller iterates, so each chart gets its own budget and one
+ * slow chart cannot fail the others.
+ */
+export const MAX_CHARTS_PER_REQUEST = 1;
+
+/**
+ * Budget for one chart, in milliseconds.
+ *
+ * Set from measurement rather than taste: the slowest observed end-to-end run was
+ * 120 seconds for a cold conversion, and the request has to survive that without
+ * being killed by the platform. A timeout here is reported as `timeout` so the
+ * caller can retry the same chart, and retrying is cheap once the conversion has
+ * been cached.
+ */
+export const EXTRACTION_TIMEOUT_MS = 120_000;
+
 /** Ceiling on converted text handed to the model, in characters. */
 const MAX_MARKDOWN_CHARS = 120_000;
-
-/** Reasoning and output budget for one chart. */
-const EXTRACTION_TIMEOUT_MS = 60_000;
 
 export type ChartSource = {
 	objectKey: string;
@@ -250,7 +271,6 @@ export async function extractChart(
 	const call = options.fetchImpl ?? fetch;
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? EXTRACTION_TIMEOUT_MS);
-
 	try {
 		const response = await call(options.endpoint ?? DEFAULT_ENDPOINT, {
 			method: 'POST',

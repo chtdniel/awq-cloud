@@ -65,6 +65,15 @@ export async function handleMinimaHarness(request: Request, env: DevHarnessEnv):
 	// production budget on one chart. A timeout here is a measurement artifact, not
 	// a finding about the extractor.
 	const timeoutMs = Number.isFinite(Number(body.timeoutMs)) ? Math.min(300_000, Math.max(10_000, Number(body.timeoutMs))) : 240_000;
+	/**
+	 * Conversion-only mode, so the two halves of the pipeline can be timed apart.
+	 *
+	 * Without this a slow run cannot be attributed: the R2 read, the Workers AI
+	 * markdown conversion and the model call share one budget, and the only evidence
+	 * a failure gives is which timeout ran out. Separating them is what decides
+	 * whether the fix is a longer budget or a different pipeline shape.
+	 */
+	const convertOnly = body.convertOnly === true;
 	const outcomes: Array<Record<string, unknown>> = [];
 
 	for (const objectKey of objectKeys) {
@@ -86,11 +95,11 @@ export async function handleMinimaHarness(request: Request, env: DevHarnessEnv):
 
 		let markdown = '';
 		let markdownChars = 0;
-		const outcome = await extractChart(source, {
-			apiKey: String(env.DEEPSEEK_API_KEY ?? '').trim(),
-			model,
-			timeoutMs,
-			toMarkdown: async file => {
+		/** Wall-clock spent inside the conversion, reported for both modes. */
+		let conversionMs = 0;
+		const toMarkdown = async (file: { fileName: string; bytes: Uint8Array }): Promise<string> => {
+			const started = Date.now();
+			try {
 				const converted = await env.AI.toMarkdown({
 					name: file.fileName,
 					blob: new Blob([file.bytes], { type: 'application/pdf' })
@@ -102,7 +111,29 @@ export async function handleMinimaHarness(request: Request, env: DevHarnessEnv):
 				markdown = result.data;
 				markdownChars = result.data.length;
 				return result.data;
+			} finally {
+				conversionMs = Date.now() - started;
 			}
+		};
+
+		if (convertOnly) {
+			const started = Date.now();
+			try {
+				await toMarkdown(source);
+				outcomes.push({ objectKey, ok: true, convertOnly: true, conversionMs, totalMs: Date.now() - started, markdownChars, bytes: bytes.length, markdownHead: markdown.slice(0, 600) });
+			} catch (error) {
+				const message = error instanceof Error ? error.message : 'conversion failed';
+				outcomes.push({ objectKey, ok: false, convertOnly: true, conversionMs, totalMs: Date.now() - started, reason: message.slice(0, 200) });
+			}
+			continue;
+		}
+
+		const extractStarted = Date.now();
+		const outcome = await extractChart(source, {
+			apiKey: String(env.DEEPSEEK_API_KEY ?? '').trim(),
+			model,
+			timeoutMs,
+			toMarkdown
 		});
 
 		if (!outcome.ok) {
@@ -110,13 +141,15 @@ export async function handleMinimaHarness(request: Request, env: DevHarnessEnv):
 			// quality starts with knowing what the converter actually produced, and a
 			// chart whose minima table did not survive conversion cannot be fixed by
 			// prompting the extractor differently.
-			outcomes.push({ objectKey, ok: false, reason: outcome.reason, markdownChars, markdown, bytes: bytes.length });
+			outcomes.push({ objectKey, ok: false, reason: outcome.reason, conversionMs, totalMs: Date.now() - extractStarted, markdownChars, markdown, bytes: bytes.length });
 			continue;
 		}
 		outcomes.push({
 			objectKey,
 			ok: true,
 			bytes: bytes.length,
+			conversionMs,
+			totalMs: Date.now() - extractStarted,
 			markdownChars,
 			markdownHead: markdown.slice(0, 1500),
 			drafts: outcome.drafts

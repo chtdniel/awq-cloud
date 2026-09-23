@@ -6,6 +6,7 @@
 - Lazyweb: skipped because this first slice is an internal operational shell with no external visual reference to clone.
 - Imagen drafts: skipped because the product surface is functional and does not need marketing imagery or decorative hero art.
 - Style direction: dark operations cockpit, adapted from Sentry's technical density without copying its brand colors, copy, or assets.
+- Second pass (release 1): the visual world is unchanged and stays incumbent. The work was a **layout and surface change**, not a redesign: the identity, palette, type ramp, motion budget and depth strategy in §1–§8 were preserved, and §11 records what the decision workspace became. The dark cockpit stays because the use scene demands it — a dispatcher reads this at a desk in an operations room, often at night, next to a dark flight board.
 
 ## 1. Atmosphere & Identity
 
@@ -17,8 +18,9 @@ Design dials: `DESIGN_VARIANCE 3`, `MOTION_INTENSITY 2`, `VISUAL_DENSITY 7`.
 
 The screen is a **single decision column**, read top to bottom in the order the work is done: board, context, weather, minima, verdict. Two consequences are deliberate and load-bearing:
 
-- The verdict is a **pinned strip** directly under the header. The assessment is read while its findings are on screen, so the verdict cannot scroll away from the evidence it is drawn from.
-- The **inputs sit above the output**. The minima and NOTAM that determine the verdict are entered before the assessment, not below the badge they produced.
+- The outcome summary is a **pinned strip** directly under the header. The assessment is read while its findings are on screen, so the outcome cannot scroll away from the evidence it is drawn from.
+- The **inputs sit above the output**. The alternate and minima that determine the outcome are selected before the assessment, not below the badge they produced.
+- **Inputs moved into the sidebar and out of the decision column** in release 1. The dispatcher reads the analysis in the main column and reaches for `Flight context` and `Assessment details` when a value needs changing, so selecting an alternate no longer pushes the destination weather off the first screen.
 
 ## 2. Color
 
@@ -113,14 +115,15 @@ Below `768px`: panels stack, `.flight-row` collapses to two columns, `.assessmen
 - Usage: the header only. A dispatch screen with no Zulu clock makes every other time on it unverifiable.
 - Motion: the value repaints every 15 seconds, which is the only recurring update on the page.
 
-### Verdict strip
+### Outcome strip
 
-- Structure: verdict badge, flight identity, ETA windows, and the printable-report action.
-- Variants: `GO`, `MARGINAL`, `NO-GO`, `NO_DATA`.
+- Structure: outcome badge, flight identity, ETA windows, and the printable-report action.
+- Variants: `GO`, `MARGINAL`, `NO-GO`, `REVIEW REQUIRED`, `NOTAM REVIEW PENDING`.
+- Why the vocabulary changed: the earlier `NO_DATA` badge collapsed "nothing was checked" and "nothing could be checked" into one state, and `MARGINAL` was reachable without a rule that stated a threshold. Release 1 uses the five states the product specification names, and each one has a text label and an icon so the colour is reinforcement rather than the message.
 - States: hidden until an assessment exists; cleared when the selected flight changes.
-- Accessibility: the text half is `role="status" aria-live="polite"`, so a new verdict is announced.
+- Accessibility: the text half is `role="status" aria-live="polite"`, so a new outcome is announced.
 - Motion: none.
-- Layout: `position: sticky; top: 0` inside `.workspace-scroll`, so it stays under the header at any scroll position. It floats, so it declares elevation with a shadow and no border.
+- Layout: `position: sticky; top: 0` inside the scroll owner, so it stays under the header at any scroll position and at any viewport, phone included. It floats, so it declares elevation with a shadow and no border.
 
 ### Flight board row
 
@@ -139,27 +142,50 @@ Below `768px`: panels stack, `.flight-row` collapses to two columns, `.assessmen
 - Accessibility: field labels remain visible; unavailable values use the word `Unavailable`, never colour alone. The heading count and the status band are written from the same value, so they cannot disagree.
 - Motion: none.
 
-### Minima panel
+### Minima selection and confirm-before-use
 
-- Structure: two `<fieldset>` groups with visible legends — `Destination minima` and `Alternate minima` — each holding approach, ceiling and visibility, plus the NOTAM field and the create action.
-- Why the fieldsets: destination and alternate minima were previously laid out by one `auto-fit` run, which wrapped the sixth field onto a second row and split the two triplets. A destination ceiling typed into the alternate field silently changes a GO/NO-GO verdict.
-- Variants: no flight selected (guidance only), flight selected (inputs).
-- Accessibility: the legend names the group, so the three fields inside it are never ambiguous.
+- Structure: a destination approach picker, an alternate picker, and a `Confirm selection` action; each picker is a labelled `<select>` of the **approved** records for one aerodrome. The value is a record id, never a typed number.
+- Why a picker and not fields: a minima value is a published chart value with a provenance obligation. Typing a ceiling into a field produced a number with no source and no approval, which is precisely the state the registry exists to prevent. The select's options carry the record's own labels, and a record that is not approved is rendered `disabled` with the reason.
+- Confirm-before-use: the pending selection is shown in a summary band carrying the record id, the applied ceiling and visibility, the chart identifier, the page, the AIP cycle, the effective date and the approval state. Selecting from the list does not commit; confirming does. Without this step a mis-click on a long airport list silently changes the assessment.
+- Variants: no flight selected (guidance), flight selected with no records (unavailable with the reason), records present, record selected and pending confirmation, confirmed.
+- Accessibility: the legend names each group; the summary is a `<dl>`; the confirm action is keyboard reachable and its focus ring is visible.
+- Motion: none.
+
+### Change-group disclosure
+
+- Structure: a `<details>` element per conditional group (`TEMPO`, `PROB30 TEMPO`, `INTER`), with the group type and validity in the `<summary>` and the decoded conditions in the body.
+- Why a disclosure and not a column: the prevailing conditions are what the dispatcher reads first, and a change group's period is a second-order fact. Printing every group flat pushed the minima comparison below the fold on a laptop.
+- The disclosure is a native `<details>`, so it is keyboard operable and announced correctly without scripted ARIA.
+
+### NOTAM review
+
+- Structure: one row per candidate NOTAM with a checkbox, the aerodrome, the validity, and the raw text; nothing is checked on the dispatcher's behalf.
+- Why manual: the product specification has the dispatcher select the applicable NOTAM. The list is filtered by aerodrome and by validity overlap, so the filter is a convenience and the selection remains a judgement.
+- States: never reviewed (renders `NOTAM REVIEW PENDING` and says in words that this is not a statement that NOTAM is clear), reviewed with a selection, reviewed with a closure finding.
+- Accessibility: each checkbox has a label naming its NOTAM id; the pending banner is a live region.
 
 ### Assessment result
 
-- Structure: verdict badge, context hash, ETA windows, fuel requirement, findings, written narrative, data-quality disclosure.
+- Structure: outcome badge, context hash, ETA windows, fuel requirement, findings with citation numbers, written narrative, data-quality disclosure, and the numbered citation list at the end.
 - Not a card: the panel is the container, and the findings are the list items. A bordered box inside a bordered panel is a card in a card.
+- Citations: each finding carries `[n]` markers assigned by first appearance, and the full list is printed once at the end of the assessment. The number is placed next to the claim rather than in a footnote at the bottom, so a reader can check a source without hunting.
 - States: awaiting input, stale (dimmed while a new snapshot is built), resolved, and a notice line for progress or failure.
-- Accessibility: `aria-live="polite"` on the result, so a new verdict is announced; `Accept` and `Reject` are `disabled` until an assessment exists.
-- Rule: **a failed or in-flight re-assess never overwrites a rendered verdict.** Progress and errors are written to the notice line; the previous verdict is dimmed, not destroyed.
+- Accessibility: `aria-live="polite"` on the result, so a new outcome is announced; `Accept` and `Reject` are `disabled` until an assessment exists.
+- Rule: **a failed or in-flight re-assess never overwrites a rendered outcome.** Progress and errors are written to the notice line; the previous outcome is dimmed, not destroyed.
+- Rule: **the rendered assessment is read from the saved snapshot, not from live state**, because the printable report is rendered from that same snapshot. Rendering one from live state and the other from the snapshot is how a report stops matching the assessment it claims to reproduce.
+
+### Minima registry
+
+- Structure: an aerodrome list with approved/draft counts, then records grouped by chart with my minima values, a status chip, the extractor's source fragment, and the confidence; an inspect panel for field-by-field correction, approval and rejection with a note; and the record's audit history.
+- Why the extractor's source fragment is on the row: chart text is flattened, so a value can sit beside the wrong row label. Measured on the real charts, three models read the same RVR note three different ways. The fragment is the claim the reviewer checks, so it belongs next to the value and not in a log.
+- Why a draft is inert: a draft's option is `disabled` in every picker, and the row states that it cannot be used. This is a visual expression of a storage rule (only `approved` rows are read by an assessment), repeated in the interface so the reason is never a surprise.
 
 ### Status band
 
-- Structure: text label plus semantic status color.
-- Variants: connected, waiting, unavailable, error.
+- Structure: text label, an inline SVG icon, and the semantic status color.
+- Variants: current, stale, unavailable, error, pending review, blocked.
 - States: default and focus when actionable.
-- Accessibility: status text is explicit and announced through `aria-live` only for changes.
+- Accessibility: status text is explicit and announced through `aria-live` only for changes; the icon is `aria-hidden` because the label already carries the meaning.
 - Motion: no looping animation.
 
 ## 6. Motion & Interaction
@@ -195,19 +221,15 @@ Findings state severity with a 1px tinted border and a tinted surface, never a t
 
 | Item | Location | Why accepted | Exit |
 |---|---|---|---|
-| SSO and live flight data are not connected | First shell | AWQ Cloud authorization/API contract is not deployed yet | Implement the approved SSO and read-only API contract |
 | Aircraft `type_code` remains unavailable | Flight context panel | No authoritative fleet type catalog is populated | Load approved aircraft master mapping |
 | Section titles are extracted heuristically and can absorb a trailing table caption | Assessment report, assistant citations | The clause number is the authoritative citation key; the title is supplementary | Add a per-document title allowlist when the manuals are next revised |
 | Engineering metadata is shown in the operator's decision panel (`prompt` hash, model name, `similarity 0.842`, `FOUND BY EXACT TOKENS + SEMANTIC`) | Assessment result, assistant citations | Auditability was the intent and the printable report is the correct home for it | Move to a collapsed audit disclosure on screen |
 | Clause citations are inert text (`References: OM Part A 8.1.2`) | Findings | The assistant is the only surface that holds clause text today | Make each reference open its retrieved excerpt inline |
 | No favicon file exists; the mark is inlined as an SVG data URI | Document head | Avoids a second request and a 404, at the cost of a long `href` | Extract to `public/favicon.svg` if the mark changes |
-| `--accent-primary` and `--status-warning` are the same value `#e6a93a`, so one amber means both "act" and "caution" | Palette, MARGINAL badge, warning chips | The accent is the brand line and the status ramp was built alongside it | Give warning a distinguishably deeper amber and demote all but one primary per state |
-| `.assessment-result.is-stale { opacity: 0.45 }` measures 2.71:1 (`--text-secondary`) and 2.33:1 (`--text-tertiary`) over the panel | Assessment result, while a re-assess is in flight | The state is transient and its job is to read as superseded, which dimming communicates instantly | Raise to 0.7 (4.66:1) or mark staleness with a chip instead of opacity |
-| `.dispatch-field input` is 36px at every viewport; `.document-row a` is 17px tall, below the WCAG 2.2 AA 24×24 target floor | Minima panel, document and reference lists | The mobile 44px rule was scoped to `.button` and the document-form controls | Extend the `≤767px` rule to `.dispatch-field input` and give the row links `min-block-size: 44px` |
-| `#reference-upload-form` has no `hidden` attribute: the manual upload widget renders before authentication | Reference manuals panel | Predates this pass; the form is gated server-side by `authorizeUser` | Add `hidden` and unhide it only after a successful board fetch, as the document form already does |
-| The board carries no verdict, finding count or reviewed state per flight, and no filter or sort | Active Flight Board | The board was built as a picker for the context panel | Add a verdict column and a needs-attention sort |
-| Progress and failure notices are bare strings with no retry affordance | `#assessment-notice`, per-panel error text | The action that failed is still on screen | Put the retry on the notice |
-| `renderFlightWeather` prints the upstream `validity.label` verbatim, so TAF validity notation is whatever AWQ Cloud sends while every other time on screen is `DDHHMMZ` | TAF cards | The label is upstream data | Normalise to `DDHHMMZ` at the render boundary |
+| `--accent-primary` and `--status-warning` are the same value `#e6a93a`, so one amber means both "act" and "caution" | Palette, `MARGINAL` badge, warning chips | The accent is the brand line and the status ramp was built alongside it | Give warning a distinguishably deeper amber and demote all but one primary per state |
+| The flight board stays above the analysis after a flight is selected, so on a phone it fills the first screen before the destination weather appears | Decision workspace | The board is the entry point and a dispatcher routinely switches flights, so keeping it open is defensible; collapsing it changes the panel order the product specifies | Collapse the board to a one-line summary once a flight is selected, with an expand control, and re-check the panel order requirement |
+| `POST /api/reference-ingest` and `POST /api/reference-index` have no UI control | Reference manuals | They were not part of the release-1 surface, and adding one introduces a destructive admin action with no confirmation design yet | Add an explicit, confirmation-gated admin control when the corpus is next revised |
+| Extraction latency is unproven: the Workers AI conversion was measured at 0.2-1s per chart, yet two production runs still hit the 120s budget, which places the variable cost in the DeepSeek call | Minima registry | The transcription is correct and a draft is inert, so latency has no safety consequence; one chart per request means a slow chart cannot fail the others, and a retry is a visible per-chart action rather than a silent loss | Move the conversion and the model call into a Queue consumer, write the drafts from the consumer, and poll a status endpoint from the registry view |
 
 ## 9. Reference Corpus
 
@@ -277,8 +299,7 @@ and the clause baselines are re-checked with `npx tsx scripts/segment-corpus.mts
 `reference_document_chunks.page_number` exists but is NULL for every row, and the
 original text extraction did not preserve page boundaries. This cannot be
 reconstructed from the stored text: the Workers AI markdown conversion service
-exposes only a `pdf.metadata` on/off switch and emits no page markers, and R2 holds
-only the three source PDFs with no page map. Filling it would mean re-extracting all
+exposes only a `pdf.metadata` on/off switch and emits no page markers, and R2 holdsonly the three source PDFs with no page map. Filling it would mean re-extracting all
 three PDFs and re-embedding the whole corpus.
 
 Deferred because the clause number is the authoritative citation key: `121.559` is
@@ -351,7 +372,7 @@ AirAsia. Any step that sends corpus text to a model provider outside the existin
 infrastructure is a compliance decision, not only an engineering one, and needs
 approval before it is built. See section 10.
 
-## 10. Dispatch Recommendations
+## 10. The deterministic assessment
 
 Status: implemented. The evaluation workflow (ETA windows, TAF change groups, minima,
 fuel) is enforced by a deterministic engine, and a language model only writes it up.
@@ -361,29 +382,37 @@ fuel) is enforced by a deterministic engine, and a language model only writes it
 | Module | Responsibility |
 |---|---|
 | `src/taf.ts` | Decodes TAF validity and change groups (`FM`, `BECMG`, `TEMPO`, `INTER`, `PROB`), and reports the prevailing conditions and the conditional deteriorations inside one time window. |
-| `src/dispatch.ts` | Computes the ETA windows, compares weather against landing and alternate planning minima, applies the `INTER`/`TEMPO` holding-fuel rule, gates on NOTAM, and reduces the findings to `GO` / `NO-GO` / `MARGINAL`. |
+| `src/dispatch.ts` | Computes the ETA windows, classifies the destination change groups against OM Part A Table 8.1-20 (continued), compares weather against the approved landing minima and the alternate planning minima, applies the destination-alternate TEMPO holding rule and the standard fuel padding, and reduces the findings to an outcome. |
+| `src/minima.ts` | The minima types and the two company minima rules: the alternate planning minima of OM Part A Table 8.1-5, and the "higher of the chart's published alternate minima or the company minima" note beneath it. |
+| `src/minima-registry.ts` | The minima registry: approved-only reads for the engine, draft insertion for extraction, ADMIN correction and approval with a full audit history. |
 | `src/awq.ts` | Translates the AWQ Cloud payloads into the engine contract, treating everything upstream as untrusted and recording every date it had to infer or correct. |
 
-Rules are cited, not asserted: every finding carries the clause identifiers that
-justify it (`OM Part A 8.1.2`, `CASR 121.639`, …), and each rule was written against a
-clause read from the indexed corpus rather than from memory.
+Rules are cited, not asserted: every finding carries the clause, table or chart
+reference that justifies it, and each rule was written against a clause read from the
+indexed corpus rather than from memory. **No reference in this product points at CASR**
+— the agreed sources are Operations Manual Part A (`IAA/FOP/M/001`) and the Flight
+Dispatch Manual (`IAA/FOP/M/008`), with the AIP chart supplying numeric minima values.
 
-`NO-GO` requires a finding that is both critical and explicitly incompatible with
-release. A condition that merely could not be assessed — no minima supplied, no NOTAM
-provided, a schedule date that still needs confirming — degrades the verdict to
-`MARGINAL`. An unknown is never presented as a violation, and never as a clean result,
-which is also why `GO` is unreachable while any check is unverified.
+### The outcome vocabulary is deliberate
 
-The controls in `src/findings.ts` were carried over rather than dropped when this
-engine replaced them: TAF currency and weather-monitoring freshness are now inputs
-supplied by `src/awq.ts`, so migrating did not silently remove a check.
+| Outcome | Reached when |
+|---|---|
+| `NO-GO` | A finding is both critical and explicitly incompatible with the rule. |
+| `REVIEW REQUIRED` | A required minima value, a required citation, a NOTAM selection, an alternate selection, or a readable TAF is missing. Also used where the manual states no threshold, because a synthetic middle band would be invented policy. |
+| `NOTAM REVIEW PENDING` | The only outstanding item is that no NOTAM has been reviewed. Reported as its own outcome so it can never be read as "NOTAM clean". |
+| `MARGINAL` | A finding is marked as a condition the manual states, such as a conditional deterioration that reaches below the minima. |
+| `GO` | Every required check was evaluated and none produced a finding. |
+
+The order of those tests is the safety property: missing data outranks a pending NOTAM
+review, which outranks a sourced marginal condition. A `GO` is unreachable while any
+check is unverified, and an unknown is never presented as a violation.
 
 ### The model explains; it does not decide
 
 `src/explainer.ts` sends the finished assessment to DeepSeek and asks for a written
 report. Three constraints are enforced rather than merely requested in prose:
 
-- **The verdict is fixed.** The prompt states the verdict must be reproduced exactly
+- **The outcome is fixed.** The prompt states the outcome must be reproduced exactly
   and never upgraded or downgraded, and that instruction is covered by a test.
 - **Corpus text does not leave the Worker.** `ExplainerInput` has no field for clause
   text: only clause *identifiers* and operational weather values are transmitted, and
@@ -405,14 +434,93 @@ never transmitted, and only clause identifiers leave the Worker. Provider and mo
 are configuration in `src/explainer.ts`, so returning to the internal gateway later is
 a configuration change rather than a rewrite.
 
+The same gateway is used for minima extraction (`src/minima-extraction.ts`) and for
+query planning (`src/query-plan.ts`). Model choice is configuration in each module.
+
 ### Known limits
 
-- Per-aerodrome minima values are **not** in the corpus (the minima tables did not
-  survive extraction), so they are entered manually today and are expected to come from
-  airport charts later. The corpus supplies the minima *rules*, which are what the
-  findings cite.
-- `ILS U/S` is not yet decoded into a minima downgrade (OM Part A `Table 8.1-17`);
-  only a runway or aerodrome closure is detected from remarks.
-- Crosswind and tailwind components are not computed, because runway-in-use is not
-  part of the payload. Aircraft `type_code` is still absent, so minima cannot be
-  selected by aircraft category.
+- `ILS U/S` is not decoded into a minima downgrade (OM Part A `Table 8.1-17`); only a
+  runway or aerodrome closure is detected from a selected NOTAM.
+- Crosswind and tailwind components are not computed, because runway-in-use is not part
+  of the payload. Aircraft `type_code` is still absent, so a minima record cannot be
+  selected by the aircraft type automatically — the dispatcher picks the category.
+- The alternate's weather is matched by station, and the AWQ Cloud payload carries a
+  forecast for the alternate the flight plan nominated plus the en-route alternates.
+  Selecting an alternate the payload has no forecast for produces an explicit
+  unavailable state rather than a comparison against another station's weather.
+
+## 11. The minima registry and release 1
+
+### Why the registry exists
+
+The minima *rules* live in the corpus. The minima *values* do not: the AIP approach
+charts are the numeric source, they exist as PDFs in R2 under `airport/`, and the PRD
+forbids both a Markdown sidecar and any guessed value. So the values have to be
+transcribed into structured records, and a transcribed number that reaches a safety
+comparison without a human having checked it against the chart is the failure mode this
+whole feature exists to prevent.
+
+Measured behaviour of the extraction, on the real YPPH charts:
+
+| Model | Draft rows from `ILS-Z RWY 21 - PAGE 2` | Agreement |
+|---|---:|---|
+| `deepseek-flash` | 16 | correctly read `DA 143 (100) RA102` at 300 RVR, `DA 193 (150)` at 450 RVR, and the 75 RVR CAT IIIb line |
+| `deepseek-reasoner` | 16 | same decision heights, but attached the `CAT A-C 350 / CAT D 400` RVR note to a different minima line |
+| `deepseek-chat` | 12 | produced 143 / 75 RVR pairs that contradict the other two |
+
+All three returned `null` for the CAT IIIb decision height rather than inventing one,
+and all three set confidence to `low` with a written explanation of the ambiguity. That
+is the behaviour the prompt asks for, and it is also the evidence for the design
+decision that follows: **the models disagree, so the approval step is load-bearing and
+the interface must make the disagreement cheap to resolve.**
+
+Two consequences, both implemented:
+
+1. Every extracted row carries the **exact chart fragment** the extractor says the
+   values came from, stored in `airport_minima.source_text`, included in the content
+   hash, and printed on the record row. The reviewer checks the number against the
+   chart; the fragment is the claim they check.
+2. **A draft is inert everywhere.** The engine reads only `status = 'approved'`, the
+   picker renders a non-approved record as `disabled` with the reason, and approving a
+   record requires a stated value — a record with neither a ceiling nor a visibility
+   cannot be approved, because an approved empty record reads as usable minima while
+   comparing nothing.
+
+### Registry data model
+
+`airport_minima` holds one row per minima value with its provenance: AIS authority,
+country, ICAO, chart identifier, chart page, runway, approach, approach type, aircraft
+category, kind (`landing` or `alternate`), ceiling and visibility with the value type,
+AIP cycle, effective dates, the R2 object key and PDF hash, the extracting model, its
+confidence and its source fragment, the review notes, the approval identity and time,
+and a content hash over the fields a reviewer verifies.
+
+`airport_minima_audit` records every change with the value before and after: extracted,
+corrected, approved, rejected, superseded. Correcting an approved record returns it to
+`draft` and clears the approver stamp, because the value that was approved is no longer
+the value on the record. Approving a record supersedes any other approved record for the
+same chart slot, so the engine never has two competing values to choose between.
+
+The assessment snapshot stores the record id and content hash of every minima value it
+applied, so a stored outcome remains traceable to the exact approved revision it used
+even after the record is later corrected.
+
+### What release 1 changed structurally
+
+The decision workspace was one column in the order the work is done. It is now two
+panels: the analysis column, and a sidebar with `Flight context` and `Assessment
+details`. The reason is measured rather than stylistic — the minima and alternate
+inputs sat between the weather comparison and the assessment, so on a 1440×1000 laptop
+the fuel recommendation and the minima section were both below the fold, and a
+dispatcher changing the alternate scrolled the destination weather off screen to do it.
+
+Breakpoints and behaviour:
+
+| Viewport | Layout |
+|---|---|
+| ≥1024px | Analysis column plus a collapsible sidebar. Collapsing the sidebar widens the analysis column rather than leaving a gutter. |
+| 768–1023px | The sidebar becomes an overlay drawer with a scrim; the analysis stays the main area. Escape, the scrim and the close control all dismiss it, and the drawer is `inert` while closed so its controls are not reachable by keyboard behind the scrim. |
+| <768px | Single-column analysis. The sidebar is a full-screen drawer, and the outcome summary stays pinned while the page scrolls. |
+
+The outcome summary lives outside every view, pinned under the header, so it cannot be
+scrolled away while the evidence it summarises is on screen.

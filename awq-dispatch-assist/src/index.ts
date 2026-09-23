@@ -43,8 +43,9 @@ import {
 	type DraftCorrection,
 	type MinimaDraftInput
 } from './minima-registry';
-import { EXTRACTION_SYSTEM_PROMPT, MAX_CHART_BYTES, extractChart, parseJsonObject, type ChartSource } from './minima-extraction';
+import { MAX_CHARTS_PER_REQUEST, MAX_CHART_BYTES, extractChart, type ChartSource } from './minima-extraction';
 import { listNotamCandidates, resolveSelectedNotams } from './notams';
+import { citableReferenceDocuments, isExcludedFromCorpus } from './reference-corpus';
 import type { MinimaRecord } from './minima';
 import { explainDispatch, type ExplainerInput, type ExplainerResult } from './explainer';
 
@@ -653,6 +654,11 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 		  GROUP BY d.id, d.file_name, d.category
 		  ORDER BY d.created_at ASC, d.id ASC`
 	).bind(CHUNK_INGEST_VERSION).all<{ id: number; file_name: string; category: string; chunk_count: number }>();
+	// Only the citable corpus is recorded as applied. A document that is indexed but
+	// outside the agreed rule sources (CASR) must not appear in an assessment or in
+	// the report's list of reference manuals, because appearing there reads as it
+	// having been applied to this flight.
+	const citableReferences = citableReferenceDocuments(references.results || []);
 	const snapshot: DispatchSnapshot = {
 		contractVersion: '4',
 		createdAt: new Date().toISOString(),
@@ -689,7 +695,7 @@ async function createAssessment(request: Request, env: Env, ctx: ExecutionContex
 		},
 		explanation,
 		schedule: serialiseSchedule(adapted.schedule),
-		referenceDocuments: references.results || [],
+		referenceDocuments: citableReferences,
 	};
 	const contextHash = await hashToken(JSON.stringify(snapshot));
 	const result = await env.DB.prepare(
@@ -939,6 +945,19 @@ function renderDispatchReport(assessment: StoredAssessment, snapshot: DispatchSn
 		'higher-of-both': 'Higher of the chart-published alternate minima and the company minima per OM Part A Table 8.1-5 note.',
 		unavailable: 'Not available.'
 	};
+	/**
+	 * State the approval gate explicitly.
+	 *
+	 * A reader of the report cannot see the registry or the review screen, so they
+	 * cannot know whether the minima this assessment applied had been checked against
+	 * its chart. Printing the gate on the report is what makes the claim checkable
+	 * from the document alone.
+	 */
+	const minimaApproval = [snapshot.minima.destination, snapshot.minima.alternateLanding, snapshot.minima.alternatePlanning].every(
+		entry => entry !== null && entry.approvedBy !== null && entry.approvedAt !== null
+	)
+		? '<p class="note">Every minima value applied above is an approved registry record: an ADMIN dispatcher compared it against the AIP chart and the approval is recorded with its identity and time. Unapproved values are never applied, and a missing value is reported as REVIEW REQUIRED rather than assumed.</p>'
+		: '<p class="note">At least one minima value above is missing or was not applied, because no approved registry record existed for it. An unapproved or absent value is never used as if it were valid.</p>';
 
 	const explanation = snapshot.explanation;
 	const narrative =
@@ -989,6 +1008,7 @@ ${draftLabel ? `<div class="stamp"><strong>${escapeHtml(draftLabel)}</strong><p>
 ${snapshot.schedule.needsConfirmation ? `<div class="stamp"><strong>Schedule confirmation required</strong><p>The ETA windows above are provisional.<br>${snapshot.schedule.adjustments.map(adjustment => escapeHtml(adjustment.note)).join('<br>')}</p></div>` : ''}
 
 <h2>2. Minima</h2>
+${minimaApproval}
 ${minimaTable('Destination landing minima', snapshot.minima.destination, 'Approved AIP chart value, applied to the destination at ETA +/- 1 hour (OM Part A 8.1.2.2.3).')}
 ${minimaTable('Primary alternate landing minima', snapshot.minima.alternateLanding, 'Approved AIP chart value. Required by the destination-alternate TEMPO concession (OM Part A 8.1.6 b.iii), and used to check the alternate is above its landing minima.')}
 ${minimaTable('Primary alternate planning minima', snapshot.minima.alternatePlanning, minimaBasis[snapshot.minima.alternatePlanningBasis])}
@@ -1032,7 +1052,7 @@ ${dataQuality}
 <h2>10. Reference manuals indexed</h2>
 <ul class="tight">${documentRows || '<li>No reference manuals indexed.</li>'}</ul>
 
-<p class="disclaimer"><strong>Advisory only.</strong> The assessment outcome, the ETA windows and the fuel figures were produced by a deterministic evaluation of the AWQ Cloud payload against the cited clauses of Operations Manual Part A (Doc. No. IAA/FOP/M/001) and the Flight Dispatch Manual (Doc. No. IAA/FOP/M/008) and the AIP chart minima in the minima registry. The written assessment merely explains them and cannot change them. The flight operations officer retains release authority and must verify every finding against the source documents before dispatch.</p>
+<p class="disclaimer"><strong>Advisory only.</strong> The assessment outcome, the ETA windows and the fuel figures were produced by a deterministic evaluation of the AWQ Cloud payload against the cited clauses of Operations Manual Part A (Doc. No. IAA/FOP/M/001) and the Flight Dispatch Manual (Doc. No. IAA/FOP/M/008) and the AIP chart minima in the minima registry. The written assessment merely explains them and cannot change them. <strong>This is an assessment outcome and not a dispatch release</strong>, not a compliance certification, and not an airworthiness determination. The flight operations officer retains release authority and must verify every finding against the source documents before dispatch.</p>
 <h2>Integrity</h2>
 <p class="meta">Snapshot contract v${escapeHtml(snapshot.contractVersion)} * context hash <span class="mono">${escapeHtml(assessment.context_hash)}</span>${assessment.review_note ? `<br>Review note: ${escapeHtml(assessment.review_note)}` : ''}${assessment.reviewed_at ? `<br>Reviewed: ${escapeHtml(assessment.reviewed_at)} UTC` : ''}</p>
 </body></html>`;
@@ -1290,8 +1310,12 @@ async function listReferenceDocuments(request: Request, env: Env): Promise<Respo
 		`SELECT id, category, file_name, size_bytes, content_type, created_at,
 		        ingest_status, ingest_note, chunk_count, ingested_at
 		   FROM reference_documents ORDER BY created_at DESC, id DESC`
-	).all();
-	return documentResponse({ ok: true, data: { documents: results || [] } });
+	).all<{ id: number; category: string; file_name: string }>();
+	// A document that is indexed but outside the agreed rule sources is not part of
+	// the reference library the product may cite (PRD §5, acceptance §15). It stays in
+	// the table so the ingestion history is intact, but it is not offered as a manual.
+	const documents = (results || []).filter(document => !isExcludedFromCorpus(document.file_name));
+	return documentResponse({ ok: true, data: { documents } });
 }
 
 async function uploadReferenceDocument(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -1394,13 +1418,12 @@ async function proxyAssistant(request: Request, env: Env, ctx: ExecutionContext)
 	const planned = mode === 'plan' ? await planQuery({ apiKey: deepSeekKey(env), timeoutMs: ASSISTANT_PLAN_TIMEOUT_MS }, question) : null;
 	const planTerms = planned?.ok ? planned.terms : [];
 
-	const retrieval = await retrieve(env, CHUNK_INGEST_VERSION, question, 8, planTerms);
+const retrieval = await retrieve(env, CHUNK_INGEST_VERSION, question, 8, planTerms);
 	const rows = retrieval.results;
 	const flightId = Number(payload.flightId || 0);
 	const answer = rows.length
 		? `Retrieved ${rows.length} relevant corpus excerpt${rows.length === 1 ? '' : 's'}. Review the cited clauses before making an operational decision.`
-		: 'No indexed manual excerpt matched the question. Verify the source manual directly before making an operational decision.';
-	// The method is recorded so a lexical-only answer, which happens when the query
+		: 'No indexed manual excerpt matched the question. Verify the source manual directly before making an operational decision.';	// The method is recorded so a lexical-only answer, which happens when the query
 	// embedding fails, is distinguishable from a full hybrid answer in the audit log.
 	// The planning mode and the terms actually searched are recorded alongside it, so
 	// a result set can be explained after the fact without replaying the model call,
@@ -1639,10 +1662,19 @@ async function extractMinimaDrafts(request: Request, env: Env, ctx: ExecutionCon
 	try { body = await request.json() as typeof body; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
 
 	const requested = Array.isArray(body.objectKeys) ? body.objectKeys.map(value => String(value).trim()).filter(Boolean) : [];
-	// Bounded per call: each chart is a PDF conversion plus a model round trip, and a
-	// request that tried to do all of them would exceed the Worker's CPU budget.
-	const objectKeys = requested.slice(0, 3);
+	// One chart per request. A conversion alone has been measured taking up to two
+	// minutes, so a batch would have to abort charts that were still converting; the
+	// caller iterates instead, and `MAX_CHARTS_PER_REQUEST` is where that rule lives.
+	const objectKeys = requested.slice(0, MAX_CHARTS_PER_REQUEST);
 	if (!objectKeys.length) return documentResponse({ error: 'At least one R2 object key is required.' }, 400);
+	if (requested.length > MAX_CHARTS_PER_REQUEST) {
+		return documentResponse(
+			{
+				error: `Extraction accepts ${MAX_CHARTS_PER_REQUEST} chart per request so one slow conversion cannot fail the others. Request the remaining ${requested.length - MAX_CHARTS_PER_REQUEST} chart(s) separately.`
+			},
+			400
+		);
+	}
 	for (const key of objectKeys) {
 		// Only the airport chart prefix is readable here. A caller cannot point the
 		// extractor at the reference manuals or at a flight document.

@@ -174,6 +174,15 @@
 			 */
 			@media (min-width: 768px) and (max-width: 1023px) {
 				.workspace-layout { grid-template-columns: minmax(0, 1fr); }
+				/**
+				 * Same reflow rule as the phone block below, and for the same reason: the
+				 * nav is a horizontal scroll container, so without a zero minimum it refuses
+				 * to shrink and the header measures 1183px inside an 834px viewport.
+				 */
+				.app-header { flex-wrap: wrap; min-inline-size: 0; }
+				.brand-lockup { min-inline-size: 0; }
+				.primary-nav { flex-basis: 100%; max-inline-size: 100%; min-inline-size: 0; }
+				.header-actions { min-inline-size: 0; }
 				.sidebar { position: fixed; inset-block: 0; inset-inline-end: 0; z-index: 60; inline-size: min(420px, 92vw); max-block-size: none; padding: var(--space-4); background: var(--surface-primary); border-inline-start: 1px solid var(--border-default); overflow: auto; transform: translateX(100%); visibility: hidden; transition: transform var(--motion), visibility var(--motion); }
 				.app-shell.is-drawer-open .sidebar { transform: translateX(0); visibility: visible; }
 				.sidebar-scrim { display: block; position: fixed; inset: 0; z-index: 50; border: 0; padding: 0; background: color-mix(in srgb, #000 62%, transparent); opacity: 0; visibility: hidden; transition: opacity var(--motion), visibility var(--motion); }
@@ -186,13 +195,23 @@
 			 * full-screen drawer rather than a panel competing for width.
 			 */
 			@media (max-width: 767px) {
-				.app-header { flex-wrap: wrap; align-items: center; }
-				.brand-lockup { flex: 1 1 auto; }
-				.primary-nav { order: 3; flex-basis: 100%; }
+				/**
+				 * `min-inline-size: 0` on the header is the load-bearing declaration.
+				 *
+				 * `.primary-nav` is a horizontal scroller (`overflow-x: auto`), and a scroll
+				 * container's automatic minimum size is its content width rather than zero.
+				 * As a flex item it therefore refused to shrink, so the header measured 851px
+				 * inside a 390px viewport and scrolled the whole document sideways by 461px.
+				 * Zeroing the minimum lets the nav shrink to the track and scroll inside
+				 * itself, which is what it is for.
+				 */
+				.app-header { flex-wrap: wrap; align-items: center; min-inline-size: 0; }
+				.brand-lockup { flex: 1 1 auto; min-inline-size: 0; }
+				.primary-nav { order: 3; flex-basis: 100%; min-inline-size: 0; }
 				.header-actions { flex: 1 1 auto; }
 				.ops-clock { display: none; }
 				.workspace-layout { grid-template-columns: minmax(0, 1fr); }
-				.sidebar { position: fixed; inset: 0; z-index: 60; inline-size: 100%; max-block-size: none; padding: var(--space-4); background: var(--surface-primary); overflow: auto; transform: translateX(100%); visibility: hidden; transition: transform var(--motion), visibility var(--motion); }
+				.sidebar { position: fixed; inset: 0; z-index: 60; inline-size: 100%; max-inline-size: 100%; max-block-size: none; padding: var(--space-4); background: var(--surface-primary); overflow: auto; transform: translateX(100%); visibility: hidden; transition: transform var(--motion), visibility var(--motion); }
 				.app-shell.is-drawer-open .sidebar { transform: translateX(0); visibility: visible; }
 				.sidebar-scrim { display: block; position: fixed; inset: 0; z-index: 50; border: 0; padding: 0; background: color-mix(in srgb, #000 62%, transparent); opacity: 0; visibility: hidden; transition: opacity var(--motion), visibility var(--motion); }
 				.app-shell.is-drawer-open .sidebar-scrim { opacity: 1; visibility: visible; }
@@ -200,6 +219,24 @@
 				.button { min-block-size: 44px; }
 				.button-sm { min-block-size: 36px; }
 				.nav-link { min-block-size: 44px; }
+
+				/**
+				 * Reflow fixes, measured on the deployed page at 390x844 and 834x1112.
+				 *
+				 * Two elements were setting a min-content width wider than the viewport and
+				 * scrolling the whole document sideways: the header, whose clock, status and
+				 * connect control are three fixed-width items that `min-inline-size: 0` on
+				 * the flex container lets shrink, and the outcome strip, whose 320px basis on
+				 * `.outcome-strip-main` could not fit beside a 323px action row. The document
+				 * must reflow to one column with no horizontal scroll at 360px, so both are
+				 * made to shrink and the strip's row is allowed to take the full width.
+				 */
+				.header-actions { min-inline-size: 0; }
+				.status-label { min-inline-size: 0; }
+				.summary-text, .outcome-strip-meta { overflow-wrap: anywhere; }
+				.outcome-strip-inner { padding-inline: 12px; }
+				.outcome-strip-main { flex-basis: 100%; }
+				.outcome-strip-actions { flex-basis: 100%; }
 			}
 
 			/* ----------------------------------------------------------------- panels */
@@ -4321,18 +4358,38 @@
 					E.extractError.textContent = `These keys are not under the airport/ prefix and cannot be extracted: ${invalid.join(', ')}.`;
 					return;
 				}
-				if (keys.length > 3) {
-					E.extractError.hidden = false;
-					E.extractError.textContent = 'A maximum of three object keys can be extracted per call.';
-					return;
-				}
 				E.extractButton.disabled = true;
-				const loading = el('div', 'skeleton');
-				loading.append(el('span', 'skeleton-line'), el('span', 'skeleton-line short'));
-				E.extractResult.append(loading);
+				// One chart per request. A chart costs a PDF conversion plus a model call and
+				// a cold conversion has been measured taking up to two minutes, so batching
+				// them would make one slow chart fail the rest and give the operator no sign
+				// of which. Iterating here means each chart reports its own result, a timeout
+				// costs only that chart, and the progress line says which one is in flight.
+				const objects = [];
+				// The model and the note are per-response, so they are carried forward from
+				// the last successful call rather than lost when the run is assembled.
+				let model = '';
+				let note = '';
+				for (let index = 0; index < keys.length; index += 1) {
+					const key = keys[index];
+					clear(E.extractResult);
+					const loading = el('div', 'skeleton');
+					loading.append(el('span', 'skeleton-line'), el('span', 'skeleton-line short'));
+					const progress = el('p', 'panel-note', `Converting and extracting ${index + 1} of ${keys.length}: ${key}`);
+					E.extractResult.append(progress, loading);
+					try {
+						const data = await api('/api/minima/extract', { method: 'POST', body: { objectKeys: [key] } });
+						model = data?.model || model;
+						note = data?.note || note;
+						objects.push(...(Array.isArray(data?.objects) ? data.objects : []));
+					} catch (error) {
+						// Recorded as this chart's failure rather than aborting the run, so the
+						// remaining charts are still attempted and the operator sees which one
+						// needs a retry.
+						objects.push({ objectKey: key, ok: false, reason: errorMessage(error) });
+					}
+				}
 				try {
-					const data = await api('/api/minima/extract', { method: 'POST', body: { objectKeys: keys } });
-					renderExtractionResult(data);
+					renderExtractionResult({ objects, model, note });
 					if (registry.icao) await loadRegistryRecords(registry.icao);
 				} catch (error) {
 					clear(E.extractResult);

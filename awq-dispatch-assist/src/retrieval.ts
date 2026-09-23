@@ -23,6 +23,7 @@
 
 import { embedQuery, EMBEDDING_MODEL } from './embeddings';
 import { normaliseTerm } from './query-plan';
+import { isExcludedFromCorpus } from './reference-corpus';
 import type { ClauseScheme } from './clause';
 
 /** RRF constant. 60 is the value from the original RRF paper and is insensitive in practice. */
@@ -305,6 +306,19 @@ export async function retrieve(env: Env, version: number, question: string, topK
 		version,
 		ordered.map(([id]) => id)
 	);
+
+	/**
+	 * Drop chunks that belong to a document outside the citable corpus.
+	 *
+	 * CASR is indexed and readable, but it is explicitly not an agreed rule source
+	 * (PRD §5, acceptance §15), so an answer that quotes it would be citing a manual
+	 * this product is not allowed to cite. The filter is applied after loading rather
+	 * than in the query because the two candidate queries return identifiers only.
+	 */
+	for (const [id] of ordered) {
+		const row = rows.get(id);
+		if (row && isExcludedFromCorpus(row.file_name)) rows.delete(id);
+	}
 
 	/**
 	 * Collapse chunks that resolve to the same clause.
