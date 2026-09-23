@@ -62,8 +62,8 @@ export type ChartSource = {
 };
 
 export type ExtractionOutcome =
-	| { ok: true; objectKey: string; icao: string; markdownChars: number; drafts: MinimaDraftInput[] }
-	| { ok: false; objectKey: string; icao: string; reason: string };
+	| { ok: true; objectKey: string; icao: string; markdownChars: number; drafts: MinimaDraftInput[]; rawModelResponse: string }
+	| { ok: false; objectKey: string; icao: string; reason: string; rawModelResponse?: string };
 
 /**
  * The system instruction.
@@ -102,6 +102,12 @@ export const EXTRACTION_SYSTEM_PROMPT = [
 	'- This is a reading rule, not an inference: the values are printed, and you are being told how the chart formats them. It does not license estimating a value that is genuinely absent, and it does not apply when the parenthesised number cannot be found in "sourceText".',
 	'- Where a row prints only a height with no parenthesised group, leave visibilityM null and set confidence to "low". Where a row prints only an RVR, for example `75RVR` or `350/400RVR`, report visibilityM from the RVR figure and leave ceilingFt null.',
 	'',
+	'Visibility units:',
+	'- Charts differ in the unit they print. Report the number exactly as it appears in "visibilityM", and report the unit the chart uses in "visibilityUnit" as either "m" or "km".',
+	'- A LIDO chart prints the visibility in KILOMETRES as a decimal, for example `ft610 - 3.4` or `ft280 - 1.5`, where 3.4 means 3.4 km. Report visibilityM as 3.4 and visibilityUnit as "km" — do NOT convert it and do NOT report it as 3.4 metres.',
+	'- An Australian AIP chart prints the visibility in METRES, for example `560 (502-1.9)`, where 502 means 502 m. Report visibilityM as 502 and visibilityUnit as "m".',
+	'- When the unit cannot be determined from the text, report visibilityUnit as null and say so in "notes". The value is converted from the unit by the application, not by you.',
+	'',
 	'Return a single JSON object and nothing else, in exactly this shape:',
 	'{',
 	'  "aisAuthority": "string, for example Airservices Australia",',
@@ -118,10 +124,10 @@ export const EXTRACTION_SYSTEM_PROMPT = [
 	'      "approachType": "string, for example CAT I, CAT II/III, Non-precision or Circling",',
 	'      "runway": "string or null, for example 21",',
 	'      "landing": [',
-	'        { "aircraftCategory": "A", "ceilingFt": 200, "visibilityM": 800, "valueType": "DA/H with RVR or null", "sourceText": "the exact fragment the values came from" }',
+	'        { "aircraftCategory": "A", "ceilingFt": 200, "visibilityM": 800, "visibilityUnit": "m", "valueType": "DA/H with RVR or null", "sourceText": "the exact fragment the values came from" }',
 	'      ],',
 	'      "alternate": [',
-	'        { "aircraftCategory": "A", "ceilingFt": 400, "visibilityM": 1500, "valueType": "DA/H with RVR or null", "sourceText": "the exact fragment the values came from" }',
+	'        { "aircraftCategory": "A", "ceilingFt": 400, "visibilityM": 1500, "visibilityUnit": "m", "valueType": "DA/H with RVR or null", "sourceText": "the exact fragment the values came from" }',
 	'      ],',
 	'      "confidence": "high"',
 	'    }',
@@ -158,6 +164,108 @@ function numberOrNull(value: unknown): number | null {
 	if (value === null || value === undefined || value === '') return null;
 	const parsed = Number(value);
 	return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
+}
+
+/**
+ * A chart number kept unrounded.
+ *
+ * Separate from `numberOrNull` because rounding a value before its unit is known
+ * destroys the information that identifies the unit. A LIDO chart prints visibility in
+ * kilometres as `2.2`; rounding it to `2` first turned 2.2 km into 2000 m instead of
+ * 2200 m. Measured on the real YPKG chart, that is the bug this function exists to
+ * prevent: rounding now happens once, on the final value, in the unit the registry
+ * stores.
+ */
+function numberUnroundedOrNull(value: unknown): number | null {
+	if (value === null || value === undefined || value === '') return null;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * Visibility in metres, from a chart that may print kilometres.
+ *
+ * Why this is a code step and not a prompt instruction
+ *   LIDO approach charts print the visibility in kilometres with a decimal —
+ *   `610 - 3.4`, `280 - 1.5`, `960 - 5.0` — while the registry stores metres and the
+ *   engine compares against a metre minima. Measured on the real YPKG chart, the model
+ *   reported `3.4` as **3 metres**: a wrong value by a factor of 1000, in the
+ *   direction that removes an operational restriction. Asking a model to do arithmetic
+ *   is how that happens, so the conversion is done here, deterministically, and the
+ *   original chart value travels with the record so a reviewer can see what was
+ *   converted.
+ *
+ * How the unit is recognised
+ *   `unit` from the model is honoured when it states one. Otherwise a value below
+ *   `KILOMETRE_CEILING` that carries a decimal is read as kilometres: no chart prints
+ *   a visibility minima of 3.4 metres, and every chart that prints kilometres uses a
+ *   decimal. A whole number under the ceiling is left alone, because `800` is metres
+ *   on every chart measured and `3` would have to be kilometres to be a minima at all —
+ *   which is precisely the ambiguity this function refuses to resolve silently: it
+ *   reports the conversion, and the record's source fragment still shows the chart.
+ */
+const KILOMETRE_CEILING = 100;
+
+/**
+ * A visibility printed in kilometres, recovered from a fragment when the model did not
+ * state a unit.
+ *
+ * Why this is only a fallback
+ *   The reliable source for the unit is the model's `visibilityUnit`, because only the
+ *   model reads the chart. Guessing from formatting was tried first and does not hold
+ *   up: anchoring on the number after `ft` matches the **height** (`ft960 - 5.0` matches
+ *   `960`), and anchoring on a bracket boundary matches an AIP fragment's **nautical
+ *   mile** figure (`560 (502-1.9)` matches `1.9`). Conversion of the wrong number
+ *   produces a confident, badly wrong minima, which is worse than leaving it for review.
+ *
+ *   So one shape is recognised and nothing else: a decimal that is the **last** number
+ *   in the fragment and is not inside brackets. Measured LIDO fragments are
+ *   `ft610 - 3.4V1810` (the visibility is followed only by a fix name) and
+ *   `ft610 - 3.4`; the AIP fragments that must not convert are `560 (502-1.9)` and
+ *   `1373-4.0`, where the decimal is bracketed or follows a height with no separator.
+ */
+function kilometresFromText(raw: string): number | null {
+	// Deciminals inside brackets are distances, not the visibility.
+	const withoutBrackets = raw.replace(/\([^)]*\)/g, ' ');
+	const matches = [...withoutBrackets.matchAll(/(\d+\.\d+)/g)];
+	if (!matches.length) return null;
+	const last = matches[matches.length - 1];
+	const value = Number(last[1]);
+	// A single decimal in the fragment is read as the visibility; with more than one the
+	// text is too ambiguous to decide, and the record is left for review instead.
+	if (matches.length > 1) return null;
+	if (!Number.isFinite(value) || value <= 0 || value >= KILOMETRE_CEILING) return null;
+	return value;
+}
+
+export function visibilityMetresFromChart(value: number | null, unit: unknown, raw: unknown): { metres: number | null; convertedFrom: string | null } {
+	const stated = String(unit ?? '').trim().toLowerCase();
+	const rawText = String(raw ?? '').trim();
+
+	// A stated unit settles it: the chart says which unit it is, so nothing is inferred.
+	if (/^(m|metre|meter|mtr)$/.test(stated)) return { metres: value, convertedFrom: null };
+	if (/^(km|kilomet|kilometer)/.test(stated)) {
+		if (value === null) return { metres: null, convertedFrom: null };
+		return { metres: Math.round(value * 1000), convertedFrom: rawText || `${value} km` };
+	}
+
+	// No stated unit: only a fragment with exactly one unbracketed decimal is converted,
+	// and only when the parsed value is small enough to be a kilometre reading. A value
+	// at or above the ceiling is metres on every chart measured (`1373-4.0` is 1373 m),
+	// so a decimal in its fragment is not the visibility.
+	const parsedIsSmallOrAbsent = value === null || (value > 0 && value < KILOMETRE_CEILING);
+	if (parsedIsSmallOrAbsent) {
+		const kilometres = kilometresFromText(rawText);
+		if (kilometres !== null) return { metres: Math.round(kilometres * 1000), convertedFrom: rawText };
+	}
+
+	if (value === null) return { metres: null, convertedFrom: null };
+	// A parsed value that is itself fractional and small is a kilometre reading even when
+	// the fragment is unhelpful.
+	if (value > 0 && value < KILOMETRE_CEILING && !Number.isInteger(value)) {
+		return { metres: Math.round(value * 1000), convertedFrom: rawText || String(value) };
+	}
+	return { metres: value, convertedFrom: null };
 }
 
 function confidenceOf(value: unknown): 'high' | 'medium' | 'low' {
@@ -207,7 +315,17 @@ export function toDraftRows(payload: unknown, objectKey: string, fallbackIcao: s
 				if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
 				const row = value as Record<string, unknown>;
 				const ceilingFt = numberOrNull(row.ceilingFt);
-				const visibilityM = numberOrNull(row.visibilityM);
+				// The visibility is converted deterministically rather than trusted from the
+				// model, because a chart printed in kilometres reported as metres is wrong by
+				// a factor of 1000 and in the direction that removes an operational limit.
+				const visibility = visibilityMetresFromChart(numberUnroundedOrNull(row.visibilityM), row.visibilityUnit, row.visibilityRaw ?? row.sourceText);
+				const visibilityM = visibility.metres;
+				const sourceText = text(row.sourceText);
+				// A conversion is stated on the record, so the reviewer sees both the chart's
+				// own figure and the value the engine will compare against.
+				const conversionNote = visibility.convertedFrom
+					? `Visibility was printed as ${visibility.convertedFrom} and converted to ${visibilityM} m; confirm the printed figure against the chart.`
+					: null;
 				rows.push({
 					...shared,
 					runway,
@@ -218,14 +336,17 @@ export function toDraftRows(payload: unknown, objectKey: string, fallbackIcao: s
 					ceilingFt,
 					visibilityM,
 					valueType: text(row.valueType),
-					sourceText: text(row.sourceText),
+					sourceText,
 					confidence: ceilingFt === null || visibilityM === null ? 'low' : confidence,
-					notes:
+					notes: [
+						notes,
+						conversionNote,
 						ceilingFt === null || visibilityM === null
-							? [notes, `A value for ${kind} category ${text(row.aircraftCategory) ?? 'unstated'} could not be read from the chart; read it from the PDF before approving.`]
-									.filter(Boolean)
-									.join(' ')
-							: notes
+							? `A value for ${kind} category ${text(row.aircraftCategory) ?? 'unstated'} could not be read from the chart; read it from the PDF before approving.`
+							: null
+					]
+						.filter(Boolean)
+						.join(' ')
 				});
 			}
 		};
@@ -311,12 +432,12 @@ export async function extractChart(
 		if (typeof content !== 'string') return { ...base, ok: false, reason: 'malformed-response' };
 
 		const parsed = parseJsonObject(content);
-		if (!parsed) return { ...base, ok: false, reason: 'unparseable-json' };
+		if (!parsed) return { ...base, ok: false, reason: 'unparseable-json', rawModelResponse: content.slice(0, 2000) };
 
 		const drafts = toDraftRows(parsed, source.objectKey, source.icao);
 		if (!drafts.length) return { ...base, ok: false, reason: 'no-approaches-found' };
 
-		return { ...base, ok: true, markdownChars: trimmed.length, drafts };
+		return { ...base, ok: true, markdownChars: trimmed.length, drafts, rawModelResponse: content.slice(0, 20000) };
 	} catch (error) {
 		const aborted = error instanceof Error && error.name === 'AbortError';
 		return { ...base, ok: false, reason: aborted ? 'timeout' : 'network-error' };

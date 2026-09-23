@@ -120,7 +120,7 @@ export async function handleMinimaHarness(request: Request, env: DevHarnessEnv):
 			const started = Date.now();
 			try {
 				await toMarkdown(source);
-				outcomes.push({ objectKey, ok: true, convertOnly: true, conversionMs, totalMs: Date.now() - started, markdownChars, bytes: bytes.length, markdownHead: markdown.slice(0, 600) });
+				outcomes.push({ objectKey, ok: true, convertOnly: true, conversionMs, totalMs: Date.now() - started, markdownChars, bytes: bytes.length, markdown, markdownHead: markdown.slice(0, 600) });
 			} catch (error) {
 				const message = error instanceof Error ? error.message : 'conversion failed';
 				outcomes.push({ objectKey, ok: false, convertOnly: true, conversionMs, totalMs: Date.now() - started, reason: message.slice(0, 200) });

@@ -269,7 +269,8 @@ export async function runExtractionJob(
 	await env.DB.prepare(
 		`UPDATE airport_minima_extraction_jobs
 		    SET status = 'succeeded', source_bytes = ?, markdown_chars = ?, drafts_extracted = ?,
-		        drafts_stored = ?, skipped_duplicates = ?, duplicates_of_approved = ?, draft_ids = ?, finished_at = ?
+		        drafts_stored = ?, skipped_duplicates = ?, duplicates_of_approved = ?, draft_ids = ?,
+		        raw_model_response = ?, finished_at = ?
 		  WHERE id = ?`
 	)
 		.bind(
@@ -280,6 +281,11 @@ export async function runExtractionJob(
 			stored.skippedDuplicates,
 			stored.duplicatesOfApproved,
 			JSON.stringify(stored.inserted),
+			// The model's own JSON is kept on the job row. When a value looks wrong, the
+			// question is always whether the model misread the chart or the application
+			// transformed what it said; without the response that question cannot be
+			// answered, and a unit bug was found exactly that way.
+			'rawModelResponse' in extraction ? extraction.rawModelResponse : null,
 			new Date().toISOString(),
 			message.jobId
 		)

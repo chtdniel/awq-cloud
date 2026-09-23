@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS airport_minima_extraction_jobs (
   duplicates_of_approved INTEGER,
   draft_ids TEXT,
   error TEXT,
+  /**
+   * The model's own JSON response, truncated.
+   *
+   * Kept because when a stored value looks wrong the first question is always whether
+   * the model misread the chart or the application transformed what it said. A unit bug
+   * was found exactly this way, and without the response the question cannot be answered
+   * without paying for another extraction.
+   */
+  raw_model_response TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   started_at TEXT,
   finished_at TEXT
