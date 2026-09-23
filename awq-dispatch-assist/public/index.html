@@ -347,6 +347,60 @@
 				.document-form select, .document-form input[type="file"] { min-block-size: 44px; }
 			}
 
+			/* Dispatch Assist visual refresh: a calmer operations console with stronger
+			   hierarchy, larger touch targets, and less visual noise in the decision rail. */
+			:root {
+				--surface-primary: rgb(13 18 24);
+				--surface-secondary: rgb(19 27 35);
+				--surface-elevated: rgb(29 40 50);
+				--border-default: rgb(53 69 82);
+				--border-subtle: rgb(35 49 61);
+				--radius-control: 7px;
+				--radius-panel: 10px;
+			}
+			.app-header { min-block-size: 68px; background: linear-gradient(180deg, rgb(16 23 30), rgb(13 18 24)); box-shadow: 0 1px 0 rgb(230 169 58 / 0.08); }
+			.brand-mark { inline-size: 34px; block-size: 34px; border-radius: 9px; box-shadow: inset 0 0 0 1px rgb(230 169 58 / 0.12); }
+			.brand-name { letter-spacing: 0.065em; }
+			.brand-subtitle { color: var(--text-secondary); letter-spacing: 0.06em; }
+			.primary-nav { gap: 6px; }
+			.nav-link { min-block-size: 36px; padding-inline: 13px; letter-spacing: 0.045em; }
+			.workspace { max-inline-size: 1500px; padding-block-start: 24px; }
+			.workspace-intro { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-4); padding-block-end: 4px; }
+			.page-title { font-size: clamp(24px, 2.7vw, 32px); letter-spacing: -0.035em; }
+			.page-copy { max-inline-size: 62ch; margin-block-start: 8px; }
+			.panel { border-color: var(--border-subtle); box-shadow: 0 12px 28px rgb(0 0 0 / 0.12); }
+			.panel-heading { min-block-size: 52px; padding-inline: var(--space-4); background: rgb(255 255 255 / 0.012); }
+			.panel-title { letter-spacing: -0.015em; }
+			.workspace-board .panel-heading, .workspace-assessment .panel-heading { background: linear-gradient(90deg, rgb(230 169 58 / 0.09), transparent 72%); }
+			.workspace-board .panel-title::before, .workspace-assessment .panel-title::before { content: ""; display: inline-block; inline-size: 6px; block-size: 6px; margin-inline-end: 8px; border-radius: 50%; background: var(--accent-primary); vertical-align: 2px; }
+			.workspace-assessment { border-color: rgb(230 169 58 / 0.34); }
+			.workspace-assessment .panel-heading { border-block-end-color: rgb(230 169 58 / 0.34); }
+			.verdict-strip { background: linear-gradient(135deg, rgb(37 47 57), rgb(29 40 50)); }
+			.verdict-identity strong { font-size: 15px; }
+			.flight-row { min-block-size: 68px; border-color: rgb(47 63 76); transition: border-color 120ms ease-out, background-color 120ms ease-out, transform 120ms ease-out; }
+			.flight-row:hover { transform: translateY(-1px); }
+			.flight-row[aria-pressed="true"] { box-shadow: inset 3px 0 0 var(--accent-primary); }
+			.weather-card, .finding { border-color: rgb(47 63 76); background: rgb(13 18 24 / 0.52); }
+			.weather-card-header { gap: var(--space-2); }
+			.dispatch-field input, .dispatch-field textarea, .assistant-form textarea { border-color: rgb(59 77 91); }
+			.dispatch-field input:hover, .dispatch-field textarea:hover, .assistant-form textarea:hover { border-color: rgb(112 132 147); }
+			.dispatch-field input:focus, .dispatch-field textarea:focus, .assistant-form textarea:focus { border-color: var(--accent-primary); box-shadow: 0 0 0 3px rgb(230 169 58 / 0.12); outline: none; }
+			.button { min-block-size: 38px; }
+			.button-primary { box-shadow: 0 5px 14px rgb(230 169 58 / 0.16); }
+			.assessment-result { gap: var(--space-3); }
+			.finding { padding: 13px; }
+			.finding-head { color: var(--text-primary); }
+			.assessment-note { border-color: rgb(59 77 91); }
+			@media (max-width: 1023px) {
+				.workspace-intro { grid-template-columns: 1fr; }
+			}
+			@media (max-width: 767px) {
+				.workspace { padding-block-start: 16px; }
+				.workspace-intro { gap: var(--space-3); }
+				.nav-link { min-block-size: 44px; }
+				.flight-row, .dispatch-field input, .dispatch-field textarea, .button { min-block-size: 44px; }
+			}
+
 			@media (prefers-reduced-motion: reduce) {
 				*, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 			}
