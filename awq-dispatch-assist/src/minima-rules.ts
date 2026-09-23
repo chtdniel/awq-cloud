@@ -34,12 +34,38 @@ export type ApprovalDecision =
  * engine to compare, so approving it would create a record that reads as usable
  * minima while checking nothing. That is the case this refuses (PRD §5,
  * acceptance §29).
+ *
+ * This is the only place the rule is expressed. The server enforces it, and the
+ * registry view asks the same function so it can disable the control and state the
+ * reason *before* the click, instead of presenting an enabled button whose only
+ * possible outcome is an error message. A rule that lives in two places drifts;
+ * this one does not.
  */
 export function canApprove(record: Pick<MinimaRecord, 'status' | 'ceilingFt' | 'visibilityM'> | null): ApprovalDecision {
 	if (!record) return { ok: false, reason: 'not-found' };
 	if (record.status === 'superseded') return { ok: false, reason: 'superseded' };
 	if (record.ceilingFt === null && record.visibilityM === null) return { ok: false, reason: 'no-values' };
 	return { ok: true };
+}
+
+/**
+ * Why a record cannot yet be approved, in the reviewer's own terms.
+ *
+ * Returned as a sentence rather than a code so the registry view and the API can
+ * show the same explanation, and so a reviewer learns what to do rather than only
+ * that something is refused.
+ */
+export function approvalBlockedReason(record: Pick<MinimaRecord, 'status' | 'ceilingFt' | 'visibilityM'> | null): string | null {
+	const decision = canApprove(record);
+	if (decision.ok) return null;
+	switch (decision.reason) {
+		case 'not-found':
+			return 'This record no longer exists.';
+		case 'superseded':
+			return 'This record was superseded by a newer approved record for the same procedure.';
+		case 'no-values':
+			return 'Neither a ceiling nor a visibility could be read from the chart, so there is nothing to verify and nothing for an assessment to compare against. Read the value off the PDF, enter it in the fields above, then approve.';
+	}
 }
 
 /**

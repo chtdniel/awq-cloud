@@ -166,6 +166,36 @@
 			.sidebar-close { display: none; }
 
 			/**
+			 * View switching.
+			 *
+			 * Each panel declares the view it belongs to in `data-view-panel`, and the
+			 * `<main>` carries the active view in `data-active-view`. This pair is the whole
+			 * mechanism.
+			 *
+			 * This rule was missing and the defect was silent: `setActiveView` updated the
+			 * heading and the URL hash, so every navigation looked like it worked while every
+			 * panel stayed on screen — the Minima registry appeared underneath the flight
+			 * board and the workspace itself, which is why the registry looked like it had not
+			 * opened. A view switcher with no rule acting on its state is a heading changer.
+			 */
+			.workspace[data-active-view] .workspace-view { display: none; }
+			.workspace[data-active-view='workspace'] .workspace-view[data-view-panel='workspace'] { display: block; }
+			.workspace[data-active-view='documents'] .workspace-view[data-view-panel='documents'] { display: block; }
+			.workspace[data-active-view='assistant'] .workspace-view[data-view-panel='assistant'] { display: block; }
+			.workspace[data-active-view='reference-manuals'] .workspace-view[data-view-panel='reference-manuals'] { display: block; }
+			.workspace[data-active-view='minima'] .workspace-view[data-view-panel='minima'] { display: block; }
+			/**
+			 * The page heading and the two-column layout belong to the decision workspace
+			 * only. `flight-documents`, `reference-manuals` and `minima` are single panels
+			 * whose own `panel-heading` already names them, so a second title above them
+			 * would be a heading over a heading; the assistant panel keeps its own heading
+			 * for the same reason. Verified by navigating each of the five links and
+			 * asserting which panel is visible.
+			 */
+			.workspace[data-active-view]:not([data-active-view='workspace']) .workspace-intro,
+			.workspace[data-active-view]:not([data-active-view='workspace']) .workspace-layout { display: none; }
+
+			/**
 			 * Tablet: 768-1023px.
 			 *
 			 * The analysis column keeps the full width and the sidebar becomes an
@@ -936,6 +966,19 @@
 									<p class="panel-note" id="review-note-status"></p>
 								</div>
 							</section>
+						</div>
+						</div>
+
+						<!--
+							Standalone views.
+
+							These four panels are siblings of `.workspace-layout`, not children of it.
+							They were originally inside the two-column grid, which broke them: the grid
+							is hidden on every view except the decision workspace (it carries the
+							sidebar, which is workspace context), and hiding it collapsed these panels
+							to zero size even though their own `display` was `block`. A view container
+							cannot live inside a container that another view's rule hides.
+						-->
 
 							<!-- ============================ flight documents -->
 							<section class="panel workspace-view" data-view-panel="documents" id="flight-documents" aria-labelledby="documents-title">
@@ -1061,9 +1104,9 @@
 									</div>
 								</div>
 							</section>
-						</div>
 
-						<!-- ============================ sidebar / drawer -->
+						<!-- The two-column layout reopens for the workspace view's sidebar. -->
+						<div class="workspace-layout">
 						<div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
 						<aside class="sidebar" id="sidebar" aria-label="Flight context and assessment details">
 							<div class="sidebar-panel">
@@ -1136,7 +1179,7 @@
 								</div>
 							</div>
 						</aside>
-					</div>
+						</div>
 				</main>
 			</div>
 		</div>
@@ -4143,6 +4186,25 @@
 				// rather than one they have to reconstruct.
 				if (record.sourceText) item.append(el('span', 'record-option-sub', `Source fragment: "${record.sourceText}"`));
 				if (record.reviewNotes) item.append(el('span', 'record-option-sub', `Review notes: ${record.reviewNotes}`));
+				/**
+				 * Why this row cannot be approved yet, on the row itself.
+				 *
+				 * The chart text is scrambled enough that some procedures yield no readable
+				 * value at all, and a reviewer scanning a list of forty records needs to see
+				 * which ones are waiting on a value they must read from the PDF rather than
+				 * discovering it one failed click at a time.
+				 */
+				if (record.ceilingFt === null && record.visibilityM === null && String(record.status || '') !== 'approved') {
+					const needsValue = el('div', 'banner banner-warning');
+					// Assigned as HTML for the same reason as the banner above: `icon()`
+					// returns markup, not a node.
+					needsValue.innerHTML = icon('warn', 'icon');
+					const needsValueBody = el('div', 'banner-body');
+					needsValueBody.append(el('strong', null, 'No value recorded'));
+					needsValueBody.append(el('p', null, 'Neither a ceiling nor a visibility could be read from this chart, so this record cannot be approved as it stands. Open it, read the value off the PDF, enter it, then approve.'));
+					needsValue.append(needsValueBody);
+					item.append(needsValue);
+				}
 				const actions = el('div', 'button-row');
 				const inspect = el('button', 'button button-secondary button-sm', 'Inspect and correct');
 				inspect.type = 'button';
@@ -4295,9 +4357,27 @@
 				decisionNote.append(decisionLabel, decisionInput);
 				decisionGroup.append(decisionNote);
 				const decisionActions = el('div', 'button-row');
+				/**
+				 * The approval gate, stated before the click.
+				 *
+				 * A record with neither a ceiling nor a visibility cannot be approved — there
+				 * is nothing to verify and nothing for an assessment to compare against, so
+				 * the server refuses it. Presenting an enabled button whose only outcome is an
+				 * error message wastes the reviewer's click and teaches them nothing; the
+				 * control is therefore disabled with the reason printed next to it, which is
+				 * the same rule the server enforces.
+				 */
+				const approvalBlocked =
+					(record.ceilingFt === null && record.visibilityM === null)
+						? 'Neither a ceiling nor a visibility is recorded, so there is nothing to verify against the chart and nothing for an assessment to compare against. Read the value off the PDF, enter it in the fields above, save the correction, then approve.'
+						: null;
 				const approve = el('button', 'button button-primary', 'Approve record');
 				approve.type = 'button';
-				approve.disabled = String(record.status || '') === 'approved' || String(record.status || '') === 'superseded';
+				approve.disabled =
+					String(record.status || '') === 'approved' ||
+					String(record.status || '') === 'superseded' ||
+					approvalBlocked !== null;
+				if (approvalBlocked) approve.title = approvalBlocked;
 				approve.addEventListener('click', () => void decideRecord(record.id, 'APPROVED', decisionInput.value));
 				const reject = el('button', 'button button-secondary', 'Reject record');
 				reject.type = 'button';
@@ -4305,6 +4385,18 @@
 				reject.addEventListener('click', () => void decideRecord(record.id, 'REJECTED', decisionInput.value));
 				decisionActions.append(approve, reject);
 				decisionGroup.append(decisionActions);
+				if (approvalBlocked) {
+					const blockedNotice = el('div', 'banner banner-warning');
+					// `icon()` returns SVG markup, so it has to be assigned as HTML. Appending
+					// it inserts a text node and prints the markup, which is how a raw `<svg>`
+					// string ended up visible on the record.
+					blockedNotice.innerHTML = icon('warn', 'icon');
+					const blockedBody = el('div', 'banner-body');
+					blockedBody.append(el('strong', null, 'Approval is blocked'));
+					blockedBody.append(el('p', null, approvalBlocked));
+					blockedNotice.append(blockedBody);
+					decisionGroup.append(blockedNotice);
+				}
 				decisionGroup.append(el('p', 'panel-note', 'Only an approved record is added to the active set that assessments may use.'));
 				E.registryDetail.append(decisionGroup);
 

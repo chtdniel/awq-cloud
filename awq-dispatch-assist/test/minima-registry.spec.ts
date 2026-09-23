@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canApprove, isUsableByAssessment, statusAfterCorrection } from '../src/minima-rules';
+import { approvalBlockedReason, canApprove, isUsableByAssessment, statusAfterCorrection } from '../src/minima-rules';
 import { MINIMA_STATUSES } from './helpers/minima-values';
 
 /**
@@ -46,6 +46,34 @@ describe('whether a record may be approved', () => {
 
 	it('reports a missing record', () => {
 		expect(canApprove(null)).toEqual({ ok: false, reason: 'not-found' });
+	});
+});
+
+/**
+ * The blocked reason is what the registry view prints and what the API returns, so
+ * a reviewer reading either surface learns the same thing. These cases exist because
+ * a real approval attempt failed with a bare refusal and the reason was only in the
+ * server's error string.
+ */
+describe('why approval is blocked, in the reviewer\'s terms', () => {
+	it('says nothing when the record can be approved', () => {
+		expect(approvalBlockedReason({ status: 'draft', ceilingFt: 200, visibilityM: 800 })).toBeNull();
+	});
+
+	it('names the missing value and what to do about it', () => {
+		const reason = approvalBlockedReason({ status: 'draft', ceilingFt: null, visibilityM: null });
+		expect(reason).toMatch(/ceiling/i);
+		expect(reason).toMatch(/visibility/i);
+		expect(reason).toMatch(/read the value/i);
+		expect(reason).toMatch(/PDF/i);
+	});
+
+	it('explains a superseded record', () => {
+		expect(approvalBlockedReason({ status: 'superseded', ceilingFt: 200, visibilityM: 800 })).toMatch(/superseded/i);
+	});
+
+	it('explains a record that has gone', () => {
+		expect(approvalBlockedReason(null)).toMatch(/no longer exists/i);
 	});
 });
 

@@ -46,6 +46,7 @@ import {
 import { MAX_CHARTS_PER_REQUEST, MAX_CHART_BYTES, extractChart, type ChartSource } from './minima-extraction';
 import { listNotamCandidates, resolveSelectedNotams } from './notams';
 import { citableReferenceDocuments, isExcludedFromCorpus } from './reference-corpus';
+import { approvalBlockedReason } from './minima-rules';
 import type { MinimaRecord } from './minima';
 import { explainDispatch, type ExplainerInput, type ExplainerResult } from './explainer';
 
@@ -1826,7 +1827,13 @@ async function decideMinimaRecord(request: Request, env: Env, ctx: ExecutionCont
 		await audit(env, userId, 'minima_reject', 'airport_minima', id, note ?? '', ctx);
 	} else {
 		const approved = await approveRecord(env, userId, id, note);
-		if (!approved.ok) return documentResponse({ error: approved.error }, 400);
+		if (!approved.ok) {
+			// The reason is written for the reviewer, and the registry view computes the
+			// same sentence before the click so the control can be disabled with it. An
+			// error here means the record changed between render and click.
+			const loaded = await getMinima(env, id);
+			return documentResponse({ error: approvalBlockedReason(loaded ? loaded.record : null) ?? approved.error }, 400);
+		}
 		// The approval is recorded with the approver identity and the time, as PRD
 		// acceptance §28 requires.
 		await audit(
