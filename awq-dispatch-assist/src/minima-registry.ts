@@ -28,7 +28,7 @@
  */
 
 import { planningMinimaForAlternate, higherMinima, type ApproachMinima, type MinimaKind, type MinimaRecord, type MinimaStatus } from './minima';
-import { canApprove, statusAfterCorrection } from './minima-rules';
+import { canApprove, canRetireForMissingSource, retireBlockedReason, statusAfterCorrection } from './minima-rules';
 
 /** SHA-256, hexadecimal. Used for the PDF source and for the record content. */
 export async function sha256Hex(data: ArrayBuffer | Uint8Array | string): Promise<string> {
@@ -293,9 +293,166 @@ export async function listActiveMinima(env: Env, icao: string): Promise<MinimaRe
 	return (results || []).map(toRecord);
 }
 
+/**
+ * The source chart a group of records came from, and how those records stand.
+ *
+ * At least one chart file per aerodrome is the normal case, so the registry is grouped
+ * by source object rather than by record: the question this answers is "is the document
+ * these values came from still available", which is a property of the file, not of any
+ * single row.
+ */
+export type SourceObjectState = {
+	icao: string;
+	sourceObjectKey: string;
+	records: number;
+	draft: number;
+	approved: number;
+	rejected: number;
+	superseded: number;
+	/** Ids that would be retired if this source is missing: drafts and approved records. */
+	retirableIds: number[];
+};
+
+/**
+ * Every source chart the registry holds records from, with per-status counts.
+ *
+ * The counts matter as much as the existence check: a source with 8 approved records and
+ * one with 8 drafts both need retiring, but only the first is changing what an assessment
+ * may use, and that difference should be visible before the action rather than after.
+ */
+export async function listSourceObjects(env: Env, icao: string | null): Promise<SourceObjectState[]> {
+	const filter = icao ? 'WHERE icao = ?' : '';
+	const bound = icao ? [icao.trim().toUpperCase()] : [];
+
+	const totals = await env.DB.prepare(
+		`SELECT icao, COALESCE(source_object_key, '') AS source_object_key,
+		        COUNT(*) AS records,
+		        SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft,
+		        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) AS approved,
+		        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+		        SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END) AS superseded
+		   FROM airport_minima ${filter}
+		  GROUP BY icao, source_object_key
+		  ORDER BY icao ASC, source_object_key ASC`
+	).bind(...bound).all<{
+		icao: string;
+		source_object_key: string;
+		records: number;
+		draft: number;
+		approved: number;
+		rejected: number;
+		superseded: number;
+	}>();
+
+	// The retirable ids are read separately rather than glued into the grouped query with
+	// GROUP_CONCAT, because this list is handed back to the caller and acted on by id: it
+	// has to be a list of ids, not a string that has to be parsed back into one.
+	const live = await env.DB.prepare(
+		`SELECT id, icao, COALESCE(source_object_key, '') AS source_object_key
+		   FROM airport_minima
+		  WHERE status IN ('draft', 'approved') ${icao ? 'AND icao = ?' : ''}
+		  ORDER BY id ASC`
+	).bind(...bound).all<{ id: number; icao: string; source_object_key: string }>();
+
+	const idsBySource = new Map<string, number[]>();
+	for (const row of live.results || []) {
+		const key = `${row.icao}\u0000${row.source_object_key}`;
+		const list = idsBySource.get(key) ?? [];
+		list.push(Number(row.id));
+		idsBySource.set(key, list);
+	}
+
+	return (totals.results || []).map(row => ({
+		icao: row.icao,
+		sourceObjectKey: row.source_object_key,
+		records: Number(row.records ?? 0),
+		draft: Number(row.draft ?? 0),
+		approved: Number(row.approved ?? 0),
+		rejected: Number(row.rejected ?? 0),
+		superseded: Number(row.superseded ?? 0),
+		retirableIds: idsBySource.get(`${row.icao}\u0000${row.source_object_key}`) ?? []
+	}));
+}
+
+/**
+ * Retire the records whose source chart is no longer in the document store.
+ *
+ * Why the caller names ids
+ *   The ids come from `listSourceObjects`, so the operator acts on a specific set they
+ *   were shown. Re-deriving "everything that is orphaned" inside this call would let the
+ *   action drift from what was reviewed, which is the failure mode bulk approval avoids
+ *   the same way.
+ *
+ * Why the existence check is repeated here
+ *   The check is made immediately before each status change, not trusted from the preview.
+ *   If a chart is restored between the preview and the action, the record has not lost its
+ *   source and is skipped with that reason instead of being retired on a stale reading.
+ *
+ * Retiring goes through `rejectRecord`, so it produces exactly the audit trail a manual
+ * rejection produces — including the note that says which source went missing — and a
+ * retired record can be approved again if its source returns.
+ */
+export async function retireRecordsFromMissingSource(
+	env: Env,
+	actorId: number,
+	ids: number[],
+	note: string | null
+): Promise<{
+	retired: Array<{ id: number; icao: string; sourceObjectKey: string }>;
+	skipped: Array<{ id: number; reason: string }>;
+}> {
+	const unique = [...new Set(ids)];
+	const found: MinimaRecord[] = [];
+	// Chunked because D1 caps bound parameters per statement, and a whole aerodrome can
+	// exceed that in one request.
+	for (let index = 0; index < unique.length; index += 40) {
+		const chunk = unique.slice(index, index + 40);
+		const placeholders = chunk.map(() => '?').join(', ');
+		const { results } = await env.DB.prepare(
+			`SELECT ${SELECT_COLUMNS} FROM airport_minima WHERE id IN (${placeholders})`
+		).bind(...chunk).all<MinimaRow>();
+		for (const row of results || []) found.push(toRecord(row));
+	}
+
+	// One existence check per distinct source, not per record: a chart with 56 records on
+	// it is one document, and 56 heads would be 56 round trips for the same answer.
+	const presence = new Map<string, boolean>();
+	for (const record of found) {
+		const key = record.sourceObjectKey ?? '';
+		if (presence.has(key)) continue;
+		presence.set(key, key ? await env.DOCUMENTS.head(key) !== null : false);
+	}
+
+	const retired: Array<{ id: number; icao: string; sourceObjectKey: string }> = [];
+	const skipped: Array<{ id: number; reason: string }> = [];
+
+	for (const id of unique) {
+		const record = found.find(row => row.id === id) ?? null;
+		if (!record) {
+			skipped.push({ id, reason: 'This record no longer exists.' });
+			continue;
+		}
+		const sourceObjectKey = record.sourceObjectKey ?? '';
+		const sourcePresent = presence.get(sourceObjectKey) === true;
+		const decision = canRetireForMissingSource(record, sourcePresent);
+		if (!decision.ok) {
+			skipped.push({ id, reason: retireBlockedReason(record, sourcePresent) ?? 'The record was not retired.' });
+			continue;
+		}
+		const reason = [
+			note,
+			`Source chart ${sourceObjectKey || 'not recorded on the record'} is no longer in the document store, so this value can no longer be checked against it and has been retired. Approve a value read from the replacement chart.`
+		].filter(Boolean).join(' ');
+		const result = await rejectRecord(env, actorId, id, reason);
+		if (result.ok) retired.push({ id, icao: record.icao, sourceObjectKey });
+		else skipped.push({ id, reason: result.error });
+	}
+
+	return { retired, skipped };
+}
+
 /** One record with its audit history, for the review screen. */
-export async function getMinima(env: Env, id: number): Promise<MinimaRecordWithHistory | null> {
-	const row = await env.DB.prepare(`SELECT ${SELECT_COLUMNS} FROM airport_minima WHERE id = ? LIMIT 1`).bind(id).first<MinimaRow>();
+export async function getMinima(env: Env, id: number): Promise<MinimaRecordWithHistory | null> {	const row = await env.DB.prepare(`SELECT ${SELECT_COLUMNS} FROM airport_minima WHERE id = ? LIMIT 1`).bind(id).first<MinimaRow>();
 	if (!row) return null;
 	const { results } = await env.DB.prepare(
 		`SELECT id, action, actor_id, before_json, after_json, note, created_at

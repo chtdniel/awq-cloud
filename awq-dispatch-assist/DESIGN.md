@@ -230,6 +230,7 @@ Findings state severity with a 1px tinted border and a tinted surface, never a t
 | The flight board stays above the analysis after a flight is selected, so on a phone it fills the first screen before the destination weather appears | Decision workspace | The board is the entry point and a dispatcher routinely switches flights, so keeping it open is defensible; collapsing it changes the panel order the product specifies | Collapse the board to a one-line summary once a flight is selected, with an expand control, and re-check the panel order requirement |
 | `POST /api/reference-ingest` and `POST /api/reference-index` have no UI control | Reference manuals | They were not part of the release-1 surface, and adding one introduces a destructive admin action with no confirmation design yet | Add an explicit, confirmation-gated admin control when the corpus is next revised |
 | Extraction latency is unproven: the Workers AI conversion was measured at 0.2-1s per chart, yet two production runs still hit the 120s budget, which places the variable cost in the DeepSeek call | Minima registry | The transcription is correct and a draft is inert, so latency has no safety consequence; one chart per request means a slow chart cannot fail the others, and a retry is a visible per-chart action rather than a silent loss | Move the conversion and the model call into a Queue consumer, write the drafts from the consumer, and poll a status endpoint from the registry view |
+| Approval supersede is keyed on `(icao, chart_identifier, approach, runway, category, kind)`, so two records approved from **different source files** for one slot coexist as active values (see §11 Source integrity) | Minima registry, approval path | The snapshot records which record id the assessment used, so the value is traceable even when two are available; the case only arises while a chart set is being replaced, and the orphaned-source check catches the usual form of it | Make the supersede key the slot alone, or refuse an approval whose slot already holds an approved value from another source file |
 
 ## 9. Reference Corpus
 
@@ -635,3 +636,51 @@ findings were defects that a passing test suite did not catch:
 Each of those was found by asserting on what a reader sees, not on what the server
 returned, which is the reason the smoke test renders the report and measures the layout
 rather than only checking status codes.
+
+### Source integrity: a value cannot outlive its chart
+
+An approved minima record is a claim that a dispatcher compared a value against a source
+chart, and every record stores the object key it was read from. Nothing checked whether
+that object still existed.
+
+It did not. Every chart PDF under `airport/` in `awq-dispatch-documents` was removed while
+the registry still held **148 records read from them, 8 of them approved and usable in
+assessments**. The condition was found by accident — a production smoke check failed
+because its fixture chart was gone — not by anything in the product, which is the actual
+defect: the registry knew the source key of every record and never asked the document store
+about any of them.
+
+Two surfaces now ask:
+
+- `GET /api/minima/orphaned-sources` reports every source chart with its per-status counts
+  and whether the object is still in the bucket, plus the ids that a retirement would
+  touch. The counts are the point: a source holding 84 drafts is housekeeping, one holding
+  8 approved records is a change to what an assessment may use, and the two are identical
+  without the numbers.
+- `POST /api/minima/retire-orphans` retires them, by explicit id, re-checking the object
+  immediately before each change so a chart restored between the preview and the action
+  leaves its records alone.
+
+The registry view runs the check with the aerodrome load and renders nothing when every
+source is present. A permanent all-clear banner on a healthy aerodrome is noise that
+teaches the reader to skip the place the warning appears; a check that *failed* does
+report itself, because silence there reads as a clean result.
+
+Retirement is a status change, not a delete: the record keeps its values, its source key
+and its approval history, stops being readable by an assessment, and can be approved again
+if the chart returns. Only `draft` and `approved` are retired — a rejected or superseded
+record is already outside the active set, and re-labelling it would overwrite the reason it
+left (`canRetireForMissingSource` in `src/minima-rules.ts`, which the write path and the UI
+both ask so the refusal is stated before the click).
+
+The trail is attributed by actor id, so this action is deliberately **not** performed by an
+automated session: a retirement run by a throwaway account would leave an audit entry
+pointing at a deleted user. It is the operator's click.
+
+What this does not do is reconcile a replacement chart against the old values. When an AIP
+chart set is replaced by a LIDO set, the new records carry a different `chart_identifier`
+(there is one identifier per source file, and a LIDO file covers a whole aerodrome), so
+approval's supersede rule — which keys on the identifier as well as the slot — will not
+retire the old records on its own. The orphaned-source check covers that gap only because
+the replaced files are actually absent; a swap that left both sets in the bucket would put
+two approved values on one slot. Recorded in §8 Accepted Debt.

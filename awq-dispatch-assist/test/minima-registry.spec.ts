@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { approvalBlockedReason, canApprove, isUsableByAssessment, statusAfterCorrection } from '../src/minima-rules';
+import { approvalBlockedReason, canApprove, canRetireForMissingSource, isUsableByAssessment, retireBlockedReason, statusAfterCorrection } from '../src/minima-rules';
 import { MINIMA_STATUSES } from './helpers/minima-values';
 
 /**
@@ -92,5 +92,46 @@ describe('status after an ADMIN correction', () => {
 
 	it('refuses to edit a superseded record', () => {
 		expect(statusAfterCorrection({ status: 'superseded' })).toBeNull();
+	});
+});
+
+/**
+ * Retiring a record whose source chart is gone.
+ *
+ * This is the rule behind the case that was found in production: every chart object under
+ * `airport/` had been removed while the records extracted from them were still in the
+ * registry, 8 of them approved and usable. The bounds below are what stop the action from
+ * doing anything except taking a value out of use: it cannot retire a record whose source
+ * is present, and it cannot touch a record that has already left the active set.
+ */
+describe('retiring a record whose source chart is gone', () => {
+	it('retires a draft and an approved record when the source is missing', () => {
+		expect(canRetireForMissingSource({ status: 'draft' }, false)).toEqual({ ok: true });
+		expect(canRetireForMissingSource({ status: 'approved' }, false)).toEqual({ ok: true });
+	});
+
+	it('refuses when the source chart is still there, even for an approved record', () => {
+		// The record has not lost anything, so retiring it would be discarding a verified
+		// value for no reason. This is also the guard against a stale preview: the check
+		// runs again immediately before the change.
+		expect(canRetireForMissingSource({ status: 'approved' }, true)).toEqual({ ok: false, reason: 'source-present' });
+		expect(canRetireForMissingSource({ status: 'draft' }, true)).toEqual({ ok: false, reason: 'source-present' });
+	});
+
+	it('leaves a rejected or superseded record alone', () => {
+		// Both are already outside the active set. Re-labelling them would overwrite the
+		// reason they left, which is the audit trail a reviewer relies on.
+		expect(canRetireForMissingSource({ status: 'rejected' }, false)).toEqual({ ok: false, reason: 'not-live' });
+		expect(canRetireForMissingSource({ status: 'superseded' }, false)).toEqual({ ok: false, reason: 'not-live' });
+	});
+
+	it('explains a skip rather than reporting a silent success', () => {
+		expect(retireBlockedReason({ status: 'approved' }, true)).toMatch(/still in the document store/i);
+		expect(retireBlockedReason({ status: 'rejected' }, false)).toMatch(/already rejected/i);
+		expect(retireBlockedReason(null, false)).toMatch(/no longer exists/i);
+	});
+
+	it('says nothing when the record can be retired', () => {
+		expect(retireBlockedReason({ status: 'approved' }, false)).toBeNull();
 	});
 });

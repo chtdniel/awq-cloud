@@ -1097,6 +1097,20 @@
 									<p class="panel-note" id="registry-status" role="status" aria-live="polite"></p>
 
 									<!--
+										Source integrity.
+
+										A minima value is only as trustworthy as the chart behind it, and every record
+										stores the object key it was read from. When a chart set is replaced, those
+										records keep pointing at a document that is gone and nothing else says so —
+										which is how 141 records, 8 of them approved and usable, outlived every chart
+										object under `airport/`. The check runs with the aerodrome load rather than
+										behind a button, because a condition nobody asks about is a condition nobody
+										finds; and it renders nothing at all when there is nothing to report, so it
+										costs no attention on a healthy aerodrome.
+									-->
+									<div class="stack-md" id="registry-source-check" hidden></div>
+
+									<!--
 										Bulk review bar.
 
 										Sits directly above the list, because the decision it offers is about the
@@ -1446,6 +1460,7 @@
 				registryIcao: document.getElementById('registry-icao'),
 				registryLoadButton: document.getElementById('registry-load-button'),
 				registryStatus: document.getElementById('registry-status'),
+				registrySourceCheck: document.getElementById('registry-source-check'),
 				registryRecords: document.getElementById('registry-records'),
 				registryDetail: document.getElementById('registry-detail'),
 				registryBulkBar: document.getElementById('registry-bulk-bar'),
@@ -4218,6 +4233,159 @@
 					E.registryRecords.append(el('p', 'document-empty', errorMessage(error)));
 					E.registryStatus.textContent = errorMessage(error);
 				}
+				// Whether the charts these records were read from still exist is a separate
+				// question from whether the records loaded, so it is asked separately and does
+				// not depend on the record read succeeding.
+				await checkSourceIntegrity(code);
+			}
+
+			/**
+			 * Ask whether the charts these records came from are still in the document store.
+			 *
+			 * Silent when the answer is "all present": this is a diagnostic, and a permanent
+			 * all-clear banner on a healthy aerodrome is noise that trains the reader to skip
+			 * the place the warning appears. A check that could not run does report itself,
+			 * because staying silent there would read as a clean result.
+			 */
+			async function checkSourceIntegrity(icao) {
+				const target = E.registrySourceCheck;
+				target.hidden = true;
+				clear(target);
+				if (!/^[A-Z0-9]{4}$/.test(String(icao || '').trim().toUpperCase())) return;
+				try {
+					const data = await api(`/api/minima/orphaned-sources?icao=${encodeURIComponent(icao)}`);
+					const orphaned = Array.isArray(data?.orphaned) ? data.orphaned : [];
+					if (!orphaned.length) return;
+					renderSourceIntegrity(orphaned, data?.totals || {});
+				} catch (error) {
+					const box = el('div', 'banner banner-warning');
+					box.innerHTML = icon('warn', 'icon');
+					const body = el('div', 'banner-body');
+					body.append(el('strong', null, 'Could not check whether the source charts are still available'));
+					body.append(
+						el('p', null, `${errorMessage(error)} The records below are shown as they are stored. This is a failed check, not a clean result.`)
+					);
+					box.append(body);
+					target.append(box);
+					target.hidden = false;
+				}
+			}
+
+			/**
+			 * Report the records whose source chart is gone, and offer to retire them.
+			 *
+			 * The counts come first because they are what the decision turns on: a source with
+			 * 84 drafts is housekeeping, a source with 8 approved records is changing what an
+			 * assessment may use, and the two look identical without the numbers.
+			 *
+			 * The confirmation states what retiring does and, just as importantly, what it does
+			 * not do — nothing is deleted, and a retired record can be approved again. That is
+			 * what makes this safe to do while a chart set is being replaced, and it is the part
+			 * a reader would otherwise have to take on trust.
+			 */
+			function renderSourceIntegrity(orphaned, totals) {
+				const target = E.registrySourceCheck;
+				const records = Number(totals.records || 0);
+				const approved = Number(totals.approved || 0);
+				const ids = orphaned.flatMap(source => Array.isArray(source.retirableIds) ? source.retirableIds.map(Number) : []);
+
+				const box = el('div', 'banner banner-warning');
+				box.innerHTML = icon('warn', 'icon');
+				const body = el('div', 'banner-body');
+				body.append(
+					el('strong', null, `${orphaned.length} source chart${orphaned.length === 1 ? '' : 's'} can no longer be found`)
+				);
+				body.append(
+					el('p', null, `${records} record${records === 1 ? '' : 's'} were read from ${orphaned.length === 1 ? 'it' : 'them'}, ${approved} of them approved and usable by an assessment. A value that can no longer be checked against the chart it came from should not stay usable.`)
+				);
+
+				const list = el('ul', 'record-list');
+				for (const source of orphaned) {
+					const row = el('li', 'record-row');
+					const head = el('div', 'row-between');
+					head.append(el('strong', null, source.sourceObjectKey || 'Source object not recorded on the record'));
+					head.append(el('span', 'chip', `${source.records} record${Number(source.records) === 1 ? '' : 's'}`));
+					row.append(head);
+					const chips = el('div', 'chip-row');
+					chips.append(el('span', 'chip', `${source.approved} approved`));
+					chips.append(el('span', 'chip', `${source.draft} draft`));
+					if (Number(source.superseded)) chips.append(el('span', 'chip', `${source.superseded} superseded`));
+					if (Number(source.rejected)) chips.append(el('span', 'chip', `${source.rejected} already rejected`));
+					chips.append(el('span', 'chip', 'not in the document store'));
+					row.append(chips);
+					list.append(row);
+				}
+				body.append(list);
+
+				const actions = el('div', 'button-row');
+				const retire = el('button', 'button button-secondary', `Retire ${ids.length} record${ids.length === 1 ? '' : 's'} from these sources`);
+				retire.type = 'button';
+				retire.disabled = ids.length === 0;
+				actions.append(retire);
+				body.append(actions, el('p', 'panel-note', ids.length === 0
+					? 'There is nothing left to retire from these sources: their records have already left the active set.'
+					: 'Retiring takes these values out of use. It deletes nothing and can be undone by approving a value from the replacement chart.'));
+				box.append(body);
+				clear(target);
+				target.append(box);
+				target.hidden = false;
+
+				retire.addEventListener('click', () => {
+					retire.disabled = true;
+					const confirm = el('div', 'stack-md');
+					const confirmBox = el('div', 'banner banner-warning');
+					confirmBox.innerHTML = icon('warn', 'icon');
+					const confirmBody = el('div', 'banner-body');
+					confirmBody.append(el('strong', null, `Retire ${ids.length} record${ids.length === 1 ? '' : 's'}?`));
+					confirmBody.append(
+						el('p', null, 'Each record keeps its values, its approval history and its source key, and stops being usable by an assessment. Nothing is deleted, and a record can be approved again if its chart returns. Every retirement is recorded against your account with the time.')
+					);
+					const noteGroup = el('div', 'input-group');
+					const noteLabel = el('label', null, 'Why these values are being retired (optional)');
+					noteLabel.setAttribute('for', 'retire-note');
+					const note = document.createElement('textarea');
+					note.className = 'field-textarea';
+					note.id = 'retire-note';
+					note.placeholder = `For example: the ${registry.icao || 'aerodrome'} chart set was replaced and these values will be re-read from the new charts`;
+					noteGroup.append(noteLabel, note);
+					const buttons = el('div', 'button-row');
+					const go = el('button', 'button button-primary', `Retire ${ids.length} record${ids.length === 1 ? '' : 's'}`);
+					go.type = 'button';
+					const cancel = el('button', 'button button-secondary', 'Cancel');
+					cancel.type = 'button';
+					const status = el('p', 'panel-note', '');
+					buttons.append(go, cancel);
+					confirmBody.append(noteGroup, buttons, status);
+					confirmBox.append(confirmBody);
+					confirm.append(confirmBox);
+					target.append(confirm);
+					cancel.addEventListener('click', () => {
+						clear(confirm);
+						retire.disabled = false;
+					});
+					go.addEventListener('click', async () => {
+						go.disabled = true;
+						status.textContent = `Retiring ${ids.length} record(s)…`;
+						try {
+							const data = await api('/api/minima/retire-orphans', {
+								method: 'POST',
+								body: { ids, note: note.value.trim() }
+							});
+							const retired = Array.isArray(data?.retired) ? data.retired : [];
+							const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
+							status.textContent = `${retired.length} retired.${skipped.length ? ` ${skipped.length} left as they were: ${skipped.map(entry => `#${entry.id} (${entry.reason})`).join('; ')}` : ''}`;
+							// Retiring an approved record changes which records a picker may offer, so
+							// the cached bundle for this aerodrome is dropped rather than left stale.
+							state.minimaReady.delete(String(registry.icao || '').toUpperCase());
+							await loadRegistryRecords(registry.icao);
+							registry.loaded = true;
+							await loadMinimaAirports();
+						} catch (error) {
+							status.textContent = errorMessage(error);
+							go.disabled = false;
+						}
+					});
+				});
 			}
 
 			/** Records grouped by chart, because one chart yields several approach rows. */

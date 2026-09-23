@@ -81,3 +81,51 @@ export function statusAfterCorrection(record: Pick<MinimaRecord, 'status'>): Min
 	if (record.status === 'approved') return 'draft';
 	return record.status;
 }
+
+export type RetireDecision =
+	| { ok: true }
+	| { ok: false; reason: 'source-present' | 'not-live' };
+
+/**
+ * Whether a record may be retired because its source chart is gone.
+ *
+ * Why this rule exists
+ *   An approved minima value is a claim that a dispatcher compared it against a source
+ *   chart. When the source is withdrawn — an AIP chart set replaced by a LIDO set, for
+ *   example — that claim can no longer be checked, so the value has to stop being usable
+ *   rather than quietly outlive the document it came from. Measured on this deployment:
+ *   every chart object under `airport/` was removed, and the records extracted from them
+ *   were still active, pointing at source keys that no longer resolve.
+ *
+ * What it is not
+ *   It is not a delete. Retiring is a status change with its own audit entry, so the
+ *   record, its values and its approval history stay readable and the record can be
+ *   approved again if the source comes back. It is also not a judgement about the value:
+ *   the values may well be correct, but correctness that cannot be checked is not a
+ *   control.
+ *
+ * Only `draft` and `approved` are retired, because those are the two states that are
+ * live — a draft occupies the review queue and an approved record is usable. A rejected
+ * or superseded record is already outside the active set, and re-labelling it would
+ * overwrite the reason it left.
+ *
+ * The source check is a parameter rather than a call into storage so the rule stays
+ * pure and testable, and so the caller performs the check immediately before the change
+ * rather than trusting a decision made earlier.
+ */
+export function canRetireForMissingSource(record: Pick<MinimaRecord, 'status'>, sourcePresent: boolean): RetireDecision {
+	if (sourcePresent) return { ok: false, reason: 'source-present' };
+	if (record.status !== 'draft' && record.status !== 'approved') return { ok: false, reason: 'not-live' };
+	return { ok: true };
+}
+
+/** Why a record was not retired, in the reviewer's own terms. */
+export function retireBlockedReason(record: Pick<MinimaRecord, 'status'> | null, sourcePresent: boolean): string | null {
+	if (!record) return 'This record no longer exists.';
+	const decision = canRetireForMissingSource(record, sourcePresent);
+	if (decision.ok) return null;
+	if (decision.reason === 'source-present') {
+		return 'The source chart for this record is still in the document store, so the record has not lost its source and is left as it is.';
+	}
+	return `This record is already ${record.status}, so it is not part of the active set and was left as it is.`;
+}

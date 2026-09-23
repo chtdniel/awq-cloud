@@ -34,7 +34,9 @@ import {
 	listActiveMinima,
 	listMinima,
 	listMinimaAirports,
+	listSourceObjects,
 	rejectRecord,
+	retireRecordsFromMissingSource,
 	toApproachMinima,
 	updateDraft,
 	type DraftCorrection
@@ -1894,6 +1896,106 @@ async function listApprovableMinima(request: Request, env: Env, url: URL): Promi
 	});
 }
 
+/**
+ * Which registry records have lost the chart they were read from.
+ *
+ * Why this is a read endpoint of its own
+ *   A minima value is only as trustworthy as the document behind it. The registry stores
+ *   the object key each record came from, so the document store can answer whether that
+ *   document still exists — and when a chart set is replaced, the answer is no. That
+ *   condition was found by accident here: every object under `airport/` had been removed
+ *   while 141 records extracted from those objects were still in the registry, 8 of them
+ *   approved and usable. Nothing surfaced it, because nothing was asking.
+ *
+ * What it returns
+ *   Every source chart with its per-status counts and its `present` flag, so the decision
+ *   to retire is made against the counts rather than against "some records". The
+ *   `retirableIds` are the ids to pass to the retire endpoint, so what the operator acts
+ *   on is exactly what they were shown.
+ */
+async function listOrphanedSources(request: Request, env: Env, url: URL): Promise<Response> {
+	if (!await authorizeUser(request, env)) return documentResponse({ error: 'SSO is required.' }, 401);
+	const requested = String(url.searchParams.get('icao') ?? '').trim().toUpperCase();
+	const icao = /^[A-Z0-9]{4}$/.test(requested) ? requested : null;
+	if (requested && !icao) return documentResponse({ error: 'icao must be a four-character ICAO location indicator.' }, 400);
+
+	const sources = await listSourceObjects(env, icao);
+	const withPresence = [];
+	for (const source of sources) {
+		// A record with no source key at all cannot be checked against anything, so it is
+		// reported as absent rather than assumed present.
+		const present = source.sourceObjectKey ? await env.DOCUMENTS.head(source.sourceObjectKey) !== null : false;
+		withPresence.push({ ...source, present });
+	}
+	const orphaned = withPresence.filter(source => !source.present);
+	return documentResponse({
+		ok: true,
+		data: {
+			icao,
+			sources: withPresence,
+			orphaned,
+			totals: {
+				sources: withPresence.length,
+				orphanedSources: orphaned.length,
+				records: orphaned.reduce((sum, source) => sum + source.records, 0),
+				approved: orphaned.reduce((sum, source) => sum + source.approved, 0),
+				draft: orphaned.reduce((sum, source) => sum + source.draft, 0)
+			},
+			note: 'A source is orphaned when its chart object is not in the document store. A record from an orphaned source can no longer be checked against the chart it states, so it should be retired before a value from the replacement chart is approved.'
+		}
+	});
+}
+
+/**
+ * Retire records whose source chart is no longer in the document store.
+ *
+ * What it deliberately does not do
+ *   - It does not approve anything, and it cannot make a value usable. The only movement
+ *     is out of the active set, so this path cannot introduce a minima value.
+ *   - It does not derive its own list. The caller names the ids from the orphaned-source
+ *     preview, and the source is re-checked immediately before each change, so a chart
+ *     restored between the two calls leaves its records alone.
+ *   - It does not delete. A retired record keeps its values and its approval history and
+ *     can be approved again if its source returns, which is what makes this a safe thing
+ *     to do when a chart set is being replaced rather than corrected.
+ */
+async function retireOrphanedMinima(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	const userId = await authorizeUser(request, env);
+	if (!userId) return documentResponse({ error: 'SSO is required.' }, 401);
+	let body: { ids?: unknown; note?: unknown };
+	try { body = await request.json() as typeof body; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
+
+	const ids = Array.isArray(body.ids)
+		? [...new Set(body.ids.map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0))]
+		: [];
+	if (!ids.length) return documentResponse({ error: 'At least one record id is required.' }, 400);
+	if (ids.length > 200) return documentResponse({ error: 'A retirement is limited to 200 records at a time.' }, 400);
+	const note = String(body.note ?? '').trim().slice(0, 500) || null;
+
+	const { retired, skipped } = await retireRecordsFromMissingSource(env, userId, ids, note);
+	for (const record of retired) {
+		await audit(
+			env,
+			userId,
+			'minima_retire',
+			'airport_minima',
+			record.id,
+			`${record.icao}: source ${record.sourceObjectKey || 'not recorded'} is not in the document store (of ${ids.length} submitted)`,
+			ctx
+		);
+	}
+
+	return documentResponse({
+		ok: true,
+		data: {
+			requested: ids.length,
+			retired,
+			skipped,
+			note: 'A retired record keeps its values and its approval history and is not usable by an assessment. It can be approved again if its source chart returns.'
+		}
+	});
+}
+
 /** Apply an ADMIN correction to a minima draft or approved record. */
 async function correctMinimaDraft(request: Request, env: Env, ctx: ExecutionContext, id: number): Promise<Response> {
 	const userId = await authorizeUser(request, env);
@@ -2110,6 +2212,8 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 		if (url.pathname === '/api/minima/extraction-jobs' && request.method === 'GET') return listExtractionJobsApi(request, env, url);
 		if (url.pathname === '/api/minima/approvable' && request.method === 'GET') return listApprovableMinima(request, env, url);
 		if (url.pathname === '/api/minima/bulk-decision' && request.method === 'POST') return decideMinimaRecordsBulk(request, env, ctx);
+		if (url.pathname === '/api/minima/orphaned-sources' && request.method === 'GET') return listOrphanedSources(request, env, url);
+		if (url.pathname === '/api/minima/retire-orphans' && request.method === 'POST') return retireOrphanedMinima(request, env, ctx);
 		const minimaMatch = url.pathname.match(/^\/api\/minima\/(\d+)$/);
 		if (minimaMatch && request.method === 'GET') return getMinimaRecord(request, env, Number(minimaMatch[1]));
 		if (minimaMatch && request.method === 'PATCH') return correctMinimaDraft(request, env, ctx, Number(minimaMatch[1]));
