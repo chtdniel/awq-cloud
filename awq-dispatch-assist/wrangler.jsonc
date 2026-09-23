@@ -48,6 +48,39 @@
 		"binding": "AI",
 		"remote": true
 	},
+	/**
+	 * Queues: minima extraction.
+	 *
+	 * Chart extraction costs a PDF conversion plus a model call and has been measured
+	 * at 81 to 130 seconds per chart. On the request path that exceeded the budget
+	 * four times out of seven, and each loss reached the dispatcher as a failed click.
+	 * A Queue consumer has a 15-minute wall-clock limit and retries, so the work is
+	 * enqueued and the outcome is read from the job row.
+	 *
+	 * `max_batch_size: 1` is deliberate: each message is a whole chart, extraction is
+	 * the expensive part, and one message per invocation keeps a slow chart from
+	 * holding up a batch and makes a retry mean exactly one chart.
+	 * `max_retries: 2` covers a transient provider error without leaving a chart in a
+	 * retry loop; a chart that fails three times is reported as failed, which is the
+	 * signal that it needs a human rather than another attempt.
+	 */
+	"queues": {
+		"producers": [
+			{
+				"queue": "awq-dispatch-minima-extraction",
+				"binding": "MINIMA_EXTRACTION_QUEUE"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "awq-dispatch-minima-extraction",
+				"max_batch_size": 1,
+				"max_batch_timeout": 5,
+				"max_retries": 2,
+				"retry_delay": 30
+			}
+		]
+	},
 	// Vectorize index for corpus retrieval. Dimensions are fixed at creation and
 	// match the 1024-dimension output of @cf/baai/bge-m3; changing the model would
 	// require a new index. Vectorize has no local simulation, so the binding is

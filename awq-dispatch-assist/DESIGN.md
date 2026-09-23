@@ -437,6 +437,70 @@ a configuration change rather than a rewrite.
 The same gateway is used for minima extraction (`src/minima-extraction.ts`) and for
 query planning (`src/query-plan.ts`). Model choice is configuration in each module.
 
+### Extraction runs in a Queue, not on the request path
+
+Measured against the real charts, a chart costs 81 to 130 seconds end to end. On the
+request path that exceeded the budget four times out of seven, and every loss reached
+the dispatcher as a failed click. The work therefore moved to a Queue consumer:
+
+| | On the request path | In a Queue consumer |
+|---|---:|---:|
+| Wall-clock budget | One response | 15 minutes |
+| YPKG charts extracted in one run | 3 of 7 | **7 of 7** |
+| Average per chart | 121s (timeouts) | 138s |
+| Failure shape | A lost click | A job row with a reason |
+
+`max_batch_size: 1` is deliberate: each message is a whole chart, so one message per
+invocation keeps a slow chart from holding up a batch and makes a retry mean exactly
+one chart. The consumer acknowledges a *recorded* failure — a job row that says what
+happened is a completed attempt — and only calls `retry()` when the job row itself
+could not be updated, because that is the one case where the status is genuinely
+unknown.
+
+`airport_minima_extraction_jobs` is the client's view of the work. It is separate from
+the registry on purpose: a job records an attempt, and the registry records values, so
+a failed attempt cannot be mistaken for a reviewable record. The consumer writes
+drafts through the same `insertDrafts` path the request used, so completing a job still
+cannot approve anything.
+
+Also measured: the `deepseek-chat` model produced minima values that contradicted both
+other models on the same chart, so the API accepts a model only from an allow-list
+(`deepseek-flash`, `deepseek-reasoner`) rather than a free-text identifier. The value
+reaches a provider as a model name, and an arbitrary string is an arbitrary outbound
+request.
+
+### Chart text is the limit, and it is a real limit
+
+The models disagree about the same minima table, and the disagreement is the reason the
+human approval step exists. On `YPPH RNP RWY 24`, the hardest chart measured:
+
+| | `deepseek-flash` | `deepseek-reasoner` |
+|---|---:|---:|
+| Records produced | 32 | 22 |
+| Records carrying a value | 16 | **22** |
+| Records carrying **both** ceiling and visibility | 4 | **22** |
+
+The difference is one reading rule. The chart prints `560 (502-1.9)`: 560 ft, with the
+parenthesised group carrying the visibility in metres. `deepseek-flash` reported the
+height and left the visibility null, saying the printed unit could not be read;
+`deepseek-reasoner` read the notation and produced 502 m. The prompt now states the
+notation explicitly, as a reading rule for how the chart formats its values rather than
+a licence to infer anything.
+
+Neither model is authoritative. `deepseek-reasoner` divided the circling minima between
+category pairs (`760/1440 ft` with `693/1193 m`) on a chart whose extracted text has no
+column alignment, which is a structured guess rather than a transcription. Every
+extracted row therefore still quotes its source fragment, and the reviewer still
+compares it against the PDF before approving. The measured disagreement is the argument
+for that control, not a problem the control fails to solve.
+
+A second consequence worth knowing when reviewing: the two models label the same
+approach differently — `RNP RWY 24 LNAV` versus `LNAV` — so a re-extraction with a
+different model adds slots rather than replacing them. The dedup key is
+(chart, approach, runway, category, kind) and therefore does not treat the two as the
+same value, which is correct: they are different claims about the same chart, and both
+should be visible until one is approved and the other superseded.
+
 ### Known limits
 
 - `ILS U/S` is not decoded into a minima downgrade (OM Part A `Table 8.1-17`); only a
@@ -448,6 +512,9 @@ query planning (`src/query-plan.ts`). Model choice is configuration in each modu
   forecast for the alternate the flight plan nominated plus the en-route alternates.
   Selecting an alternate the payload has no forecast for produces an explicit
   unavailable state rather than a comparison against another station's weather.
+- Different extraction models label approaches differently, so re-extracting a chart
+  with a second model adds registry slots rather than replacing the first model's. Both
+  are visible for review; approving one supersedes only records sharing its slot key.
 
 ## 11. The minima registry and release 1
 

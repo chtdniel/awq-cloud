@@ -1095,7 +1095,14 @@
 											<label for="extract-keys">R2 object keys, one per line (maximum 3, each must start with airport/)</label>
 											<textarea class="field-textarea" id="extract-keys" placeholder="airport/YPPH/ILS-Z RWY 21 - PAGE 2.pdf"></textarea>
 										</div>
-										<p class="input-hint">Nothing is written to the live registry: extraction inserts drafts that still require review.</p>
+										<div class="input-group">
+											<label for="extract-model">Extraction model</label>
+											<select class="field-select" id="extract-model">
+												<option value="deepseek-flash">deepseek-flash — faster</option>
+												<option value="deepseek-reasoner">deepseek-reasoner — reasons about the table, slower</option>
+											</select>
+										</div>
+										<p class="input-hint">Extraction runs in the background: the job continues even if you leave this view, and a chart takes roughly one to two minutes. Nothing is written to the live registry — extraction inserts drafts that still require review.</p>
 										<div class="button-row">
 											<button class="button button-secondary" id="extract-button" type="button">Extract drafts</button>
 										</div>
@@ -1406,6 +1413,7 @@
 				registryRecords: document.getElementById('registry-records'),
 				registryDetail: document.getElementById('registry-detail'),
 				extractKeys: document.getElementById('extract-keys'),
+				extractModel: document.getElementById('extract-model'),
 				extractButton: document.getElementById('extract-button'),
 				extractError: document.getElementById('extract-error'),
 				extractResult: document.getElementById('extract-result')
@@ -4435,6 +4443,18 @@
 				}
 			}
 
+			/**
+			 * Submit charts for extraction and wait for the jobs to finish.
+			 *
+			 * The server enqueues each chart and returns a job id immediately, because a
+			 * chart costs a PDF conversion plus a model call measured at 81 to 130 seconds —
+			 * longer than a response budget, which is what previously lost four charts out of
+			 * seven to a timeout. So this submits, then polls the job rows and reports each
+			 * chart's own outcome. A job that is still running is shown as running rather
+			 * than as a failure, and the run stops polling once every job has settled.
+			 *
+			 * Nothing here can approve anything: a completed job has produced drafts.
+			 */
 			async function runExtraction() {
 				const keys = E.extractKeys.value.split('\n').map(line => line.trim()).filter(Boolean);
 				E.extractError.hidden = true;
@@ -4451,37 +4471,80 @@
 					return;
 				}
 				E.extractButton.disabled = true;
-				// One chart per request. A chart costs a PDF conversion plus a model call and
-				// a cold conversion has been measured taking up to two minutes, so batching
-				// them would make one slow chart fail the rest and give the operator no sign
-				// of which. Iterating here means each chart reports its own result, a timeout
-				// costs only that chart, and the progress line says which one is in flight.
-				const objects = [];
-				// The model and the note are per-response, so they are carried forward from
-				// the last successful call rather than lost when the run is assembled.
-				let model = '';
-				let note = '';
-				for (let index = 0; index < keys.length; index += 1) {
-					const key = keys[index];
+				const submitted = [];
+				let model = E.extractModel ? E.extractModel.value : '';
+				for (const key of keys) {
+					try {
+						const data = await api('/api/minima/extract', {
+							method: 'POST',
+							body: { objectKeys: [key], model: model || undefined }
+						});
+						model = data?.model || model;
+						for (const entry of Array.isArray(data?.objects) ? data.objects : []) {
+							submitted.push({ objectKey: entry.objectKey || key, jobId: entry.jobId || null, ok: entry.ok === true, reason: entry.reason || null });
+						}
+					} catch (error) {
+						submitted.push({ objectKey: key, jobId: null, ok: false, reason: errorMessage(error) });
+					}
+				}
+
+				const pendingIds = submitted.filter(entry => entry.ok && entry.jobId).map(entry => entry.jobId);
+				const settled = new Map();
+				// A chart takes roughly one to two minutes. The deadline is generous because
+				// the consumer has fifteen, and abandoning the poll early would report a
+				// running job as a failure.
+				const deadline = Date.now() + 10 * 60 * 1000;
+				while (pendingIds.length && Date.now() < deadline) {
 					clear(E.extractResult);
 					const loading = el('div', 'skeleton');
 					loading.append(el('span', 'skeleton-line'), el('span', 'skeleton-line short'));
-					const progress = el('p', 'panel-note', `Converting and extracting ${index + 1} of ${keys.length}: ${key}`);
-					E.extractResult.append(progress, loading);
-					try {
-						const data = await api('/api/minima/extract', { method: 'POST', body: { objectKeys: [key] } });
-						model = data?.model || model;
-						note = data?.note || note;
-						objects.push(...(Array.isArray(data?.objects) ? data.objects : []));
-					} catch (error) {
-						// Recorded as this chart's failure rather than aborting the run, so the
-						// remaining charts are still attempted and the operator sees which one
-						// needs a retry.
-						objects.push({ objectKey: key, ok: false, reason: errorMessage(error) });
+					E.extractResult.append(
+						el('p', 'panel-note', `Extraction running in the background: ${pendingIds.length} of ${submitted.length} chart(s) still in flight. You can leave this view; the records appear when they finish.`),
+						loading
+					);
+					await new Promise(resolve => setTimeout(resolve, 5000));
+					for (const jobId of [...pendingIds]) {
+						try {
+							const data = await api(`/api/minima/extraction-jobs?id=${encodeURIComponent(jobId)}`);
+							const job = data?.job;
+							if (job && (job.status === 'succeeded' || job.status === 'failed')) {
+								settled.set(jobId, job);
+								pendingIds.splice(pendingIds.indexOf(jobId), 1);
+							}
+						} catch {
+							// A failed poll is not a failed job: the next pass retries it.
+						}
 					}
 				}
+
+				const objects = submitted.map(entry => {
+					const job = entry.jobId ? settled.get(entry.jobId) : null;
+					if (!entry.ok) return { objectKey: entry.objectKey, ok: false, reason: entry.reason || 'submission failed' };
+					if (!job) {
+						return {
+							objectKey: entry.objectKey,
+							ok: false,
+							reason: 'still running after ten minutes; reload the registry to see its outcome',
+							jobId: entry.jobId
+						};
+					}
+					return {
+						objectKey: job.objectKey,
+						ok: job.status === 'succeeded',
+						reason: job.error || undefined,
+						jobId: job.id,
+						attempt: job.attempt,
+						markdownChars: job.markdownChars,
+						draftsExtracted: job.draftsExtracted,
+						draftsStored: job.draftsStored,
+						skippedDuplicates: job.skippedDuplicates,
+						duplicatesOfApproved: job.duplicatesOfApproved,
+						draftIds: job.draftIds ? JSON.parse(job.draftIds) : []
+					};
+				});
+
 				try {
-					renderExtractionResult({ objects, model, note });
+					renderExtractionResult({ objects, model, note: 'Each chart is extracted in the background as draft records.' });
 					if (registry.icao) await loadRegistryRecords(registry.icao);
 				} catch (error) {
 					clear(E.extractResult);

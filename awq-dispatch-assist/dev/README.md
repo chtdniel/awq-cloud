@@ -73,17 +73,31 @@ That disagreement is the evidence behind the design decision that the ADMIN appr
 step is load-bearing, and behind requiring every extracted row to quote the chart
 fragment it came from. See `DESIGN.md` section 11.
 
+## Extraction now runs on a Queue
+
+The synchronous endpoint this harness was built to measure no longer exists in that
+form: `POST /api/minima/extract` enqueues a job and returns a job id, and a Queue
+consumer does the work with a 15-minute wall-clock budget. The harness remains useful
+for measuring the conversion and model steps directly, and `scratch/extract-run.mjs`
+drives the queue path end to end. See `DESIGN.md` section 11 for the measurements.
+
 ## Open work on extraction
 
-Latency is the unresolved part, and the fix is a shape change rather than a longer
-timeout:
+Latency is no longer the blocker it was: the queue lifted YPKG from 3 of 7 charts to
+**7 of 7** in one run, at an average of 138 seconds per chart, because the consumer is
+not bounded by a response. What remains is quality, and it is bounded by the converted
+text rather than by the pipeline:
 
-1. Move the conversion and the model call off the request path into a Queue
-   consumer, write the draft rows from the consumer, and have the registry view poll
-   a status endpoint. This removes the request budget from the problem entirely and
-   is what the registry was designed to accommodate — drafts are inert, so the delay
-   has no safety consequence.
-2. Until then, one chart per request and a retry after a `timeout` is the
-   supported workflow, and the registry UI already reports per-chart outcomes so a
-   timed-out chart is visible rather than silent.
+1. **Model choice is a real variable.** `deepseek-reasoner` produced 22 records
+   carrying both a ceiling and a visibility on `YPPH RNP RWY 24`, where `deepseek-flash`
+   produced 32 records with only 4 carrying both. The difference is that the reasoner
+   applies the chart's `560 (502-1.9)` notation rule. The registry UI exposes the model
+   so this can be chosen per run, and the prompt now states the rule explicitly.
+2. **Neither model is authoritative.** The reasoner also divided circling minima
+   between category pairs on a chart with no column alignment, which is a structured
+   guess. Human approval remains the only thing that makes a value usable.
+3. **Re-extracting with a different model adds slots.** The two models label the same
+   approach differently, so the dedup key does not treat them as the same claim. A
+   future pass could group by chart and let a reviewer keep one, but until then both
+   are visible.
 

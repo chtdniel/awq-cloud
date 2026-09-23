@@ -31,19 +31,25 @@ import {
 	alternatePlanningMinima,
 	approveRecord,
 	getMinima,
-	insertDrafts,
 	listActiveMinima,
 	listMinima,
 	listMinimaAirports,
 	rejectRecord,
-	referencesForRecord,
-	sha256Hex,
 	toApproachMinima,
 	updateDraft,
-	type DraftCorrection,
-	type MinimaDraftInput
+	type DraftCorrection
 } from './minima-registry';
-import { MAX_CHARTS_PER_REQUEST, MAX_CHART_BYTES, extractChart, type ChartSource } from './minima-extraction';
+import { MAX_CHARTS_PER_REQUEST, MAX_CHART_BYTES } from './minima-extraction';
+import {
+	DEFAULT_EXTRACTION_MODEL,
+	EXTRACTION_MODELS,
+	createExtractionJob,
+	getExtractionJob,
+	isExtractionModel,
+	listExtractionJobs,
+	runExtractionJob,
+	type ExtractionJobMessage
+} from './minima-jobs';
 import { listNotamCandidates, resolveSelectedNotams } from './notams';
 import { citableReferenceDocuments, isExcludedFromCorpus } from './reference-corpus';
 import { approvalBlockedReason } from './minima-rules';
@@ -1659,19 +1665,19 @@ async function getMinimaRecord(request: Request, env: Env, id: number): Promise<
 async function extractMinimaDrafts(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 	const userId = await authorizeUser(request, env);
 	if (!userId) return documentResponse({ error: 'SSO is required.' }, 401);
-	let body: { objectKeys?: unknown; icao?: unknown };
+	let body: { objectKeys?: unknown; icao?: unknown; model?: unknown };
 	try { body = await request.json() as typeof body; } catch { return documentResponse({ error: 'A JSON request body is required.' }, 400); }
 
-	const requested = Array.isArray(body.objectKeys) ? body.objectKeys.map(value => String(value).trim()).filter(Boolean) : [];
-	// One chart per request. A conversion alone has been measured taking up to two
-	// minutes, so a batch would have to abort charts that were still converting; the
-	// caller iterates instead, and `MAX_CHARTS_PER_REQUEST` is where that rule lives.
-	const objectKeys = requested.slice(0, MAX_CHARTS_PER_REQUEST);
+	const requestedKeys = Array.isArray(body.objectKeys) ? body.objectKeys.map(value => String(value).trim()).filter(Boolean) : [];
+	// One chart per job. Each chart is a conversion plus a model call, so one message
+	// per chart keeps a slow chart from holding up a batch and makes a retry mean
+	// exactly one chart.
+	const objectKeys = requestedKeys.slice(0, MAX_CHARTS_PER_REQUEST);
 	if (!objectKeys.length) return documentResponse({ error: 'At least one R2 object key is required.' }, 400);
-	if (requested.length > MAX_CHARTS_PER_REQUEST) {
+	if (requestedKeys.length > MAX_CHARTS_PER_REQUEST) {
 		return documentResponse(
 			{
-				error: `Extraction accepts ${MAX_CHARTS_PER_REQUEST} chart per request so one slow conversion cannot fail the others. Request the remaining ${requested.length - MAX_CHARTS_PER_REQUEST} chart(s) separately.`
+				error: `Extraction accepts ${MAX_CHARTS_PER_REQUEST} chart per request so one slow conversion cannot fail the others. Request the remaining ${requestedKeys.length - MAX_CHARTS_PER_REQUEST} chart(s) separately.`
 			},
 			400
 		);
@@ -1684,88 +1690,83 @@ async function extractMinimaDrafts(request: Request, env: Env, ctx: ExecutionCon
 		}
 	}
 
-	const model = String((env as unknown as { EXTRACTION_MODEL?: string }).EXTRACTION_MODEL ?? '').trim() || 'deepseek-flash';
-	const outcomes: Array<Record<string, unknown>> = [];
+	// The default is a `vars` entry so the model can be changed without a code edit,
+	// but it is validated like any other value: a variable is configuration, and a
+	// misconfigured variable must not become an arbitrary outbound request.
+	const configuredDefault = String((env as unknown as { EXTRACTION_MODEL?: string }).EXTRACTION_MODEL ?? '').trim();
+	const fallbackModel = isExtractionModel(configuredDefault) ? configuredDefault : DEFAULT_EXTRACTION_MODEL;
+	const requestedModel = body.model === undefined ? fallbackModel : body.model;
+	if (!isExtractionModel(requestedModel)) {
+		return documentResponse({ error: `Unsupported extraction model. Use one of: ${EXTRACTION_MODELS.join(', ')}.` }, 400);
+	}
+	const model = requestedModel;
 
+	// Every chart becomes a job. The Queue consumer has a 15-minute wall-clock limit
+	// where the request path had to fit inside a response budget, which is what lost
+	// four charts out of seven to a timeout.
+	const jobs: Array<Record<string, unknown>> = [];
 	for (const objectKey of objectKeys) {
-		const object = await env.DOCUMENTS.get(objectKey);
-		if (!object) {
-			outcomes.push({ objectKey, ok: false, reason: 'object-not-found' });
+		const head = await env.DOCUMENTS.head(objectKey);
+		if (!head) {
+			jobs.push({ objectKey, ok: false, reason: 'object-not-found' });
 			continue;
 		}
-		if (object.size > MAX_CHART_BYTES) {
-			outcomes.push({ objectKey, ok: false, reason: `chart-larger-than-${MAX_CHART_BYTES}-bytes` });
+		if (head.size > MAX_CHART_BYTES) {
+			jobs.push({ objectKey, ok: false, reason: `chart-larger-than-${MAX_CHART_BYTES}-bytes` });
 			continue;
 		}
-		const bytes = new Uint8Array(await object.arrayBuffer());
-		// The hash identifies the exact bytes the transcription was made from, so a
-		// later replacement of the chart file is detectable.
-		const pdfHash = await sha256Hex(bytes);
-		const fileName = objectKey.split('/').pop() || objectKey;
 		const objectIcao = objectKey.split('/')[1]?.toUpperCase() ?? '';
-		const source: ChartSource = { objectKey, icao: /^[A-Z0-9]{4}$/.test(objectIcao) ? objectIcao : '', fileName, bytes, pdfHash };
+		const icao = /^[A-Z0-9]{4}$/.test(objectIcao) ? objectIcao : '';
+		const job = await createExtractionJob(env, { objectKey, icao, model, requestedBy: userId });
+		const message: ExtractionJobMessage = { jobId: job.id, objectKey, icao, model };
 
-		const outcome = await extractChart(source, {
-			apiKey: deepSeekKey(env),
-			model,
-			toMarkdown: async file => {
-				// Workers AI markdown conversion is the only text extraction this feature
-				// uses. The converted text is a search/reasoning aid, not a source of
-				// truth: the numeric values are verified against the PDF by a human.
-				const converted = await env.AI.toMarkdown({
-					name: file.fileName,
-					blob: new Blob([file.bytes], { type: 'application/pdf' })
-				});
-				const result = Array.isArray(converted) ? converted[0] : converted;
-				if (!result || result.format === 'error' || typeof result.data !== 'string') {
-					throw new Error(result && 'error' in result ? String(result.error) : 'conversion produced no text');
-				}
-				return result.data;
-			}
-		});
-
-		if (!outcome.ok) {
-			outcomes.push({ objectKey, ok: false, reason: outcome.reason });
-			await audit(env, userId, 'minima_extract_failed', 'airport_minima', null, `${objectKey}: ${outcome.reason}`.slice(0, 500), ctx);
-			continue;
+		try {
+			await env.MINIMA_EXTRACTION_QUEUE.send(message);
+			jobs.push({ objectKey, ok: true, jobId: job.id, status: 'pending', model, sizeBytes: head.size });
+			await audit(env, userId, 'minima_extract_enqueued', 'airport_minima', null, `${objectKey} job=${job.id} model=${model}`, ctx);
+		} catch (error) {
+			// A failed enqueue has to be visible rather than leaving a pending job that
+			// nothing will ever run.
+			const detail = error instanceof Error ? error.message : 'enqueue failed';
+			await env.DB.prepare(`UPDATE airport_minima_extraction_jobs SET status = 'failed', error = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?`)
+				.bind(`enqueue-failed: ${detail}`.slice(0, 500), job.id)
+				.run();
+			jobs.push({ objectKey, ok: false, jobId: job.id, reason: `enqueue-failed: ${detail}` });
+			await audit(env, userId, 'minima_extract_enqueue_failed', 'airport_minima', null, `${objectKey}: ${detail}`.slice(0, 500), ctx);
 		}
-
-		const stored = await insertDrafts(env, {
-			drafts: outcome.drafts,
-			sourceObjectKey: objectKey,
-			pdfHash,
-			extractionModel: model,
-			actorId: userId
-		});
-		outcomes.push({
-			objectKey,
-			ok: true,
-			markdownChars: outcome.markdownChars,
-			draftsExtracted: outcome.drafts.length,
-			draftsStored: stored.inserted.length,
-			skippedDuplicates: stored.skippedDuplicates,
-			duplicatesOfApproved: stored.duplicatesOfApproved,
-			draftIds: stored.inserted
-		});
-		await audit(
-			env,
-			userId,
-			'minima_extract',
-			'airport_minima',
-			null,
-			`${objectKey}: drafts=${stored.inserted.length} skipped=${stored.skippedDuplicates} approvedDuplicates=${stored.duplicatesOfApproved} model=${model}`,
-			ctx
-		);
 	}
 
-	return documentResponse({
-		ok: outcomes.every(outcome => outcome.ok === true),
-		data: {
-			model,
-			objects: outcomes,
-			note: 'Every extracted value is stored as a draft. It becomes usable by an assessment only after an ADMIN dispatcher compares it against the source PDF and approves it.'
-		}
-	});
+	return documentResponse(
+		{
+			ok: jobs.every((job: Record<string, unknown>) => job.ok === true),
+			data: {
+				model,
+				objects: jobs,
+				poll: '/api/minima/extraction-jobs',
+				note: 'Each chart is extracted in the background and becomes a draft. Poll the job for its outcome. A draft becomes usable only after an ADMIN dispatcher compares it against the source PDF and approves it.'
+			}
+		},
+		202
+	);
+}
+
+/**
+ * Extraction job status, for the registry view's poll.
+ *
+ * The job row is the only record of what happened, so this is a plain read: a
+ * consumer that failed, timed out or is still running is reported as itself.
+ */
+async function listExtractionJobsApi(request: Request, env: Env, url: URL): Promise<Response> {
+	if (!await authorizeUser(request, env)) return documentResponse({ error: 'SSO is required.' }, 401);
+	const id = String(url.searchParams.get('id') ?? '').trim();
+	if (id) {
+		const job = await getExtractionJob(env, id);
+		if (!job) return documentResponse({ error: 'Extraction job not found.' }, 404);
+		return documentResponse({ ok: true, data: { job } });
+	}
+	const icao = String(url.searchParams.get('icao') ?? '').trim().toUpperCase();
+	const jobs = await listExtractionJobs(env, /^[A-Z0-9]{4}$/.test(icao) ? icao : null, Number(url.searchParams.get('limit') ?? 30));
+	return documentResponse({ ok: true, data: { jobs } });
 }
 
 /** Apply an ADMIN correction to a minima draft or approved record. */
@@ -1901,6 +1902,53 @@ export default {
 			return jsonResponse({ ok: false, code: 'INTERNAL', error: 'The request could not be completed.' }, 500);
 		}
 	},
+
+	/**
+	 * Minima extraction, off the request path.
+	 *
+	 * A chart costs a PDF conversion plus a model call and was measured at 81 to 130
+	 * seconds. Here the wall-clock limit is 15 minutes rather than a response budget,
+	 * which is the whole reason this exists: four of seven charts were previously lost
+	 * to a timeout.
+	 *
+	 * `runExtractionJob` records every terminal outcome on the job row, so a failure
+	 * is readable by the client rather than only visible in a log. A throw is reserved
+	 * for the case where the job row itself could not be updated, because retrying is
+	 * then the only way to get a truthful status.
+	 */
+	async queue(batch, env): Promise<void> {
+		for (const message of batch.messages) {
+			const payload = message.body as Partial<ExtractionJobMessage> | null;
+			if (!payload || typeof payload.jobId !== 'string' || typeof payload.objectKey !== 'string') {
+				// A message with no usable body cannot be recorded against a job, and
+				// retrying it would fail identically, so it is acknowledged with a log.
+				console.error('[DISPATCH] discarding malformed extraction message', JSON.stringify(message.body));
+				message.ack();
+				continue;
+			}
+			try {
+				const outcome = await runExtractionJob(env, {
+					jobId: payload.jobId,
+					objectKey: payload.objectKey,
+					icao: typeof payload.icao === 'string' ? payload.icao : '',
+					model: typeof payload.model === 'string' ? payload.model : DEFAULT_EXTRACTION_MODEL
+				});
+				// A recorded failure is still a completed attempt: the job row says what
+				// happened, so acknowledging avoids three identical retries of a chart
+				// whose PDF or conversion is the problem.
+				console.log(
+					`[DISPATCH] extraction job ${payload.jobId} ${outcome.ok ? 'succeeded' : `failed: ${outcome.reason}`} drafts=${outcome.draftsStored}`
+				);
+				message.ack();
+			} catch (error) {
+				// The job row could not be updated, so its status is unknown. Retrying is
+				// what makes it truthful; the attempt counter on the row records how many
+				// times this happened.
+				console.error(`[DISPATCH] extraction job ${payload.jobId} could not record its outcome`, error);
+				message.retry();
+			}
+		}
+	},
 } satisfies ExportedHandler<Env>;
 
 async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -1934,6 +1982,7 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 		if (url.pathname === '/api/assistant' && request.method === 'POST') return proxyAssistant(request, env, ctx);
 		if (url.pathname === '/api/minima' && request.method === 'GET') return listMinimaRecords(request, env, url);
 		if (url.pathname === '/api/minima/extract' && request.method === 'POST') return extractMinimaDrafts(request, env, ctx);
+		if (url.pathname === '/api/minima/extraction-jobs' && request.method === 'GET') return listExtractionJobsApi(request, env, url);
 		const minimaMatch = url.pathname.match(/^\/api\/minima\/(\d+)$/);
 		if (minimaMatch && request.method === 'GET') return getMinimaRecord(request, env, Number(minimaMatch[1]));
 		if (minimaMatch && request.method === 'PATCH') return correctMinimaDraft(request, env, ctx, Number(minimaMatch[1]));
