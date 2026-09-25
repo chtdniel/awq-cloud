@@ -1,5 +1,43 @@
 const BMKG_URL = 'https://web-aviation.bmkg.go.id/web/taf.php';
 const BOM_URL = 'https://www.bom.gov.au/aviation/php/process.php';
+const ICAO_RE = /^[A-Z]{4}$/;
+const CALLSIGN_RE = /^[A-Z0-9]{2,10}$/;
+
+export function normalizeTafStation(value) {
+    const station = String(value || '').trim().toUpperCase();
+    return ICAO_RE.test(station) ? station : '';
+}
+
+export function isValidTafFlightRow(row) {
+    if (!row || typeof row !== 'object') return false;
+    const callsign = String(row.callsign ?? row.flight ?? row.FLIGHT ?? row.QZ ?? '').trim().toUpperCase();
+    const dep = normalizeTafStation(row.dep ?? row.DEP);
+    const dest = normalizeTafStation(row.dest ?? row.arr ?? row.ARR ?? row.DES);
+    if (!callsign || /^["'\s]+$/.test(callsign)) return false;
+    if (!CALLSIGN_RE.test(callsign)) return false;
+    if (!dep || !dest) return false;
+    return true;
+}
+
+export function tafStationsFromFlights(rows, { excludedStations = null, stationFields = ['dep', 'dest', 'alt'] } = {}) {
+    const excludedSet = excludedStations
+        ? new Set([...excludedStations].map(normalizeTafStation).filter(Boolean))
+        : new Set();
+    const out = [];
+    const seen = new Set();
+    (rows || []).forEach(row => {
+        if (!isValidTafFlightRow(row)) return;
+        stationFields.forEach(field => {
+            const station = normalizeTafStation(row[field] ?? row[field.toUpperCase()]);
+            if (!station) return;
+            if (excludedSet.has(station)) return;
+            if (seen.has(station)) return;
+            seen.add(station);
+            out.push(station);
+        });
+    });
+    return out;
+}
 
 function textContent(html) {
     return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ').replace(/\s+/g, ' ').trim();
@@ -39,7 +77,7 @@ export function parseTafs(payload, stations, now = new Date()) {
 }
 
 export async function fetchLatestTafs(input, { fetchImpl = fetch, now = new Date() } = {}) {
-    const stations = [...new Set(input.map(s => String(s).trim().toUpperCase()).filter(s => /^[A-Z]{4}$/.test(s)))];
+    const stations = [...new Set(input.map(normalizeTafStation).filter(Boolean))];
     if (!stations.length) return {};
     async function request(url, options = {}) {
         const response = await fetchImpl(url, { ...options, signal: AbortSignal.timeout(15000) });

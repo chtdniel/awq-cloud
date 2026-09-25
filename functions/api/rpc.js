@@ -1,5 +1,5 @@
 import { previewWaypoints, saveWaypoints, deleteWaypoint, clearWaypoints } from '../../shared/waypoint.mjs';
-import { fetchLatestTafs } from '../../shared/taf.mjs';
+import { fetchLatestTafs, normalizeTafStation } from '../../shared/taf.mjs';
 import {
     fromWarningRow, toManualWarningRow, computeRouteHits, parseProducts, asPreviewWarning,
     WX_WARNING_UPSERT, warningBindValues, SOURCE_LABELS, DEFAULT_BUFFER_NM
@@ -1203,11 +1203,13 @@ async function handleGetNotamData(context) {
 async function handleGetTafData(context) {
     try {
         const { results } = await context.env.DB.prepare('SELECT * FROM tafs').all();
-        const formattedData = results.map(row => ({
-            STATION: row.station,
-            RAW_TAF: row.raw_text,
-            TIMESTAMP: row.issue_time ? new Date(row.issue_time).toISOString().replace(/\.\d{3}Z$/, 'Z') : ""
-        }));
+        const formattedData = results
+            .map(row => ({
+                STATION: normalizeTafStation(row.station),
+                RAW_TAF: row.raw_text,
+                TIMESTAMP: row.issue_time ? new Date(row.issue_time).toISOString().replace(/\.\d{3}Z$/, 'Z') : ""
+            }))
+            .filter(row => row.STATION);
         return Response.json({ data: formattedData });
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
@@ -1225,10 +1227,10 @@ async function handleSaveTafData(context, args) {
             const uniqueTafs = [];
             
             tafArray.forEach(item => {
-                const icao = String(item.STATION || "").trim().toUpperCase();
+                const icao = normalizeTafStation(item.STATION);
                 if (icao && !seen.has(icao)) {
                     seen.add(icao);
-                    uniqueTafs.push(item);
+                    uniqueTafs.push({ ...item, STATION: icao });
                 }
             });
             
@@ -1246,7 +1248,7 @@ async function handleSaveTafData(context, args) {
                 }
                 
                 stmts.push(context.env.DB.prepare('INSERT INTO tafs (station, raw_text, issue_time) VALUES (?, ?, ?)')
-                    .bind(String(item.STATION || "").toUpperCase(), item.RAW_TAF || "", ts));
+                    .bind(item.STATION, item.RAW_TAF || "", ts));
             }
             
             if (stmts.length > 0) await context.env.DB.batch(stmts);

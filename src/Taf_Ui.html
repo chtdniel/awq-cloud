@@ -307,10 +307,28 @@
       grid.innerHTML = '<div role="alert" style="grid-column: 1/-1; padding: 48px; text-align: center; color: var(--status-critical); font-family: var(--font-mono); border: 2px dashed var(--status-critical); border-radius: var(--radius-lg);">' + e(msg) + '<br><button type="button" class="control-btn btn-solid-primary" style="margin-top: 12px;" onclick="window.initTafManager()">RETRY LOAD</button></div>';
     };
 
+    window.tafNormalizeStation = function(value) {
+      const station = String(value || '').trim().toUpperCase();
+      return /^[A-Z]{4}$/.test(station) ? station : '';
+    };
+
+    window.tafIsValidBoardFlight = function(f) {
+      if (typeof window.isValidDbFlight === 'function') return window.isValidDbFlight(f);
+      if (!f || typeof f !== 'object') return false;
+      const flight = String(f.FLIGHT == null ? '' : f.FLIGHT).trim();
+      const dep = window.tafNormalizeStation(f.DEP);
+      const arr = window.tafNormalizeStation(f.ARR);
+      if (!flight || /^["'\s]+$/.test(flight)) return false;
+      if (!/^[A-Z0-9]{2,10}$/.test(flight)) return false;
+      return !!(dep && arr);
+    };
+
     window.saveTafDataGuarded = function(data, opts) {
       opts = opts || {};
-      // Skip empty-STATION rows for the backend payload - empty rows stay editable locally.
-      const payload = (data || []).filter(d => ((d && d.STATION) || '').trim() !== '');
+      const payload = (data || []).map(function(d) {
+        const station = window.tafNormalizeStation(d && d.STATION);
+        return station ? Object.assign({}, d, { STATION: station }) : null;
+      }).filter(Boolean);
       if (typeof google === 'undefined' || !google.script || !google.script.run) {
         if (!opts.silent) window.tafToast('BRIDGE UNAVAILABLE — changes are kept local only.', 'error');
         if (opts.onErr) opts.onErr();
@@ -375,13 +393,13 @@
       const rankOf = {}, seenAt = {}, roles = {};
       function add(icao, role, rank) {
         if (!icao) return;
-        const k = String(icao).trim().toUpperCase(); if (!k) return;
+        const k = window.tafNormalizeStation(icao); if (!k) return;
         if (!roles[k]) roles[k] = [];
         if (roles[k].indexOf(role) === -1) roles[k].push(role);
         if (!(k in rankOf)) { rankOf[k] = rank; seenAt[k] = Object.keys(seenAt).length; }
         else if (rank < rankOf[k]) rankOf[k] = rank;
       }
-      dbFlights.filter(f => activeIds.includes(f.rowIdx)).forEach(function(f) {
+      dbFlights.filter(f => activeIds.includes(f.rowIdx) && window.tafIsValidBoardFlight(f)).forEach(function(f) {
         add(f.DEP, 'DEP', 0); add(f.ARR, 'ARR', 1); add(f.ALT, 'ALT', 2);
         add(f.ENR1, 'ENR', 3); add(f.ENR2, 'ENR', 3); add(f.ENR3, 'ENR', 3);
       });
@@ -594,7 +612,12 @@
   window.updateLocalTaf = function(index, field, value, el) {
     if (!localTafData[index]) return;
     if (field === 'STATION') {
-      const newVal = value.trim().toUpperCase();
+      const newVal = window.tafNormalizeStation(value);
+      if (!newVal && String(value || '').trim()) {
+        window.tafToast('Station must be a 4-letter ICAO code.', 'error');
+        if (el) el.value = localTafData[index].STATION;
+        return;
+      }
       const isDuplicate = localTafData.some((item, i) => i !== index && (item.STATION || "").toUpperCase() === newVal);
       if (isDuplicate && newVal !== "") {
         window.tafToast(`Station ${newVal} is already in the list!`, 'error');
@@ -628,10 +651,10 @@
         localTafData.splice(index, 1);
         window.renderTafTable();
       }
-    }
+  }
 
   window.fetchLatestTafs = function(event) {
-    const icaoList = localTafData.map(d => d.STATION).filter(s => s.length >= 3);
+    const icaoList = localTafData.map(d => window.tafNormalizeStation(d.STATION)).filter(Boolean);
     if (icaoList.length === 0) {
       window.tafToast('Please add station ICAO codes first.', 'info');
       return;
@@ -837,4 +860,3 @@
     });
   })();
 </script>
-

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fetchLatestTafs, parseTafs } from '../shared/taf.mjs';
+import { fetchLatestTafs, parseTafs, tafStationsFromFlights } from '../shared/taf.mjs';
 const now = new Date('2026-09-15T18:30:00Z');
 const taf = (st, time = '151700', extra = '') => `TAF ${extra}${st} ${time}Z 1518/1700 08010KT CAVOK`;
 test('selects newest report, amendment, and excludes METAR and expired forecasts', () => {
@@ -48,4 +48,19 @@ test('empty ADDS falls back; complete ADDS avoids regional requests', async () =
   const result = await fetchLatestTafs(['YPPH'], { now, fetchImpl: async () => ++calls === 1 ? new Response(null, {status: 204}) : new Response(`<p>${taf('YPPH')}</p>`) });
   assert.ok(result.YPPH);
   assert.equal(calls, 2);
+});
+
+test('TAF refresh station list ignores broken flight rows and FIR codes', () => {
+  const firCodes = new Set(['WIIF']);
+  const rows = [
+    { callsign: '818', dep: 'WIII', dest: 'WADD', alt: 'WATO' },
+    { callsign: '"', dep: '20260908', dest: 'WIIF', alt: '' },
+    { callsign: '819', dep: 'WADD', dest: 'WIIF', alt: '' }
+  ];
+  assert.deepEqual(tafStationsFromFlights(rows, { excludedStations: firCodes }), ['WIII', 'WADD', 'WATO']);
+});
+
+test('TAF refresh keeps valid airports not present in the FIR mapping', () => {
+  const rows = [{ callsign: '819', dep: 'WADD', dest: 'YPPH', alt: 'WIII' }];
+  assert.deepEqual(tafStationsFromFlights(rows, { excludedStations: ['WIIF'] }), ['WADD', 'YPPH', 'WIII']);
 });

@@ -1,4 +1,4 @@
-import { fetchLatestTafs } from '../../shared/taf.mjs';
+import { fetchLatestTafs, tafStationsFromFlights } from '../../shared/taf.mjs';
 // ============================================================================
 // CLOUDFLARE PAGES CRON / REFRESH WORKER ENDPOINT
 // Fetches live TAF data for all active flight stations and updates D1
@@ -10,14 +10,21 @@ export async function onRequest(context) {
             return Response.json({ error: 'DB binding not found' }, { status: 500 });
         }
 
-        // 1. Fetch stations from DB
-        const { results: stationsRows } = await context.env.DB.prepare(
-            'SELECT DISTINCT dep as st FROM flights UNION SELECT DISTINCT dest as st FROM flights UNION SELECT DISTINCT alt as st FROM flights'
+        const { results: flightRows } = await context.env.DB.prepare(
+            'SELECT callsign, dep, dest, alt FROM flights'
         ).all();
-        
-        const stations = (stationsRows || [])
-            .map(r => String(r.st || '').trim().toUpperCase())
-            .filter(s => /^[A-Z]{4}$/.test(s));
+        let airportRows = [];
+        try {
+            ({ results: airportRows } = await context.env.DB.prepare(
+                'SELECT DISTINCT airport_icao, fir_code FROM airport_firs'
+            ).all());
+        } catch (error) {
+            console.warn('airport_firs mapping unavailable; refreshing all valid flight stations:', error.message);
+        }
+        const firCodes = (airportRows || [])
+            .filter(row => row.airport_icao && row.fir_code && row.airport_icao !== row.fir_code)
+            .map(row => row.fir_code);
+        const stations = tafStationsFromFlights(flightRows || [], { excludedStations: firCodes });
 
         if (stations.length === 0) {
             return Response.json({ status: 'NO_STATIONS', count: 0 });
