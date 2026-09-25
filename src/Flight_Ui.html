@@ -1701,6 +1701,7 @@
       const crossMid = sta <= std;
       const left = Math.max(0, std / 1440 * 100);
       const width = Math.max(3, Math.min(100 - left, dur / 1440 * 100));
+      const wrapWidth = crossMid ? (sta / 1440 * 100) : 0;
       const triage = getFlightTriage(flight);
       const conflict = hasConflict(idx);
       const notamEntry = getFlightNotamStatus(flight);
@@ -2980,7 +2981,7 @@
 
     const formData = {
       FLT_NO: document.getElementById('fn-flt').value,
-      DOF: document.getElementById('fn-dof').value,
+      DOF: parseToDbDate(document.getElementById('fn-dof').value),
       DEP: document.getElementById('fn-dep').value.toUpperCase(),
       ARR: document.getElementById('fn-arr').value.toUpperCase(),
       STD: formatTimeField(document.getElementById('fn-std').value),
@@ -2998,9 +2999,9 @@
       .withSuccessHandler((updatedDb) => {
         window.allDbFlights = Array.isArray(updatedDb.flights) ? updatedDb.flights : [];
         window.acList = normalizeAcList(updatedDb.acList);
-        if (window.allDbFlights.length > 0) {
+        if (updatedDb.addedRowId) {
           if (!Array.isArray(window.activeBoardRowIds)) window.activeBoardRowIds = [];
-          window.activeBoardRowIds.push(window.allDbFlights[window.allDbFlights.length - 1].rowIdx);
+          window.activeBoardRowIds.push(updatedDb.addedRowId);
           try { activeBoardRowIds = window.activeBoardRowIds; } catch (e) {}
         }
         if (btn) { btn.innerText = "COMMIT TO DATABASE"; btn.disabled = false; }
@@ -3012,7 +3013,8 @@
       })
       .withFailureHandler(err => {
         if (btn) { btn.innerText = "COMMIT TO DATABASE"; btn.disabled = false; }
-        alert('Failed to add flight. Please try again.');
+        const msg = err && err.message ? err.message : (err && err.error ? err.error : 'Please try again.');
+        alert('Failed to add flight: ' + msg);
         console.error('Add flight failed:', err);
       })
       .addNewFlightToDb(formData);
