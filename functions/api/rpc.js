@@ -526,9 +526,24 @@ async function handleSaveFlightEdit(context, args) {
             throw new Error("Invalid column for inline edit.");
         }
         
+        const rawValue = value == null ? '' : String(value).trim();
+        let valToSave = rawValue;
+        if (dbCol === 'dof') {
+            valToSave = normalizeBulkFlightDof(rawValue);
+            if (!valToSave) return Response.json({ error: 'DOF invalid (format YYYYMMDD or YYYY-MM-DD)' }, { status: 400 });
+        } else if (dbCol === 'etd' || dbCol === 'eta') {
+            valToSave = normalizeFlightFormTime(rawValue);
+            if (rawValue && !valToSave) {
+                return Response.json({ error: `${dbCol === 'etd' ? 'STD' : 'STA'} invalid (HHMM or HH:MM)` }, { status: 400 });
+            }
+            valToSave = valToSave || '';
+        } else if (dbCol === 'dep' || dbCol === 'dest') {
+            valToSave = rawValue.toUpperCase();
+            if (!icaoRe.test(valToSave)) return Response.json({ error: `${dbCol === 'dep' ? 'DEP' : 'ARR'} invalid (ICAO 4-letter code)` }, { status: 400 });
+        }
+
         // Update D1
         const query = `UPDATE flights SET ${dbCol} = ? WHERE id = ?`;
-        const valToSave = value == null ? '' : String(value);
         await context.env.DB.prepare(query).bind(valToSave, rowIdx).run();
         
         return Response.json({ data: "OK" });
@@ -3304,24 +3319,45 @@ async function handleAnalyzeFlightBoardNotams(context, args) {
 const callsignRe = /^[A-Z0-9]{2,10}$/;
 const icaoRe = /^[A-Z]{4}$/;
 const dofRe = /^\d{8}$/;
-const timeRe = /^\d{2,4}$/; // HHMM atau HH:MM
+const timeRe = /^(\d{1,2}:?\d{2})$/; // HHMM atau HH:MM
 
 function normalizeBulkFlightDof(value) {
     const raw = String(value || '').trim();
-    if (dofRe.test(raw)) return raw;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.replace(/-/g, '');
-    return '';
+    const match = dofRe.test(raw) ? raw.match(/^(\d{4})(\d{2})(\d{2})$/) : raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (year < 1 || month < 1 || month > 12 || day < 1) return '';
+    const date = new Date(0);
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCFullYear(year, month - 1, day);
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+    return `${match[1]}${match[2]}${match[3]}`;
+}
+
+function normalizeFlightFormTime(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (!timeRe.test(raw)) return null;
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length < 3 || digits.length > 4) return null;
+    const padded = digits.padStart(4, '0');
+    const hh = Number(padded.slice(0, 2));
+    const mm = Number(padded.slice(2, 4));
+    if (hh > 23 || mm > 59) return null;
+    return padded.slice(0, 2) + ':' + padded.slice(2, 4);
 }
 
 function validateFlightForm(fd) {
     if (!fd || typeof fd !== 'object') return 'formData invalid';
     const cs = String(fd.FLT_NO || '').trim().toUpperCase();
     if (!callsignRe.test(cs)) return 'FLT_NO invalid (2-10 alphanumeric)';
-    if (!dofRe.test(String(fd.DOF || '').trim())) return 'DOF invalid (format YYYYMMDD)';
+    if (!normalizeBulkFlightDof(fd.DOF)) return 'DOF invalid (format YYYYMMDD or YYYY-MM-DD)';
     if (!icaoRe.test(String(fd.DEP || '').trim().toUpperCase())) return 'DEP invalid (ICAO 4-letter code)';
     if (!icaoRe.test(String(fd.ARR || '').trim().toUpperCase())) return 'ARR invalid (ICAO 4-letter code)';
-    if (String(fd.STD || '').trim() && !timeRe.test(String(fd.STD).trim())) return 'STD invalid (HHMM)';
-    if (String(fd.STA || '').trim() && !timeRe.test(String(fd.STA).trim())) return 'STA invalid (HHMM)';
+    if (String(fd.STD || '').trim() && !normalizeFlightFormTime(fd.STD)) return 'STD invalid (HHMM or HH:MM)';
+    if (String(fd.STA || '').trim() && !normalizeFlightFormTime(fd.STA)) return 'STA invalid (HHMM or HH:MM)';
     return null;
 }
 
@@ -3330,17 +3366,35 @@ async function handleAddNewFlightToDb(context, args) {
         const [formData] = args;
         const err = validateFlightForm(formData);
         if (err) return Response.json({ error: err }, { status: 400 });
+        const callsign = String(formData.FLT_NO).trim().toUpperCase();
+        const dof = normalizeBulkFlightDof(formData.DOF);
+        const dep = String(formData.DEP).trim().toUpperCase();
+        const dest = String(formData.ARR).trim().toUpperCase();
+        const existing = await context.env.DB.prepare(
+            'SELECT id FROM flights WHERE callsign = ? AND dof = ? AND dep = ? AND dest = ? LIMIT 1'
+        ).bind(callsign, dof, dep, dest).first();
+        if (existing) {
+            return Response.json({
+                error: 'Flight already exists for the same callsign, DOF, departure, and arrival.',
+                code: 'DUPLICATE_FLIGHT',
+                existingRowId: existing.id
+            }, { status: 409 });
+        }
         const query = `INSERT INTO flights (callsign, dof, dep, dest, etd, eta, ac_type, alt, atc, taf_dep, taf_arr, cgo, remarks)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-        await context.env.DB.prepare(query).bind(
-            String(formData.FLT_NO).trim().toUpperCase(), String(formData.DOF).trim(),
-            String(formData.DEP).trim().toUpperCase(), String(formData.ARR).trim().toUpperCase(),
-            formData.STD || '', formData.STA || '',
+        const insertResult = await context.env.DB.prepare(query).bind(
+            callsign, dof,
+            dep, dest,
+            normalizeFlightFormTime(formData.STD) || '', normalizeFlightFormTime(formData.STA) || '',
             String(formData.REG || '').trim(), String(formData.ALT || '').trim().toUpperCase(), String(formData.ATC || '').trim(),
             String(formData.TAF_DEP || '').trim(), String(formData.TAF_ARR || '').trim(),
             String(formData.CGO || '').trim(), String(formData.REMARK || '').trim()
         ).run();
-        return await handleGetFlightDashboardData(context);
+        const insertedRowId = Number(insertResult?.meta?.last_row_id ?? insertResult?.lastInsertRowid ?? 0) || null;
+        const dashboardResponse = await handleGetFlightDashboardData(context);
+        if (!dashboardResponse.ok) return dashboardResponse;
+        const dashboard = await dashboardResponse.json();
+        return Response.json({ ...dashboard, data: { ...dashboard.data, addedRowId: insertedRowId } });
     } catch (e) {
         return Response.json({ error: e.message }, { status: 500 });
     }

@@ -60,10 +60,22 @@ export function duParseFlightTime(value) {
         const m = Number(isoMatch[2]);
         return h <= 23 && m <= 59 ? { h, m } : null;
     }
+    const clockMatch = raw.match(/(?:^|[\sT])(\d{1,2}):(\d{2})(?::\d{2})?/);
+    if (clockMatch) {
+        const h = Number(clockMatch[1]);
+        const m = Number(clockMatch[2]);
+        return h <= 23 && m <= 59 ? { h, m } : null;
+    }
     if (/\d{4}-\d{2}-\d{2}/.test(raw)) return null;
 
     const compact = raw.replace(/[^0-9]/g, '');
+    if (compact.length >= 12) {
+        const h = Number(compact.slice(8, 10));
+        const m = Number(compact.slice(10, 12));
+        return h <= 23 && m <= 59 ? { h, m } : null;
+    }
     if (compact.length < 3) return null;
+    if (compact.length > 4) return null;
     const h = compact.length === 3 ? Number(compact.slice(0, 1)) : Number(compact.slice(0, 2));
     const m = compact.length === 3 ? Number(compact.slice(1, 3)) : Number(compact.slice(2, 4));
     return h <= 23 && m <= 59 ? { h, m } : null;

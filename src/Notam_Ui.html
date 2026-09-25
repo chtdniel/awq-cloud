@@ -581,10 +581,19 @@
       const selectedFlights = typeof window.getSelectedFlightObjects === 'function' ? window.getSelectedFlightObjects() : [];
       const displayFlightTime = value => {
         const raw = String(value ?? '').trim();
+        if (!raw) return '';
         const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/);
         if (isoMatch) return `${isoMatch[1]}${isoMatch[2]}`;
+        const clockMatch = raw.match(/(?:^|[\sT])(\d{1,2}):(\d{2})(?::\d{2})?/);
+        if (clockMatch) {
+          const hh = String(Number(clockMatch[1])).padStart(2, '0');
+          return `${hh}${clockMatch[2]}`;
+        }
         const compact = raw.replace(/[^0-9]/g, '');
-        return compact.length === 3 ? compact.padStart(4, '0') : (compact.length >= 4 ? compact.slice(0, 4) : raw);
+        if (compact.length >= 12) return compact.slice(8, 12);
+        if (compact.length === 3) return compact.padStart(4, '0');
+        if (compact.length === 4) return compact;
+        return raw;
       };
       let multiLegDetailsHtml = '';
       selectedFlights.forEach(f => {
